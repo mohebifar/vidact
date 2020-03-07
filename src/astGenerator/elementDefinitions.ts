@@ -1,7 +1,6 @@
 import * as t from "@babel/types";
 
-const KEY_ELEMENT = "element";
-const KEY_PROP_UPDATE = "updateProps";
+import { KEY_ELEMENT, KEY_PROP_UPDATE } from "../constants";
 
 export interface NodeElementDefinition {
   type: "node";
@@ -33,13 +32,15 @@ export const transformerMap = {
   expr: transformExpression
 };
 
-export function createComponentElement(
-  elementName: t.Identifier,
-  updatePropName: t.Identifier
-) {
+export function createComponentElement(elementName: t.Identifier) {
   return t.objectExpression([
-    t.objectProperty(t.stringLiteral(KEY_ELEMENT), elementName),
-    t.objectProperty(t.stringLiteral(KEY_PROP_UPDATE), updatePropName)
+    t.objectProperty(t.identifier(KEY_ELEMENT), elementName),
+    t.objectProperty(
+      t.identifier(KEY_PROP_UPDATE),
+      t.identifier(KEY_PROP_UPDATE),
+      false,
+      true
+    )
   ]);
 }
 
