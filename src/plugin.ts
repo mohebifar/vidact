@@ -3,6 +3,7 @@ import { NodePath, Scope } from "@babel/traverse";
 import * as t from "@babel/types";
 
 import { getImpactfulIdentifiers } from "./astExplorer/getImpactfulIdentifiers";
+import { isComponent } from "./astExplorer/isComponent";
 import {
   createComponentElement,
   ElementDefenition,
@@ -35,9 +36,6 @@ function shallowTraverseJSXElement(
   scope: Scope,
   namePrefix = "el"
 ) {
-  if (t.isJSXText(element) && element.value.trim() === "") {
-    return undefined;
-  }
   const identifier = scope.generateUidIdentifier(namePrefix);
 
   switch (element.type) {
@@ -58,7 +56,7 @@ function shallowTraverseJSXElement(
     case "JSXText":
       state.elements.push({
         type: "text",
-        value: element.value.trim(),
+        value: element.value,
         identifier
       });
       break;
@@ -79,6 +77,10 @@ function shallowTraverseJSXElement(
 export default function() {
   const visitor: Visitor<any> = {
     FunctionDeclaration(path) {
+      if (!isComponent(path)) {
+        return path.skip();
+      }
+
       const state = {
         elements: []
       };
@@ -123,7 +125,7 @@ export default function() {
                 const declarator = binding.path as NodePath<
                   t.VariableDeclarator
                 >;
-                // console.log(binding.path.node)
+
                 variableStatementDependencyManager.push(
                   "local",
                   id.name,
@@ -208,6 +210,10 @@ export default function() {
                 const nodes = transformerMap[definition.type](
                   definition as any
                 );
+
+                if(!nodes) {
+                  console.log(definition.type, definition)
+                }
 
                 if (definition.type === "expr") {
                   const nodePath = new NodePath(path.hub, path.parent);

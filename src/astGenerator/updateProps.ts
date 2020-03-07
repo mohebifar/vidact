@@ -12,7 +12,7 @@ const statementsToExecute = new Set();
 for (const prop in newProps) {
   if (propDependencyMap.has(prop) && __internal_props[prop] !== newProps[prop]) {
     __internal_props[prop] = newProps[prop];
-    for (dependency of propDependencyMap.get(prop)) {
+    for (const dependency of propDependencyMap.get(prop)) {
 		  statementsToExecute.add(dependency)
     }
   }

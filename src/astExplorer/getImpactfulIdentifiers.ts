@@ -10,6 +10,10 @@ export function getImpactfulIdentifiers(
   parentPath: NodePath
 ) {
   const impactfulIdentifiers: [DependencyType, string][] = [];
+  if (t.isIdentifier(node)) {
+    impactfulIdentifiers.push(["local", node.name]);
+  }
+
   traverse(
     node,
     {

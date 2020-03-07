@@ -61,11 +61,6 @@ export function transformNode(definition: NodeElementDefinition) {
 }
 
 export function transformText(definition: TextElementDefenition) {
-  const value = definition.value.trim();
-  if (value === "") {
-    return undefined;
-  }
-
   const variableDeclarator = t.variableDeclarator(
     definition.identifier,
     createCreateTextNode(definition.value)
