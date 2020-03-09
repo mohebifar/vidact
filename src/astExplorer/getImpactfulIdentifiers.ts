@@ -20,12 +20,14 @@ export function getImpactfulIdentifiers(
       Identifier(p) {
         if (t.isMemberExpression(p.container)) {
           const parentNode = p.container as t.MemberExpression;
-          if (
-            t.isIdentifier(parentNode.object) &&
-            p.node.name !== PROP_VAR &&
-            parentNode.object.name === PROP_VAR
-          ) {
-            impactfulIdentifiers.push(["prop", parentNode.property.name]);
+          if (t.isIdentifier(parentNode.object)) {
+            if (p.node.name !== PROP_VAR) {
+              if (parentNode.object.name === PROP_VAR) {
+                impactfulIdentifiers.push(["prop", parentNode.property.name]);
+              } else if (parentNode.object.name === p.node.name) {
+                impactfulIdentifiers.push(["local", p.node.name]);
+              }
+            }
           }
         } else {
           impactfulIdentifiers.push(["local", p.node.name]);

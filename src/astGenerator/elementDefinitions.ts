@@ -1,9 +1,14 @@
 import * as t from "@babel/types";
 
-import { KEY_ELEMENT, KEY_PROP_UPDATE } from "../constants";
+import {
+  KEY_ELEMENT,
+  KEY_PROP_UPDATE,
+  ELEMENT_UPDATER_SUFFIX
+} from "../constants";
 
 export interface NodeElementDefinition {
   type: "node";
+  isNative?: boolean;
   tag: string;
   identifier: t.Identifier;
   children: t.Identifier[];
@@ -45,13 +50,7 @@ export function createComponentElement(elementName: t.Identifier) {
 }
 
 export function transformNode(definition: NodeElementDefinition) {
-  const variableDeclarator = t.variableDeclarator(
-    definition.identifier,
-    createCreateElement(definition.tag)
-  );
-
-  const elementDeclarator = t.variableDeclaration("let", [variableDeclarator]);
-  const result: t.Node[] = [elementDeclarator];
+  const result: t.Node[] = createCreateElement(definition);
 
   if (definition.children.length > 0) {
     result.push(createAppend(definition.identifier, definition.children));
@@ -72,7 +71,7 @@ export function transformText(definition: TextElementDefenition) {
 
 export function transformExpression(definition: ExpressionElementDefenition) {
   const updateFunctionIdentifier = t.identifier(
-    definition.identifier.name + "ExprUpdate"
+    definition.identifier.name + ELEMENT_UPDATER_SUFFIX
   );
   const elementDeclarator = t.variableDeclaration("let", [
     t.variableDeclarator(definition.identifier)
@@ -112,11 +111,46 @@ export function transformExpression(definition: ExpressionElementDefenition) {
   return [elementDeclarator, expressionUpdateDeclarator, callUpdateExpress];
 }
 
-function createCreateElement(tag: string) {
-  return t.callExpression(
-    t.memberExpression(t.identifier("document"), t.identifier("createElement")),
-    [t.stringLiteral(tag)]
+function createCreateElement(definition: NodeElementDefinition): t.Node[] {
+  return definition.isNative
+    ? createCreateNativeElement(definition)
+    : createCreateComponentElement(definition);
+}
+
+function createCreateNativeElement(
+  definition: NodeElementDefinition
+): t.Node[] {
+  return [
+    t.variableDeclaration("let", [
+      t.variableDeclarator(
+        definition.identifier,
+        t.callExpression(
+          t.memberExpression(
+            t.identifier("document"),
+            t.identifier("createElement")
+          ),
+          [t.stringLiteral(definition.tag)]
+        )
+      )
+    ])
+  ];
+}
+
+function createCreateComponentElement(
+  definition: NodeElementDefinition
+): t.Node[] {
+  const elInstanceId = t.identifier(definition.identifier.name + "_instance");
+  const callExpression = t.callExpression(t.identifier(definition.tag), []);
+  const instanceDeclarator = t.variableDeclarator(elInstanceId, callExpression);
+  const elementDeclarator = t.variableDeclarator(
+    definition.identifier,
+    t.memberExpression(elInstanceId, t.identifier(KEY_ELEMENT))
   );
+  const elementDeclaration = t.variableDeclaration("let", [
+    instanceDeclarator,
+    elementDeclarator
+  ]);
+  return [elementDeclaration];
 }
 
 function createCreateTextNode(value = "") {
