@@ -29,8 +29,7 @@ export function shallowTraverseJSXElement(
       const tagIdentifier = element.openingElement.name as t.JSXIdentifier;
       const children = element.children
         .map((child, i) => {
-          const shouldTrimNext =
-            i === 0 || element.children[i - 1].type !== "JSXElement";
+          const shouldTrimNext = i === 0;
 
           return shallowTraverseJSXElement(
             child,
