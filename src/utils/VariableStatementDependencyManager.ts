@@ -2,14 +2,14 @@ import { SourceLocation } from "@babel/types";
 import { NodePath } from "@babel/traverse";
 import * as t from "@babel/types";
 
-export type DependencyType = "node" | "local" | "prop";
+export type DependencyType = "node" | "local" | "prop" | "state";
 export type DependencyDescriptor = {
   type: DependencyType;
   value: string;
   location?: SourceLocation["start"];
 };
 export type VariableDescriptor = {
-  type: "local" | "prop";
+  type: "local" | "prop" | "state";
   name: string;
 };
 export type StatementDescriptor = {

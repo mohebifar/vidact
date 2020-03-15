@@ -1,10 +1,7 @@
 import * as t from "@babel/types";
 import { NodePath, Scope } from "@babel/traverse";
-import { traverse } from "@babel/core";
-import g from "@babel/generator";
 
 import { STATEMENT_EXECUTER_VAR } from "../constants";
-import { isStatementExecuter, isElementUpdate } from "../utils/variableNames";
 
 export function createStatementUpdater(
   statement: NodePath | t.Statement,

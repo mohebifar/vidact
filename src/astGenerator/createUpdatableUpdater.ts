@@ -5,12 +5,15 @@ import VariableStatementDependencyManager, {
   DependencyDescriptor
 } from "../utils/VariableStatementDependencyManager";
 import getStatementUpdaterIdentifier from "../astExplorer/getStatementUpdaterIdentifier";
-import { PROP_VAR } from "../constants";
+import { PROP_VAR, STATE_VAR } from "../constants";
 
-export function createPropUpdater(
+export function createUpdatableUpdater(
   variableStatementDependencyManager: VariableStatementDependencyManager,
-  path: NodePath<t.BlockStatement>
+  path: NodePath<t.BlockStatement>,
+  type: "prop" | "state" = "prop"
 ) {
+  const isStateUpdater = type === "state";
+  const containerVar = isStateUpdater ? STATE_VAR : PROP_VAR;
   const statementNamesMap = new Map<string, string>();
   const { statements, variables } = variableStatementDependencyManager;
 
@@ -71,7 +74,7 @@ export function createPropUpdater(
 
   const propDependencies = [...variables.entries()]
     .map(([a, b]): [string[], DependencyDescriptor[]] => [a.split(","), b])
-    .filter(([a]) => a[0] === "prop");
+    .filter(([a]) => a[0] === type);
 
   const usedStatementNames = propDependencies.flatMap(([, dependencies]) =>
     getUniqDependencyNames(dependencies)
@@ -97,8 +100,9 @@ export function createPropUpdater(
   );
 
   return t.callExpression(t.identifier("propUpdater"), [
-    t.identifier(PROP_VAR),
+    t.identifier(containerVar),
     dependencies,
-    propDependenciesMap
+    propDependenciesMap,
+    isStateUpdater ? t.booleanLiteral(false) : t.booleanLiteral(true)
   ]);
 }

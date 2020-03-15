@@ -8,8 +8,8 @@ const runtimeModules = <const>[
   "createElement",
   "append",
   "setContent",
-  "css",
-  "consolidateExecuters"
+  "consolidateExecuters",
+  "setProperty"
 ];
 
 export type RuntimeModule = typeof runtimeModules[number];

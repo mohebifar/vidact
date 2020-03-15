@@ -1,7 +1,6 @@
-import template from "@babel/template";
 import * as t from "@babel/types";
 
-import { State } from "../plugin";
+import { ComponentState } from "../plugin";
 import {
   KEY_ELEMENT,
   KEY_PROP_UPDATER,
@@ -41,10 +40,8 @@ export const transformerMap = {
   expr: transformExpression
 };
 
-const styleUpdateTemplate = template(`css(ELEMENT_ID, OBJECT);`);
-
 export function createComponentElement(
-  elementName: t.Identifier,
+  elementName: t.Expression,
   propUpdater: t.Expression
 ) {
   return t.objectExpression([
@@ -53,7 +50,7 @@ export function createComponentElement(
   ]);
 }
 
-export function transformNode(definition: NodeElementDefinition, state: State) {
+export function transformNode(definition: NodeElementDefinition, state: ComponentState) {
   state.moduleDependencies.add("createElement");
   const result: t.Node[] = createCreateElement(definition, state);
 
@@ -65,7 +62,7 @@ export function transformNode(definition: NodeElementDefinition, state: State) {
   return result;
 }
 
-export function transformText(definition: TextElementDefenition, state: State) {
+export function transformText(definition: TextElementDefenition, state: ComponentState) {
   state.moduleDependencies.add("createText");
   const variableDeclarator = t.variableDeclarator(
     definition.identifier,
@@ -78,7 +75,7 @@ export function transformText(definition: TextElementDefenition, state: State) {
 
 export function transformExpression(
   definition: ExpressionElementDefenition,
-  state: State
+  state: ComponentState
 ) {
   state.moduleDependencies.add("createText");
   state.moduleDependencies.add("setContent");
@@ -127,7 +124,7 @@ export function transformExpression(
 
 function createCreateElement(
   definition: NodeElementDefinition,
-  state: State
+  state: ComponentState
 ): t.Node[] {
   return definition.isNative
     ? createCreateNativeElement(definition, state)
@@ -136,7 +133,7 @@ function createCreateElement(
 
 function createCreateNativeElement(
   definition: NodeElementDefinition,
-  state: State
+  state: ComponentState
 ): t.Node[] {
   const attributeSet = createNativeSetAttribute(definition, state);
 
@@ -155,20 +152,21 @@ function createCreateNativeElement(
 
 function createNativeSetAttribute(
   definition: NodeElementDefinition,
-  state: State
+  state: ComponentState
 ): t.Node[] {
   if (!definition.attributes || definition.attributes.length === 0) {
     return [];
   }
 
   const attributeSet: t.Node[] = [];
+  state.moduleDependencies.add("setProperty");
 
   for (const attr of definition.attributes) {
     if (!t.isJSXAttribute(attr)) {
       continue;
     }
 
-    const propName = attr.name.name;
+    const propName = attr.name.name as string;
     const value: t.Expression =
       (t.isStringLiteral(attr.value) && attr.value) ||
       (t.isJSXExpressionContainer(attr.value) &&
@@ -176,25 +174,15 @@ function createNativeSetAttribute(
         attr.value.expression) ||
       t.booleanLiteral(true);
 
-    if (propName === "style" && t.isJSXExpressionContainer(attr.value)) {
-      const st = styleUpdateTemplate({
-        OBJECT: attr.value.expression,
-        ELEMENT_ID: definition.identifier.name
-      }) as t.Statement;
-      state.moduleDependencies.add("css");
-
-      attributeSet.push(st);
-    } else {
-      attributeSet.push(
-        t.expressionStatement(
-          t.assignmentExpression(
-            "=",
-            t.memberExpression(definition.identifier, t.identifier(propName)),
-            value
-          )
-        )
-      );
-    }
+    attributeSet.push(
+      t.expressionStatement(
+        t.callExpression(t.identifier("setProperty"), [
+          definition.identifier,
+          t.stringLiteral(propName),
+          value
+        ])
+      )
+    );
   }
 
   return attributeSet;
@@ -202,7 +190,7 @@ function createNativeSetAttribute(
 
 function createCreateComponentElement(
   definition: NodeElementDefinition,
-  state: State
+  _: ComponentState
 ): t.Node[] {
   const elInstanceId = t.identifier(definition.identifier.name + "_instance");
   const [updateAttrStatements, init] = createComponentSetAttribute(

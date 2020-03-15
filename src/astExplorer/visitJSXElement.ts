@@ -3,7 +3,7 @@ import * as t from "@babel/types";
 
 import { ELEMENT_VAR } from "../constants";
 import isNativeTag from "../utils/isNativeTag";
-import { State } from "../plugin";
+import { JSXState } from "../plugin";
 
 const multiSpaceRegex = /[\s\r\n]{2,}/g;
 const LEFT = 1;
@@ -17,7 +17,7 @@ export function shallowTraverseJSXElement(
     | t.JSXElement
     | t.JSXFragment
     | t.JSXEmptyExpression,
-  state: State,
+  state: JSXState,
   scope: Scope,
   namePrefix = ELEMENT_VAR,
   shouldTrim: 0 | typeof LEFT | typeof RIGHT = 0

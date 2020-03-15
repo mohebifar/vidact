@@ -1,10 +1,18 @@
-export function propUpdater(oldProps, dependencies, propDependency) {
+export function propUpdater(
+  oldProps,
+  dependencies,
+  propDependency,
+  shallowEqual = true
+) {
   const propDependencyMap = new Map(propDependency);
-  return (newProps) => {
+  return newProps => {
     const dependenciesToExecute = new Set();
 
     for (const prop in newProps) {
-      if (propDependencyMap.has(prop) && oldProps[prop] !== newProps[prop]) {
+      if (
+        propDependencyMap.has(prop) &&
+        (!shallowEqual || oldProps[prop] !== newProps[prop])
+      ) {
         oldProps[prop] = newProps[prop];
 
         for (const dependency of propDependencyMap.get(prop)) {
