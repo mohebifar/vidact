@@ -1,10 +1,13 @@
+import template from "@babel/template";
 import * as t from "@babel/types";
 
+import { State } from "../plugin";
 import {
   KEY_ELEMENT,
-  KEY_PROP_UPDATE,
+  KEY_PROP_UPDATER,
   ELEMENT_UPDATER_SUFFIX
 } from "../constants";
+import { createStatementUpdater } from "./createStatementUpdater";
 
 export interface NodeElementDefinition {
   type: "node";
@@ -12,6 +15,7 @@ export interface NodeElementDefinition {
   tag: string;
   identifier: t.Identifier;
   children: t.Identifier[];
+  attributes?: t.JSXOpeningElement["attributes"];
 }
 
 export interface TextElementDefenition {
@@ -37,29 +41,32 @@ export const transformerMap = {
   expr: transformExpression
 };
 
-export function createComponentElement(elementName: t.Identifier) {
+const styleUpdateTemplate = template(`css(ELEMENT_ID, OBJECT);`);
+
+export function createComponentElement(
+  elementName: t.Identifier,
+  propUpdater: t.Expression
+) {
   return t.objectExpression([
     t.objectProperty(t.identifier(KEY_ELEMENT), elementName),
-    t.objectProperty(
-      t.identifier(KEY_PROP_UPDATE),
-      t.identifier(KEY_PROP_UPDATE),
-      false,
-      true
-    )
+    t.objectProperty(t.identifier(KEY_PROP_UPDATER), propUpdater)
   ]);
 }
 
-export function transformNode(definition: NodeElementDefinition) {
-  const result: t.Node[] = createCreateElement(definition);
+export function transformNode(definition: NodeElementDefinition, state: State) {
+  state.moduleDependencies.add("createElement");
+  const result: t.Node[] = createCreateElement(definition, state);
 
   if (definition.children.length > 0) {
+    state.moduleDependencies.add("append");
     result.push(createAppend(definition.identifier, definition.children));
   }
 
   return result;
 }
 
-export function transformText(definition: TextElementDefenition) {
+export function transformText(definition: TextElementDefenition, state: State) {
+  state.moduleDependencies.add("createText");
   const variableDeclarator = t.variableDeclarator(
     definition.identifier,
     createCreateTextNode(definition.value)
@@ -69,78 +76,140 @@ export function transformText(definition: TextElementDefenition) {
   return elementDeclarator;
 }
 
-export function transformExpression(definition: ExpressionElementDefenition) {
+export function transformExpression(
+  definition: ExpressionElementDefenition,
+  state: State
+) {
+  state.moduleDependencies.add("createText");
+  state.moduleDependencies.add("setContent");
   const updateFunctionIdentifier = t.identifier(
     definition.identifier.name + ELEMENT_UPDATER_SUFFIX
   );
   const elementDeclarator = t.variableDeclaration("let", [
     t.variableDeclarator(definition.identifier)
   ]);
-  const expressionUpdateDeclarator = t.variableDeclaration("const", [
-    t.variableDeclarator(
-      updateFunctionIdentifier,
-      t.arrowFunctionExpression(
-        [],
-        t.blockStatement([
-          t.ifStatement(
-            t.unaryExpression("!", definition.identifier),
-            t.expressionStatement(
-              t.assignmentExpression(
-                "=",
-                definition.identifier,
-                createCreateTextNode()
-              )
-            )
-          ),
-          t.expressionStatement(
-            t.assignmentExpression(
-              "=",
-              t.memberExpression(
-                definition.identifier,
-                t.identifier("textContent")
-              ),
-              definition.expression as t.Expression
-            )
-          )
+  const expression = definition.expression as t.Expression;
+  t.traverse(expression, node => {
+    if (t.isArrowFunctionExpression(node) && !t.isBlockStatement(node.body)) {
+      node.body = t.blockStatement([t.returnStatement(node.body)]);
+    }
+  });
+
+  const block = t.blockStatement([
+    t.ifStatement(
+      t.unaryExpression("!", definition.identifier),
+      t.expressionStatement(
+        t.assignmentExpression(
+          "=",
+          definition.identifier,
+          createCreateTextNode()
+        )
+      )
+    ),
+    t.expressionStatement(
+      t.assignmentExpression(
+        "=",
+        definition.identifier,
+        t.callExpression(t.identifier("setContent"), [
+          definition.identifier,
+          expression
         ])
       )
     )
   ]);
-  const callUpdateExpress = t.callExpression(updateFunctionIdentifier, []);
+  const [updater, callUpdater] = createStatementUpdater(
+    block,
+    updateFunctionIdentifier
+  );
 
-  return [elementDeclarator, expressionUpdateDeclarator, callUpdateExpress];
+  return [elementDeclarator, updater, callUpdater];
 }
 
-function createCreateElement(definition: NodeElementDefinition): t.Node[] {
+function createCreateElement(
+  definition: NodeElementDefinition,
+  state: State
+): t.Node[] {
   return definition.isNative
-    ? createCreateNativeElement(definition)
-    : createCreateComponentElement(definition);
+    ? createCreateNativeElement(definition, state)
+    : createCreateComponentElement(definition, state);
 }
 
 function createCreateNativeElement(
-  definition: NodeElementDefinition
+  definition: NodeElementDefinition,
+  state: State
 ): t.Node[] {
+  const attributeSet = createNativeSetAttribute(definition, state);
+
   return [
     t.variableDeclaration("let", [
       t.variableDeclarator(
         definition.identifier,
-        t.callExpression(
-          t.memberExpression(
-            t.identifier("document"),
-            t.identifier("createElement")
-          ),
-          [t.stringLiteral(definition.tag)]
-        )
+        t.callExpression(t.identifier("createElement"), [
+          t.stringLiteral(definition.tag)
+        ])
       )
-    ])
+    ]),
+    ...attributeSet
   ];
 }
 
+function createNativeSetAttribute(
+  definition: NodeElementDefinition,
+  state: State
+): t.Node[] {
+  if (!definition.attributes || definition.attributes.length === 0) {
+    return [];
+  }
+
+  const attributeSet: t.Node[] = [];
+
+  for (const attr of definition.attributes) {
+    if (!t.isJSXAttribute(attr)) {
+      continue;
+    }
+
+    const propName = attr.name.name;
+    const value: t.Expression =
+      (t.isStringLiteral(attr.value) && attr.value) ||
+      (t.isJSXExpressionContainer(attr.value) &&
+        !t.isJSXEmptyExpression(attr.value.expression) &&
+        attr.value.expression) ||
+      t.booleanLiteral(true);
+
+    if (propName === "style" && t.isJSXExpressionContainer(attr.value)) {
+      const st = styleUpdateTemplate({
+        OBJECT: attr.value.expression,
+        ELEMENT_ID: definition.identifier.name
+      }) as t.Statement;
+      state.moduleDependencies.add("css");
+
+      attributeSet.push(st);
+    } else {
+      attributeSet.push(
+        t.expressionStatement(
+          t.assignmentExpression(
+            "=",
+            t.memberExpression(definition.identifier, t.identifier(propName)),
+            value
+          )
+        )
+      );
+    }
+  }
+
+  return attributeSet;
+}
+
 function createCreateComponentElement(
-  definition: NodeElementDefinition
+  definition: NodeElementDefinition,
+  state: State
 ): t.Node[] {
   const elInstanceId = t.identifier(definition.identifier.name + "_instance");
-  const callExpression = t.callExpression(t.identifier(definition.tag), []);
+  const [updateAttrStatements, init] = createComponentSetAttribute(
+    definition,
+    elInstanceId
+  );
+  const callExpression = t.callExpression(t.identifier(definition.tag), [init]);
   const instanceDeclarator = t.variableDeclarator(elInstanceId, callExpression);
   const elementDeclarator = t.variableDeclarator(
     definition.identifier,
@@ -150,22 +219,58 @@ function createCreateComponentElement(
     instanceDeclarator,
     elementDeclarator
   ]);
-  return [elementDeclaration];
+  return [elementDeclaration, ...updateAttrStatements];
 }
 
-function createCreateTextNode(value = "") {
+function createComponentSetAttribute(
+  definition: NodeElementDefinition,
+  instanceId: t.Identifier
+): [t.Node[], t.ObjectExpression | undefined] {
+  if (!definition.attributes || definition.attributes.length === 0) {
+    return [[], undefined];
+  }
+
+  const attributeSet: t.Node[] = [];
+  const objProperties: t.ObjectProperty[] = [];
+
+  for (const attr of definition.attributes) {
+    if (!t.isJSXAttribute(attr)) {
+      continue;
+    }
+
+    const propName = attr.name.name;
+    const propId = t.identifier(propName);
+    const value: t.Expression =
+      (t.isStringLiteral(attr.value) && attr.value) ||
+      (t.isJSXExpressionContainer(attr.value) &&
+        !t.isJSXEmptyExpression(attr.value.expression) &&
+        attr.value.expression) ||
+      t.booleanLiteral(true);
+
+    objProperties.push(t.objectProperty(propId, value));
+
+    attributeSet.push(
+      t.expressionStatement(
+        t.callExpression(
+          t.memberExpression(instanceId, t.identifier(KEY_PROP_UPDATER)),
+          [t.objectExpression([t.objectProperty(propId, value)])]
+        )
+      )
+    );
+  }
+
+  return [attributeSet, t.objectExpression(objProperties)];
+}
+
+function createCreateTextNode(value?: string) {
   return t.callExpression(
-    t.memberExpression(
-      t.identifier("document"),
-      t.identifier("createTextNode")
-    ),
-    [t.stringLiteral(value)]
+    t.identifier("createText"),
+    value ? [t.stringLiteral(value)] : []
   );
 }
 
 function createAppend(parent: t.Identifier, children: t.Identifier[]) {
-  return t.callExpression(
-    t.memberExpression(parent, t.identifier("append"), false),
-    children
+  return t.expressionStatement(
+    t.callExpression(t.identifier("append"), [parent, ...children])
   );
 }

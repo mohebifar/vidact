@@ -1,10 +1,15 @@
 import { NodePath } from "@babel/core";
 import * as t from "@babel/types";
 
-export default function getStatementUpdaterIdentifier(path: NodePath<t.VariableDeclaration>) {
-  const node = path.get("declarations")[0].get("id").node;
-  if (node.type === "Identifier") {
-    return node.name;
+export default function getStatementUpdaterIdentifier(
+  path: NodePath<t.VariableDeclaration>
+) {
+  const { node: id } = path.get("declarations")[0].get("id");
+  if (t.isIdentifier(id)) {
+    return id.name;
   }
-  throw new Error("Statement updater declarator must be an Identifier");
+  if (t.isArrayPattern(id) && t.isIdentifier(id.elements[0])) {
+    return id.elements[0].name;
+  }
+  throw new Error("Statement updater declarator must be an Identifier or ArrayPattern");
 }

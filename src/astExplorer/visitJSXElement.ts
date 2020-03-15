@@ -1,11 +1,13 @@
 import { Scope } from "@babel/traverse";
 import * as t from "@babel/types";
 
-import { ElementDefenition } from "../astGenerator/elementDefinitions";
 import { ELEMENT_VAR } from "../constants";
 import isNativeTag from "../utils/isNativeTag";
+import { State } from "../plugin";
 
 const multiSpaceRegex = /[\s\r\n]{2,}/g;
+const LEFT = 1;
+const RIGHT = 2;
 
 export function shallowTraverseJSXElement(
   element:
@@ -15,12 +17,10 @@ export function shallowTraverseJSXElement(
     | t.JSXElement
     | t.JSXFragment
     | t.JSXEmptyExpression,
-  state: {
-    elements: ElementDefenition[];
-  },
+  state: State,
   scope: Scope,
   namePrefix = ELEMENT_VAR,
-  shouldTrim = false
+  shouldTrim: 0 | typeof LEFT | typeof RIGHT = 0
 ) {
   const identifier = scope.generateUidIdentifier(namePrefix);
 
@@ -29,7 +29,8 @@ export function shallowTraverseJSXElement(
       const tagIdentifier = element.openingElement.name as t.JSXIdentifier;
       const children = element.children
         .map((child, i) => {
-          const shouldTrimNext = i === 0;
+          const shouldTrimNext =
+            (i === 0 && LEFT) || (i === element.children.length - 1 && RIGHT);
 
           return shallowTraverseJSXElement(
             child,
@@ -40,19 +41,28 @@ export function shallowTraverseJSXElement(
           );
         })
         .filter(value => value);
+
       state.elements.push({
         type: "node",
         tag: tagIdentifier.name,
         isNative: isNativeTag(tagIdentifier.name),
+        attributes: element.openingElement.attributes,
         identifier,
         children
       });
       break;
     case "JSXText":
-      const value = element.value.replace(multiSpaceRegex, " ");
-      if (shouldTrim && value.trim() === "") {
-        return undefined;
+      let value = element.value.replace(multiSpaceRegex, " ");
+      if (shouldTrim) {
+        if (value.trim() === "") {
+          return undefined;
+        } else if (shouldTrim === LEFT) {
+          value = value.trimLeft();
+        } else if (shouldTrim === RIGHT) {
+          value = value.trimRight();
+        }
       }
+
       state.elements.push({
         type: "text",
         identifier,

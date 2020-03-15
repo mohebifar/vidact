@@ -21,6 +21,7 @@ export default class VariableStatementDependencyManager {
   public variables = new Map<string, DependencyDescriptor[]>();
   public statements = new Map<string, NodePath>();
   public nodeHashMap = new Map<t.Node, string>();
+
   private id = 0;
 
   public push(
