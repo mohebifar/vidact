@@ -9,7 +9,8 @@ const runtimeModules = <const>[
   "append",
   "setContent",
   "consolidateExecuters",
-  "setProperty"
+  "setProperty",
+  "addPropTransaction"
 ];
 
 export type RuntimeModule = typeof runtimeModules[number];

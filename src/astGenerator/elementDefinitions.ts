@@ -4,7 +4,8 @@ import { ComponentState } from "../plugin";
 import {
   KEY_ELEMENT,
   KEY_PROP_UPDATER,
-  ELEMENT_UPDATER_SUFFIX
+  ELEMENT_UPDATER_SUFFIX,
+  PROP_VAR_TRANSACTION_VAR
 } from "../constants";
 import { createStatementUpdater } from "./createStatementUpdater";
 
@@ -50,7 +51,10 @@ export function createComponentElement(
   ]);
 }
 
-export function transformNode(definition: NodeElementDefinition, state: ComponentState) {
+export function transformNode(
+  definition: NodeElementDefinition,
+  state: ComponentState
+) {
   state.moduleDependencies.add("createElement");
   const result: t.Node[] = createCreateElement(definition, state);
 
@@ -62,7 +66,10 @@ export function transformNode(definition: NodeElementDefinition, state: Componen
   return result;
 }
 
-export function transformText(definition: TextElementDefenition, state: ComponentState) {
+export function transformText(
+  definition: TextElementDefenition,
+  state: ComponentState
+) {
   state.moduleDependencies.add("createText");
   const variableDeclarator = t.variableDeclarator(
     definition.identifier,
@@ -190,12 +197,13 @@ function createNativeSetAttribute(
 
 function createCreateComponentElement(
   definition: NodeElementDefinition,
-  _: ComponentState
+  state: ComponentState
 ): t.Node[] {
   const elInstanceId = t.identifier(definition.identifier.name + "_instance");
   const [updateAttrStatements, init] = createComponentSetAttribute(
     definition,
-    elInstanceId
+    elInstanceId,
+    state
   );
   const callExpression = t.callExpression(t.identifier(definition.tag), [init]);
   const instanceDeclarator = t.variableDeclarator(elInstanceId, callExpression);
@@ -212,7 +220,8 @@ function createCreateComponentElement(
 
 function createComponentSetAttribute(
   definition: NodeElementDefinition,
-  instanceId: t.Identifier
+  instanceId: t.Identifier,
+  state: ComponentState
 ): [t.Node[], t.ObjectExpression | undefined] {
   if (!definition.attributes || definition.attributes.length === 0) {
     return [[], undefined];
@@ -228,8 +237,10 @@ function createComponentSetAttribute(
 
     const propName = attr.name.name;
     const propId = t.identifier(propName);
+    const literalValue = t.isStringLiteral(attr.value) && attr.value;
+
     const value: t.Expression =
-      (t.isStringLiteral(attr.value) && attr.value) ||
+      literalValue ||
       (t.isJSXExpressionContainer(attr.value) &&
         !t.isJSXEmptyExpression(attr.value.expression) &&
         attr.value.expression) ||
@@ -237,12 +248,20 @@ function createComponentSetAttribute(
 
     objProperties.push(t.objectProperty(propId, value));
 
+    if (literalValue) {
+      continue;
+    }
+
+    state.moduleDependencies.add("addPropTransaction");
+    state.needsPropTransaction = true;
     attributeSet.push(
       t.expressionStatement(
-        t.callExpression(
-          t.memberExpression(instanceId, t.identifier(KEY_PROP_UPDATER)),
-          [t.objectExpression([t.objectProperty(propId, value)])]
-        )
+        t.callExpression(t.identifier("addPropTransaction"), [
+          t.identifier(PROP_VAR_TRANSACTION_VAR),
+          instanceId,
+          t.stringLiteral(propId.name),
+          value
+        ])
       )
     );
   }

@@ -5,11 +5,14 @@ import VariableStatementDependencyManager, {
   DependencyDescriptor
 } from "../utils/VariableStatementDependencyManager";
 import getStatementUpdaterIdentifier from "../astExplorer/getStatementUpdaterIdentifier";
-import { PROP_VAR, STATE_VAR } from "../constants";
+import { ComponentState } from "../plugin";
+
+import { PROP_VAR, STATE_VAR, PROP_VAR_TRANSACTION_VAR } from "../constants";
 
 export function createUpdatableUpdater(
   variableStatementDependencyManager: VariableStatementDependencyManager,
   path: NodePath<t.BlockStatement>,
+  state: ComponentState,
   type: "prop" | "state" = "prop"
 ) {
   const isStateUpdater = type === "state";
@@ -99,10 +102,15 @@ export function createUpdatableUpdater(
     })
   );
 
-  return t.callExpression(t.identifier("propUpdater"), [
-    t.identifier(containerVar),
-    dependencies,
-    propDependenciesMap,
-    isStateUpdater ? t.booleanLiteral(false) : t.booleanLiteral(true)
-  ]);
+  return t.callExpression(
+    t.identifier("propUpdater"),
+    [
+      t.identifier(containerVar),
+      dependencies,
+      propDependenciesMap,
+      isStateUpdater ? t.booleanLiteral(false) : t.booleanLiteral(true)
+    ].concat(
+      state.needsPropTransaction ? [t.identifier(PROP_VAR_TRANSACTION_VAR)] : []
+    )
+  );
 }

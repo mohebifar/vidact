@@ -5,6 +5,7 @@ import VariableStatementDependencyManager from "../utils/VariableStatementDepend
 import { createUpdatableUpdater } from "./createUpdatableUpdater";
 
 import { STATE_VAR, KEY_STATE_UPDATER } from "../constants";
+import { ComponentState } from "../plugin";
 
 export interface InternalStateRecord {
   name: t.Identifier;
@@ -13,10 +14,11 @@ export interface InternalStateRecord {
 }
 
 export function createStateDefinition(
-  states: InternalStateRecord[],
+  state: ComponentState,
   variableStatementDependencyManager: VariableStatementDependencyManager,
   fnPath: NodePath<t.FunctionDeclaration>
 ) {
+  const states = state.state;
   const internalStateDeclaration = t.variableDeclaration("const", [
     t.variableDeclarator(
       t.identifier(STATE_VAR),
@@ -34,6 +36,7 @@ export function createStateDefinition(
       createUpdatableUpdater(
         variableStatementDependencyManager,
         fnPath.get("body"),
+        state,
         "state"
       )
     )

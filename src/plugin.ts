@@ -26,13 +26,15 @@ import {
   InternalStateRecord,
   createStateDefinition
 } from "./astGenerator/createStateDefinition";
+import { PROP_VAR_TRANSACTION_VAR } from "./constants";
 
 export interface ComponentState {
   moduleDependencies: RuntimeModuleSet;
 
-  state?: InternalStateRecord[];
-  variableStatementDependencyManager?: VariableStatementDependencyManager;
-  variablesWithDependencies?: Set<string>;
+  state: InternalStateRecord[];
+  variableStatementDependencyManager: VariableStatementDependencyManager;
+  variablesWithDependencies: Set<string>;
+  needsPropTransaction: boolean;
 }
 
 export interface JSXState {
@@ -54,10 +56,11 @@ function visitFunction(
 
   const variableStatementDependencyManager = new VariableStatementDependencyManager();
   const state: ComponentState = {
-    state: [],
-    moduleDependencies,
     variablesWithDependencies: new Set<string>(),
-    variableStatementDependencyManager
+    needsPropTransaction: false,
+    state: [],
+    variableStatementDependencyManager,
+    moduleDependencies
   };
 
   // Separate variable declarations with multiple declarators
@@ -101,15 +104,15 @@ function visitFunction(
 
   fnPath.traverse({
     JSXElement(path) {
-      const state: JSXState = {
+      const jsxState: JSXState = {
         elements: [],
         moduleDependencies
       };
 
-      const name = shallowTraverseJSXElement(path.node, state, path.scope);
+      const name = shallowTraverseJSXElement(path.node, jsxState, path.scope);
       names.push(name);
 
-      state.elements.forEach(definition => {
+      jsxState.elements.forEach(definition => {
         const nodePaths: NodePath[] = [];
         const nodes = transformerMap[definition.type](definition as any, state);
 
@@ -198,7 +201,9 @@ function visitFunction(
     returnValue,
     createUpdatableUpdater(
       variableStatementDependencyManager,
-      fnPath.get("body")
+      fnPath.get("body"),
+      state,
+      "prop"
     )
   );
 
@@ -206,10 +211,23 @@ function visitFunction(
   const returnPath = fnPath
     .get("body")
     .pushContainer("body", t.returnStatement(componentElement))[0];
+  if (state.needsPropTransaction) {
+    fnPath
+      .get("body")
+      .unshiftContainer(
+        "body",
+        t.variableDeclaration("const", [
+          t.variableDeclarator(
+            t.identifier(PROP_VAR_TRANSACTION_VAR),
+            t.newExpression(t.identifier("Map"), [])
+          )
+        ])
+      );
+  }
 
   if (state.state && state.state.length > 0) {
     const [internalStateDeclaration, defineUpdater] = createStateDefinition(
-      state.state,
+      state,
       variableStatementDependencyManager,
       fnPath
     );

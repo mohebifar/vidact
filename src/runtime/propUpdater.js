@@ -2,7 +2,8 @@ export function propUpdater(
   oldProps,
   dependencies,
   propDependency,
-  shallowEqual = true
+  shallowEqual,
+  propTransactionContainer
 ) {
   const propDependencyMap = new Map(propDependency);
   return newProps => {
@@ -24,5 +25,12 @@ export function propUpdater(
     const statementsToExecuteSorted = Array.from(dependenciesToExecute)
       .sort()
       .forEach(id => dependencies[id]());
+
+    if (propTransactionContainer) {
+      propTransactionContainer.forEach((newProps, instance) => {
+        instance && instance.updateProps(newProps);
+      });
+      propTransactionContainer.clear();
+    }
   };
 }
