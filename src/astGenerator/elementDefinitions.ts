@@ -205,7 +205,12 @@ function createCreateComponentElement(
     elInstanceId,
     state
   );
-  const callExpression = t.callExpression(t.identifier(definition.tag), [init]);
+  console.log(t.identifier(definition.tag), init);
+  const callExpression = t.callExpression(
+    t.identifier(definition.tag),
+    init ? [init] : [t.objectExpression([])]
+  );
+
   const instanceDeclarator = t.variableDeclarator(elInstanceId, callExpression);
   const elementDeclarator = t.variableDeclarator(
     definition.identifier,

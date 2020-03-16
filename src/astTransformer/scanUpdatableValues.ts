@@ -183,7 +183,6 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
       }
 
       const statement = n.findParent(findImmediateStatement);
-      console.log('statement', statement.node)
       if (statement.isVariableDeclaration()) {
         declarationToAssigment(statement).forEach(name =>
           state.variablesWithDependencies.add(name)

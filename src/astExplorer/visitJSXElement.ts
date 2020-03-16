@@ -55,8 +55,8 @@ export function shallowTraverseJSXElement(
               )
             )
           );
+          children = [];
         }
-        children = [];
       }
 
       state.elements.push({
