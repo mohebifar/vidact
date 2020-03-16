@@ -27,7 +27,7 @@ export function shallowTraverseJSXElement(
   switch (element.type) {
     case "JSXElement":
       const tagIdentifier = element.openingElement.name as t.JSXIdentifier;
-      const children = element.children
+      let children = element.children
         .map((child, i) => {
           const shouldTrimNext =
             (i === 0 && LEFT) || (i === element.children.length - 1 && RIGHT);
@@ -41,12 +41,29 @@ export function shallowTraverseJSXElement(
           );
         })
         .filter(value => value);
+      const isNative = isNativeTag(tagIdentifier.name);
+      let { attributes } = element.openingElement;
+      if (!isNative) {
+        if (children && children.length > 0) {
+          attributes.push(
+            t.jsxAttribute(
+              t.jsxIdentifier("children"),
+              t.jsxExpressionContainer(
+                children.length === 1
+                  ? children[0]
+                  : t.arrayExpression(children)
+              )
+            )
+          );
+        }
+        children = [];
+      }
 
       state.elements.push({
         type: "node",
         tag: tagIdentifier.name,
-        isNative: isNativeTag(tagIdentifier.name),
         attributes: element.openingElement.attributes,
+        isNative,
         identifier,
         children
       });
