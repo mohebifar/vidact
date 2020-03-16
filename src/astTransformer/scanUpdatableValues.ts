@@ -9,6 +9,7 @@ import {
   KEY_STATE_UPDATER,
   USE_STATE
 } from "../constants";
+import { declarationToAssigment } from "./declarationToAssignment";
 
 export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
   const { variableStatementDependencyManager } = state;
@@ -182,6 +183,12 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
       }
 
       const statement = n.findParent(findImmediateStatement);
+      console.log('statement', statement.node)
+      if (statement.isVariableDeclaration()) {
+        declarationToAssigment(statement).forEach(name =>
+          state.variablesWithDependencies.add(name)
+        );
+      }
 
       if (!statement.isReturnStatement()) {
         variableStatementDependencyManager.push(
