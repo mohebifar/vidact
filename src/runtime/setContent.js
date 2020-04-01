@@ -1,15 +1,24 @@
-export function setContent(el, content) {
-  const isCurrentElementText = el instanceof Text;
+import { createText } from "./createNativeDom";
 
-  if (el === content) {
-    return el;
+export function setContent(element, content) {
+  const isCurrentElementText = element instanceof Text;
+  const isNewContentNativeNode = (content && content.native) || false;
+
+  if (isNewContentNativeNode) {
+    content = content.element;
+  }
+
+  if (element === content) {
+    return element;
   }
 
   if (Array.isArray(content)) {
-    const normalizedElements = content.map(e => setContent(createText(), e));
+    const normalizedElements = content.map(e =>
+      setContent(createText().element, e)
+    );
 
-    if (Array.isArray(el)) {
-      const newNode = replaceArrayWithText(el);
+    if (Array.isArray(element)) {
+      const newNode = replaceArrayWithText(element);
 
       if (normalizedElements.length === 0) {
         return newNode;
@@ -18,42 +27,38 @@ export function setContent(el, content) {
       }
     } else {
       if (normalizedElements.length === 0) {
-        return setContent(el, "");
+        return setContent(element, "");
       } else {
-        el.replaceWith(...normalizedElements);
+        element.replaceWith(...normalizedElements);
       }
     }
 
     return normalizedElements;
   }
 
-  if (Array.isArray(el)) {
-    el = replaceArrayWithText(el);
+  if (Array.isArray(element)) {
+    element = replaceArrayWithText(element);
   }
 
   if (content instanceof Node) {
-    el.replaceWith(content);
+    element.replaceWith(content);
     return content;
   } else if (!isCurrentElementText) {
-    const text = createText(content);
-    el.replaceWith(text);
+    const text = createText(content).element;
+    element.replaceWith(text);
     return text;
   } else {
-    el.textContent = content;
-    return el;
-  }
-
-  function createText(text = "") {
-    return document.createTextNode(text);
+    element.textContent = content || "";
+    return element;
   }
 }
 
-function replaceArrayWithText(el) {
-  const parent = el[0].parentNode;
-  const newNode = createText();
-  let i = el.length;
+function replaceArrayWithText(element) {
+  const parent = element[0].parentNode;
+  const newNode = createText().element;
+  let i = element.length;
   while (i--) {
-    const currentNode = el[i];
+    const currentNode = element[i];
     if (!i) {
       parent.replaceChild(newNode, currentNode);
     } else {

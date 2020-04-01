@@ -94,7 +94,7 @@ export function shallowTraverseJSXElement(
       });
       break;
     default:
-      console.log(element);
+      console.warn("Unsupported JSX child", element);
   }
 
   return identifier;

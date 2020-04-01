@@ -1,3 +1,3 @@
-export function append(el, ...children) {
-    el.append(...children.flatMap(a => a));
+export function append(element, ...children) {
+  element.element.append(...children.flatMap(child => child.element));
 }

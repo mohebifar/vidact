@@ -24,28 +24,47 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
           return;
         }
 
-        let variableDeclaration = objectReferencePath.findParent(p =>
-          p.isVariableDeclaration()
-        ) as NodePath<t.VariableDeclaration>;
-
-        if (!variableDeclaration) {
-          return;
-        }
-
-        // TODO: Check for object and array destruct
-        const { id } = variableDeclaration.node.declarations[0];
-
-        if (!t.isIdentifier(id)) {
-          return;
-        }
-
-        variableStatementDependencyManager.push(
-          { type: "prop", name: property.name },
-          { type: "local", name: id.name },
-          id.loc && id.loc.start
+        const immediateStatement = objectReferencePath.findParent(
+          findImmediateStatement
         );
 
-        scanDependees(objectReferencePath.scope, id.name);
+        if (immediateStatement.isVariableDeclaration()) {
+          // TODO: Check for object and array destruct
+          const { id } = immediateStatement.node.declarations[0];
+
+          if (!t.isIdentifier(id)) {
+            return;
+          }
+
+          variableStatementDependencyManager.push(
+            { type: "prop", name: property.name },
+            { type: "local", name: id.name }
+          );
+
+          scanDependees(objectReferencePath.scope, id.name);
+        } else if (
+          !immediateStatement.isReturnStatement() &&
+          (!immediateStatement.isExpressionStatement() ||
+            !immediateStatement.get("expression").isAssignmentExpression())
+        ) {
+          variableStatementDependencyManager.push(
+            { type: "prop", name: property.name },
+            { type: "node", value: immediateStatement }
+          );
+
+          immediateStatement.traverse({
+            AssignmentExpression(assignPath) {
+              const leftPath = assignPath.get("left");
+              if (leftPath.isIdentifier()) {
+                variableStatementDependencyManager.push(
+                  { type: "prop", name: property.name },
+                  { type: "local", name: leftPath.node.name }
+                );
+                scanDependees(objectReferencePath.scope, leftPath.node.name);
+              }
+            }
+          });
+        }
       },
       CallExpression(callExpressionPath, state) {
         const callee = callExpressionPath.get("callee");
@@ -113,6 +132,7 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
             { type: "local", name: valueName },
             { type: "node", value: assignValuePath }
           );
+
           scanDependees(callExpressionPath.scope, valueName, true);
           state.state.push({
             originalName: valueName,
@@ -140,27 +160,14 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
 
     const binding = scope.getBinding(name);
 
-    if (!skipDefinition) {
-      const declaration = binding.path.findParent(findImmediateStatement);
-      const declarator = binding.path as NodePath<t.VariableDeclarator>;
-
-      state.variablesWithDependencies.add(name);
-      variableStatementDependencyManager.push(
-        { type: "local", name },
-        { type: "node", value: declaration }
-      );
-
-      declaration.replaceWith(
-        t.assignmentExpression("=", declarator.node.id, declarator.node.init)
-      );
-    }
-
     Object.values(binding.referencePaths).forEach(n => {
       const container = n.getStatementParent();
 
       const expression = container.isExpressionStatement()
         ? container.get("expression")
         : container;
+
+      const statement = n.findParent(findImmediateStatement);
 
       let lVal: NodePath<t.LVal>;
       if (expression.isVariableDeclaration()) {
@@ -169,9 +176,16 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
         lVal = expression.get("left");
       }
 
+      if (statement.isVariableDeclaration()) {
+        declarationToAssigment(statement).forEach(name =>
+          state.variablesWithDependencies.add(name)
+        );
+      }
+
       if (lVal) {
         const id = lVal as NodePath<t.Identifier>;
         const { name: idName } = id.node;
+
         if (idName !== name) {
           scanDependees(scope, idName);
 
@@ -182,19 +196,42 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
         }
       }
 
-      const statement = n.findParent(findImmediateStatement);
-      if (statement.isVariableDeclaration()) {
-        declarationToAssigment(statement).forEach(name =>
-          state.variablesWithDependencies.add(name)
-        );
-      }
-
       if (!statement.isReturnStatement()) {
+        statement.traverse({
+          AssignmentExpression(assignPath) {
+            const leftPath = assignPath.get("left");
+            if (leftPath.isIdentifier()) {
+              variableStatementDependencyManager.push(
+                { type: "local", name },
+                { type: "local", name: leftPath.node.name }
+              );
+              scanDependees(scope, leftPath.node.name);
+            }
+          }
+        });
+
         variableStatementDependencyManager.push(
           { type: "local", name },
           { type: "node", value: statement }
         );
       }
     });
+
+    if (!skipDefinition) {
+      const declaration = binding.path.findParent(findImmediateStatement);
+
+      state.variablesWithDependencies.add(name);
+      variableStatementDependencyManager.push(
+        { type: "local", name },
+        { type: "node", value: declaration }
+      );
+
+      // declaration.replaceWith(
+      //   t.assignmentExpression("=", declarator.node.id, declarator.node.init)
+      // );
+      if (declaration.isVariableDeclaration()) {
+        state.looseAssignments.add(declaration);
+      }
+    }
   }
 }

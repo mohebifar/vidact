@@ -39,7 +39,7 @@ export function getImpactfulIdentifiers(
             const parentNode = p.container as t.CallExpression;
             if (
               t.isIdentifier(parentNode.callee) &&
-              parentNode.callee.name === "css"
+              parentNode.callee.name === "addPropTransaction"
             ) {
               return;
             }

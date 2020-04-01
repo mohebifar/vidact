@@ -22,9 +22,11 @@ export function propUpdater(
       }
     }
 
-    const statementsToExecuteSorted = Array.from(dependenciesToExecute)
-      .sort()
-      .forEach(id => dependencies[id]());
+    Array.from(dependenciesToExecute)
+      .sort((a, b) => (a > b ? 1 : -1))
+      .forEach(id => {
+        dependencies[id]();
+      });
 
     if (propTransactionContainer) {
       propTransactionContainer.forEach((newProps, instance) => {

@@ -55,7 +55,7 @@ export function transformNode(
   definition: NodeElementDefinition,
   state: ComponentState
 ) {
-  state.moduleDependencies.add("createElement");
+  state.moduleDependencies.add("createNativeDom");
   const result: t.Node[] = createCreateElement(definition, state);
 
   if (definition.children.length > 0) {
@@ -70,7 +70,7 @@ export function transformText(
   definition: TextElementDefenition,
   state: ComponentState
 ) {
-  state.moduleDependencies.add("createText");
+  state.moduleDependencies.add("createNativeDom");
   const variableDeclarator = t.variableDeclarator(
     definition.identifier,
     createCreateTextNode(definition.value)
@@ -84,7 +84,7 @@ export function transformExpression(
   definition: ExpressionElementDefenition,
   state: ComponentState
 ) {
-  state.moduleDependencies.add("createText");
+  state.moduleDependencies.add("createNativeDom");
   state.moduleDependencies.add("setContent");
   const updateFunctionIdentifier = t.identifier(
     definition.identifier.name + ELEMENT_UPDATER_SUFFIX
@@ -113,9 +113,9 @@ export function transformExpression(
     t.expressionStatement(
       t.assignmentExpression(
         "=",
-        definition.identifier,
+        t.memberExpression(definition.identifier, t.identifier(KEY_ELEMENT)),
         t.callExpression(t.identifier("setContent"), [
-          definition.identifier,
+          t.memberExpression(definition.identifier, t.identifier(KEY_ELEMENT)),
           expression
         ])
       )
@@ -142,21 +142,26 @@ function createCreateNativeElement(
   definition: NodeElementDefinition,
   state: ComponentState
 ): t.Node[] {
-  const attributeSet = createNativeSetAttribute(definition, state);
+  const [updateAttrStatements, init] = createComponentSetAttribute(
+    definition,
+    definition.identifier,
+    state
+  );
 
   return [
     t.variableDeclaration("let", [
       t.variableDeclarator(
         definition.identifier,
         t.callExpression(t.identifier("createElement"), [
-          t.stringLiteral(definition.tag)
-        ])
+          t.stringLiteral(definition.tag),
+          init
+        ].filter(Boolean))
       )
     ]),
-    ...attributeSet
+    ...updateAttrStatements
   ];
 }
-
+/*
 function createNativeSetAttribute(
   definition: NodeElementDefinition,
   state: ComponentState
@@ -166,7 +171,7 @@ function createNativeSetAttribute(
   }
 
   const attributeSet: t.Node[] = [];
-  state.moduleDependencies.add("setProperty");
+  // state.moduleDependencies.add("setProperty");
 
   for (const attr of definition.attributes) {
     if (!t.isJSXAttribute(attr)) {
@@ -194,6 +199,7 @@ function createNativeSetAttribute(
 
   return attributeSet;
 }
+*/
 
 function createCreateComponentElement(
   definition: NodeElementDefinition,
@@ -205,7 +211,6 @@ function createCreateComponentElement(
     elInstanceId,
     state
   );
-  console.log(t.identifier(definition.tag), init);
   const callExpression = t.callExpression(
     t.identifier(definition.tag),
     init ? [init] : [t.objectExpression([])]

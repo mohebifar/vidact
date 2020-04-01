@@ -4,12 +4,10 @@ import * as t from "@babel/types";
 
 const runtimeModules = <const>[
   "propUpdater",
-  "createText",
-  "createElement",
+  "createNativeDom",
   "append",
   "setContent",
   "consolidateExecuters",
-  "setProperty",
   "addPropTransaction"
 ];
 
@@ -24,6 +22,7 @@ function getInlineRuntime() {
   }
 
   inlineFiles = new Map<string, any>();
+
   for (const module of runtimeModules) {
     const code = fs
       .readFileSync(`${__dirname}/../../src/runtime/${module}.js`)
@@ -32,6 +31,9 @@ function getInlineRuntime() {
     traverse(ast, {
       ExportNamedDeclaration(path) {
         path.replaceWith(path.node.declaration);
+      },
+      ImportDeclaration(path) {
+        path.remove();
       }
     });
     inlineFiles.set(module, ast);

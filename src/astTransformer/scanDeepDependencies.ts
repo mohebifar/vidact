@@ -43,6 +43,21 @@ export function scanForDeepDependencies(
     const exportedNames = allExportedUpdaters.map(name =>
       t.identifier(getUpdaterArrayName(name))
     );
+    if (
+      oldInit.type === "ArrowFunctionExpression" &&
+      oldInit.body.type === "BlockStatement"
+    ) {
+      oldInit.body.body.unshift(
+        ...exportedNames.map(name =>
+          t.expressionStatement(
+            t.callExpression(t.memberExpression(name, t.identifier("splice")), [
+              t.numericLiteral(0),
+              t.memberExpression(name, t.identifier("length"))
+            ])
+          )
+        )
+      );
+    }
     declarator.get("init").replaceWith(
       t.callExpression(
         t.arrowFunctionExpression(

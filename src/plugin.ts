@@ -27,6 +27,7 @@ import {
   createStateDefinition
 } from "./astGenerator/createStateDefinition";
 import { PROP_VAR_TRANSACTION_VAR } from "./constants";
+import { declarationToAssigment } from "./astTransformer/declarationToAssignment";
 
 export interface ComponentState {
   moduleDependencies: RuntimeModuleSet;
@@ -35,6 +36,7 @@ export interface ComponentState {
   variableStatementDependencyManager: VariableStatementDependencyManager;
   variablesWithDependencies: Set<string>;
   needsPropTransaction: boolean;
+  looseAssignments: Set<NodePath<t.VariableDeclaration>>;
 }
 
 export interface JSXState {
@@ -56,8 +58,9 @@ function visitFunction(
 
   const variableStatementDependencyManager = new VariableStatementDependencyManager();
   const state: ComponentState = {
-    variablesWithDependencies: new Set<string>(),
+    variablesWithDependencies: new Set(),
     needsPropTransaction: false,
+    looseAssignments: new Set(),
     state: [],
     variableStatementDependencyManager,
     moduleDependencies
@@ -87,6 +90,10 @@ function visitFunction(
       )
     );
   }
+
+  state.looseAssignments.forEach(path => {
+    declarationToAssigment(path);
+  });
 
   for (const statementPath of variableStatementDependencyManager.statements.values()) {
     const [updater, callUpdater] = createStatementUpdater(

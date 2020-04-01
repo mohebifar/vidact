@@ -2,6 +2,7 @@ export const PROP_VAR = "__internal_props";
 export const STATE_VAR = "__internal_state";
 export const KEY_ELEMENT = "element";
 export const KEY_PROP_UPDATER = "updateProps";
+export const KEY_TYPE = "type";
 export const KEY_STATE_UPDATER = "updateState";
 export const STATEMENT_EXECUTER_VAR = "executer";
 export const ELEMENT_VAR = "el_";
