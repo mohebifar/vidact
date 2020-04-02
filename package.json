@@ -6,7 +6,7 @@
   "scripts": {
     "build:watch": "tsc -w -p tsconfig.release.json",
     "build": "tsc -p tsconfig.release.json",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest"
   },
   "author": "Mohamad Mohebifar <mohamad@mohebifar.com>",
   "license": "MIT",
@@ -21,7 +21,10 @@
     "@babel/template": "^7.8.6",
     "@types/babel-core": "^6.25.6",
     "@types/babel__core": "^7.1.5",
+    "@types/jest": "^25.1.4",
     "@types/node": "^13.7.4",
+    "jest": "^25.2.4",
+    "ts-jest": "^25.3.0",
     "ts-node": "^8.6.2",
     "tslib": "^1.11.1",
     "typescript": "^3.7.5"
