@@ -1,16 +1,13 @@
 import * as t from "@babel/types";
 import { NodePath } from "@babel/core";
 
-import VariableStatementDependencyManager, {
-  DependencyDescriptor
-} from "../utils/VariableStatementDependencyManager";
 import getStatementUpdaterIdentifier from "../astExplorer/getStatementUpdaterIdentifier";
+import { DependencyDescriptor } from "../utils/VariableStatementDependencyManager";
 import { ComponentState } from "../plugin";
 
 import { PROP_VAR, STATE_VAR, PROP_VAR_TRANSACTION_VAR } from "../constants";
 
 export function createUpdatableUpdater(
-  variableStatementDependencyManager: VariableStatementDependencyManager,
   path: NodePath<t.BlockStatement>,
   state: ComponentState,
   type: "prop" | "state" = "prop"
@@ -18,6 +15,7 @@ export function createUpdatableUpdater(
   const isStateUpdater = type === "state";
   const containerVar = isStateUpdater ? STATE_VAR : PROP_VAR;
   const statementNamesMap = new Map<string, string>();
+  const { variableStatementDependencyManager } = state;
   const { statements, variables } = variableStatementDependencyManager;
 
   for (const [key, statement] of statements.entries()) {
@@ -105,12 +103,12 @@ export function createUpdatableUpdater(
   return t.callExpression(
     t.identifier("propUpdater"),
     [
-      t.identifier(containerVar),
-      dependencies,
-      propDependenciesMap,
-      isStateUpdater ? t.booleanLiteral(false) : t.booleanLiteral(true)
+      t.identifier(containerVar), // old props
+      dependencies, // dependencies
+      propDependenciesMap, // propDependency
+      isStateUpdater ? t.booleanLiteral(false) : t.booleanLiteral(true) // shallowEqual
     ].concat(
-      state.needsPropTransaction ? [t.identifier(PROP_VAR_TRANSACTION_VAR)] : []
+      state.needsPropTransaction ? [t.identifier(PROP_VAR_TRANSACTION_VAR)] : [] // propTransactionContainer
     )
   );
 }

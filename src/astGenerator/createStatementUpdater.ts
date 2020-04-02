@@ -8,8 +8,7 @@ export function createStatementUpdater(
   scope: Scope | t.Identifier,
   name = STATEMENT_EXECUTER_VAR
 ) {
-  const uid =
-    scope instanceof Scope ? scope.generateUidIdentifier(name) : scope;
+  const uid = t.isIdentifier(scope) ? scope : scope.generateUidIdentifier(name);
   const node = "node" in statement ? statement.node : statement;
   const block = t.isBlockStatement(node)
     ? node

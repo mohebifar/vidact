@@ -207,7 +207,6 @@ function visitFunction(
   const componentElement = createComponentElement(
     returnValue,
     createUpdatableUpdater(
-      variableStatementDependencyManager,
       fnPath.get("body"),
       state,
       "prop"
@@ -235,7 +234,6 @@ function visitFunction(
   if (state.state && state.state.length > 0) {
     const [internalStateDeclaration, defineUpdater] = createStateDefinition(
       state,
-      variableStatementDependencyManager,
       fnPath
     );
 
