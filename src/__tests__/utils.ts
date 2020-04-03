@@ -8,11 +8,15 @@ export function createNodePath<T extends t.Node>(node: T) {
   return path;
 }
 
-export function getNodePathForType(node: t.Node, type: t.Node["type"]) {
-  const paths: NodePath[] = [];
+export function getNodePathForType<
+  Type extends t.Node["type"],
+  NodeType = Extract<t.Node, { type: Type }>,
+  NodePathType = NodePath<NodeType>
+>(node: t.Node, type: Type) {
+  const paths: NodePathType[] = [];
 
   traverse(node, {
-    [type]: (path: NodePath) => {
+    [type]: (path: NodePathType) => {
       paths.push(path);
     }
   });

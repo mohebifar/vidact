@@ -4,7 +4,6 @@ import generate from "@babel/generator";
 import { getNodePathForType, parseJSX } from "../../__tests__/utils";
 import { createStateDefinition } from "../createStateDefinition";
 import { ComponentState } from "../../plugin";
-import { NodePath } from "@babel/core";
 import VariableStatementDependencyManager from "../../utils/VariableStatementDependencyManager";
 
 describe("createStateDefinition", () => {
@@ -18,9 +17,7 @@ describe("createStateDefinition", () => {
       ]
     });
     const ast = parseJSX("function MyComponent() {}");
-    const [fnPath] = getNodePathForType(ast, "FunctionDeclaration") as NodePath<
-      t.FunctionDeclaration
-    >[];
+    const [fnPath] = getNodePathForType(ast, "FunctionDeclaration");
 
     const [stateDeclarator] = createStateDefinition(state, fnPath);
     expect(generate(stateDeclarator).code).toStrictEqual(
@@ -43,9 +40,7 @@ describe("createStateDefinition", () => {
       ]
     });
     const ast = parseJSX("function MyComponent() {}");
-    const [fnPath] = getNodePathForType(ast, "FunctionDeclaration") as NodePath<
-      t.FunctionDeclaration
-    >[];
+    const [fnPath] = getNodePathForType(ast, "FunctionDeclaration");
 
     const [stateDeclarator] = createStateDefinition(state, fnPath);
     expect(generate(stateDeclarator).code).toStrictEqual(
@@ -56,9 +51,7 @@ describe("createStateDefinition", () => {
   it("returns a stateUpdater function using propUpdater", () => {
     const state = makeState();
     const ast = parseJSX("function MyComponent() {}");
-    const [fnPath] = getNodePathForType(ast, "FunctionDeclaration") as NodePath<
-      t.FunctionDeclaration
-    >[];
+    const [fnPath] = getNodePathForType(ast, "FunctionDeclaration");
 
     const [, stateUpdater] = createStateDefinition(state, fnPath);
     expect(generate(stateUpdater).code).toStrictEqual(

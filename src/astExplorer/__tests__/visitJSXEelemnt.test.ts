@@ -36,11 +36,7 @@ describe("shallowTraverseJSXElement", () => {
         elements: [],
         moduleDependencies: new Set()
       };
-      const id = shallowTraverseJSXElement(
-        path.node as t.JSXText,
-        state,
-        path.scope
-      );
+      const id = shallowTraverseJSXElement(path.node, state, path.scope);
 
       expect(id).toMatchObject(t.identifier("_el_"));
       expect(state.elements).toContainEqual({
@@ -60,11 +56,7 @@ describe("shallowTraverseJSXElement", () => {
         elements: [],
         moduleDependencies: new Set()
       };
-      const id = shallowTraverseJSXElement(
-        path.node as t.JSXText,
-        state,
-        path.scope
-      );
+      const id = shallowTraverseJSXElement(path.node, state, path.scope);
 
       expect(id).toMatchObject(t.identifier("_el_"));
       expect(state.elements).toContainEqual({
@@ -84,11 +76,7 @@ describe("shallowTraverseJSXElement", () => {
         elements: [],
         moduleDependencies: new Set()
       };
-      const id = shallowTraverseJSXElement(
-        path.node as t.JSXText,
-        state,
-        path.scope
-      );
+      const id = shallowTraverseJSXElement(path.node, state, path.scope);
 
       expect(id).toMatchObject(t.identifier("_el_"));
       expect(state.elements).toContainEqual({
@@ -114,11 +102,7 @@ describe("shallowTraverseJSXElement", () => {
         elements: [],
         moduleDependencies: new Set()
       };
-      const id = shallowTraverseJSXElement(
-        path.node as t.JSXText,
-        state,
-        path.scope
-      );
+      const id = shallowTraverseJSXElement(path.node, state, path.scope);
 
       expect(id).toMatchObject(t.identifier("_el_"));
       expect(state.elements).toContainEqual({
@@ -146,11 +130,7 @@ describe("shallowTraverseJSXElement", () => {
         elements: [],
         moduleDependencies: new Set()
       };
-      const id = shallowTraverseJSXElement(
-        path.node as t.JSXText,
-        state,
-        path.scope
-      );
+      const id = shallowTraverseJSXElement(path.node, state, path.scope);
 
       expect(id).toMatchObject(t.identifier("_el_"));
       expect(state.elements).toContainEqual({
