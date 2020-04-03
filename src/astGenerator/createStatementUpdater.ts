@@ -7,7 +7,7 @@ export function createStatementUpdater(
   statement: NodePath | t.Statement,
   scope: Scope | t.Identifier,
   name = STATEMENT_EXECUTER_VAR
-) {
+): [t.VariableDeclaration, t.ExpressionStatement, t.Identifier] {
   const uid = t.isIdentifier(scope) ? scope : scope.generateUidIdentifier(name);
   const node = "node" in statement ? statement.node : statement;
   const block = t.isBlockStatement(node)
