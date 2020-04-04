@@ -21,16 +21,6 @@ export const createElement = (tag, props) => {
   }
 };
 
-export function createText(text = "") {
-  const element = document.createTextNode(text || "");
-
-  return {
-    element,
-    type: Text,
-    native: true
-  };
-}
-
 function setProperty(element, name, newProps, oldProps) {
   const value = newProps[name];
   let oldValue = oldProps[name];

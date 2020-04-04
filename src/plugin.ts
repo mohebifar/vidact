@@ -22,12 +22,12 @@ import VariableStatementDependencyManager from "./utils/VariableStatementDepende
 import { RuntimeModuleSet, getModuleDeclarations } from "./utils/inlineRuntime";
 import { scanUpdatableValues } from "./astTransformer/scanUpdatableValues";
 import { scanForDeepDependencies } from "./astTransformer/scanDeepDependencies";
+import { declarationToAssignment } from "./astTransformer/declarationToAssignment";
 import {
   InternalStateRecord,
   createStateDefinition
 } from "./astGenerator/createStateDefinition";
 import { PROP_VAR_TRANSACTION_VAR } from "./constants";
-import { declarationToAssigment } from "./astTransformer/declarationToAssignment";
 
 export interface ComponentState {
   moduleDependencies: RuntimeModuleSet;
@@ -46,6 +46,10 @@ export interface JSXState {
 
 interface ProgramState {
   moduleDependencies: RuntimeModuleSet;
+}
+
+interface PluginState {
+  opts: { runtime?: "inline" | "module" };
 }
 
 function visitFunction(
@@ -92,7 +96,7 @@ function visitFunction(
   }
 
   state.looseAssignments.forEach(path => {
-    declarationToAssigment(path);
+    declarationToAssignment(path);
   });
 
   for (const statementPath of variableStatementDependencyManager.statements.values()) {
@@ -206,11 +210,7 @@ function visitFunction(
 
   const componentElement = createComponentElement(
     returnValue,
-    createUpdatableUpdater(
-      fnPath.get("body"),
-      state,
-      "prop"
-    )
+    createUpdatableUpdater(fnPath.get("body"), state, "prop")
   );
 
   state.moduleDependencies.add("propUpdater");
@@ -245,14 +245,18 @@ function visitFunction(
 }
 
 export default function() {
-  const visitor: Visitor<any> = {
-    Program(path) {
+  const visitor: Visitor<PluginState> = {
+    Program(path, { opts: { runtime = "module" } }) {
       const state: ProgramState = {
         moduleDependencies: new Set()
       };
 
+      path.stop();
       path.traverse({ FunctionDeclaration: visitFunction }, state);
-      const declarations = getModuleDeclarations(state.moduleDependencies);
+      const declarations = getModuleDeclarations(
+        state.moduleDependencies,
+        runtime
+      );
       path.unshiftContainer("body", declarations);
     }
   };

@@ -1,4 +1,4 @@
-import { createText } from "./createNativeDom";
+import { createText } from "./createText";
 
 export function setContent(element, content) {
   const isCurrentElementText = element instanceof Text;

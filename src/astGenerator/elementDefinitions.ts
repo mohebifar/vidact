@@ -5,7 +5,7 @@ import {
   KEY_ELEMENT,
   KEY_PROP_UPDATER,
   ELEMENT_UPDATER_SUFFIX,
-  PROP_VAR_TRANSACTION_VAR
+  PROP_VAR_TRANSACTION_VAR,
 } from "../constants";
 import { createStatementUpdater } from "./createStatementUpdater";
 
@@ -38,7 +38,7 @@ export type ElementDefenition =
 export const transformerMap = {
   text: transformText,
   node: transformNode,
-  expr: transformExpression
+  expr: transformExpression,
 };
 
 export function createComponentElement(
@@ -47,7 +47,7 @@ export function createComponentElement(
 ) {
   return t.objectExpression([
     t.objectProperty(t.identifier(KEY_ELEMENT), elementName),
-    t.objectProperty(t.identifier(KEY_PROP_UPDATER), propUpdater)
+    t.objectProperty(t.identifier(KEY_PROP_UPDATER), propUpdater),
   ]);
 }
 
@@ -55,7 +55,7 @@ export function transformNode(
   definition: NodeElementDefinition,
   state: ComponentState
 ) {
-  state.moduleDependencies.add("createNativeDom");
+  state.moduleDependencies.add("createElement");
   const result: t.Node[] = createCreateElement(definition, state);
 
   if (definition.children.length > 0) {
@@ -70,7 +70,7 @@ export function transformText(
   definition: TextElementDefenition,
   state: ComponentState
 ) {
-  state.moduleDependencies.add("createNativeDom");
+  state.moduleDependencies.add("createText");
   const variableDeclarator = t.variableDeclarator(
     definition.identifier,
     createCreateTextNode(definition.value)
@@ -84,16 +84,16 @@ export function transformExpression(
   definition: ExpressionElementDefenition,
   state: ComponentState
 ) {
-  state.moduleDependencies.add("createNativeDom");
+  state.moduleDependencies.add("createText");
   state.moduleDependencies.add("setContent");
   const updateFunctionIdentifier = t.identifier(
     definition.identifier.name + ELEMENT_UPDATER_SUFFIX
   );
   const elementDeclarator = t.variableDeclaration("let", [
-    t.variableDeclarator(definition.identifier)
+    t.variableDeclarator(definition.identifier),
   ]);
   const expression = definition.expression as t.Expression;
-  t.traverse(expression, node => {
+  t.traverse(expression, (node) => {
     if (t.isArrowFunctionExpression(node) && !t.isBlockStatement(node.body)) {
       node.body = t.blockStatement([t.returnStatement(node.body)]);
     }
@@ -116,10 +116,10 @@ export function transformExpression(
         t.memberExpression(definition.identifier, t.identifier(KEY_ELEMENT)),
         t.callExpression(t.identifier("setContent"), [
           t.memberExpression(definition.identifier, t.identifier(KEY_ELEMENT)),
-          expression
+          expression,
         ])
       )
-    )
+    ),
   ]);
   const [updater, callUpdater] = createStatementUpdater(
     block,
@@ -142,7 +142,7 @@ function createCreateNativeElement(
   definition: NodeElementDefinition,
   state: ComponentState
 ): t.Node[] {
-  const [updateAttrStatements, init] = createComponentSetAttribute(
+  const [updateAttrStatements, init] = createSetAttribute(
     definition,
     definition.identifier,
     state
@@ -152,61 +152,22 @@ function createCreateNativeElement(
     t.variableDeclaration("let", [
       t.variableDeclarator(
         definition.identifier,
-        t.callExpression(t.identifier("createElement"), [
-          t.stringLiteral(definition.tag),
-          init
-        ].filter(Boolean))
-      )
+        t.callExpression(
+          t.identifier("createElement"),
+          [t.stringLiteral(definition.tag), init].filter(Boolean)
+        )
+      ),
     ]),
-    ...updateAttrStatements
+    ...updateAttrStatements,
   ];
 }
-/*
-function createNativeSetAttribute(
-  definition: NodeElementDefinition,
-  state: ComponentState
-): t.Node[] {
-  if (!definition.attributes || definition.attributes.length === 0) {
-    return [];
-  }
-
-  const attributeSet: t.Node[] = [];
-  // state.moduleDependencies.add("setProperty");
-
-  for (const attr of definition.attributes) {
-    if (!t.isJSXAttribute(attr)) {
-      continue;
-    }
-
-    const propName = attr.name.name as string;
-    const value: t.Expression =
-      (t.isStringLiteral(attr.value) && attr.value) ||
-      (t.isJSXExpressionContainer(attr.value) &&
-        !t.isJSXEmptyExpression(attr.value.expression) &&
-        attr.value.expression) ||
-      t.booleanLiteral(true);
-
-    attributeSet.push(
-      t.expressionStatement(
-        t.callExpression(t.identifier("setProperty"), [
-          definition.identifier,
-          t.stringLiteral(propName),
-          value
-        ])
-      )
-    );
-  }
-
-  return attributeSet;
-}
-*/
 
 function createCreateComponentElement(
   definition: NodeElementDefinition,
   state: ComponentState
 ): t.Node[] {
   const elInstanceId = t.identifier(definition.identifier.name + "_instance");
-  const [updateAttrStatements, init] = createComponentSetAttribute(
+  const [updateAttrStatements, init] = createSetAttribute(
     definition,
     elInstanceId,
     state
@@ -223,12 +184,12 @@ function createCreateComponentElement(
   );
   const elementDeclaration = t.variableDeclaration("let", [
     instanceDeclarator,
-    elementDeclarator
+    elementDeclarator,
   ]);
   return [elementDeclaration, ...updateAttrStatements];
 }
 
-function createComponentSetAttribute(
+function createSetAttribute(
   definition: NodeElementDefinition,
   instanceId: t.Identifier,
   state: ComponentState
@@ -270,7 +231,7 @@ function createComponentSetAttribute(
           t.identifier(PROP_VAR_TRANSACTION_VAR),
           instanceId,
           t.stringLiteral(propId.name),
-          value
+          value,
         ])
       )
     );

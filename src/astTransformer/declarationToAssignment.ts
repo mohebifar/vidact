@@ -1,11 +1,13 @@
 import { NodePath } from "@babel/core";
 import * as t from "@babel/types";
 
-export function declarationToAssigment(path: NodePath<t.VariableDeclaration>) {
+export function declarationToAssignment(path: NodePath<t.VariableDeclaration>) {
   const declarator = path.get("declarations")[0];
   const { id, init } = declarator.node;
   path.replaceWith(
-    t.assignmentExpression("=", id, init || t.identifier("undefined"))
+    t.expressionStatement(
+      t.assignmentExpression("=", id, init || t.identifier("undefined"))
+    )
   );
 
   let ids: string[];
@@ -15,7 +17,10 @@ export function declarationToAssigment(path: NodePath<t.VariableDeclaration>) {
     declarator.get("id").traverse(
       {
         Identifier(idPath, state) {
-          state.push(idPath.node.name);
+          const { name } = idPath.node;
+          if (!state.includes(name)) {
+            state.push(name);
+          }
         }
       },
       (ids = [])
