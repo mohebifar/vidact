@@ -42,7 +42,7 @@ export function createUpdatableUpdater(
   function getDependencies(
     dependencies: DependencyDescriptor[]
   ): DependencyDescriptor[] {
-    return dependencies.flatMap(dependency => {
+    return dependencies.flatMap((dependency) => {
       if (dependency.type === "local") {
         const searchKey = `local,${dependency.value}`;
         return searchKey && getDependencies(variables.get(searchKey));
@@ -55,7 +55,7 @@ export function createUpdatableUpdater(
   const getUniqDependencyNames = (dependencies: DependencyDescriptor[]) =>
     Array.from(
       new Set(
-        getDependencies(dependencies).map(dep =>
+        getDependencies(dependencies).map((dep) =>
           statementNamesMap.get(dep.value)
         )
       )
@@ -66,8 +66,8 @@ export function createUpdatableUpdater(
     statementNamesSorted: string[]
   ) =>
     getUniqDependencyNames(dependencies)
-      .map(name => statementNamesSorted.indexOf(name))
-      .map(value => {
+      .map((name) => statementNamesSorted.indexOf(name))
+      .map((value) => {
         const node = t.numericLiteral(value);
         t.addComment(node, "trailing", statementNamesSorted[value], false);
         return node;
@@ -81,13 +81,17 @@ export function createUpdatableUpdater(
     getUniqDependencyNames(dependencies)
   );
 
-  const usedStatementNamesSorted = statementNamesSorted.filter(name =>
+  const usedStatementNamesSorted = statementNamesSorted.filter((name) =>
     usedStatementNames.includes(name)
   );
 
   const dependencies = t.arrayExpression(
-    usedStatementNamesSorted.map(name => t.identifier(name))
+    usedStatementNamesSorted.map((name) => t.identifier(name))
   );
+
+  if (propDependencies.length === 0) {
+    return t.arrowFunctionExpression([], t.blockStatement([]));
+  }
 
   const propDependenciesMap = t.arrayExpression(
     propDependencies.map(([[, key], dependencies]) => {
@@ -95,7 +99,7 @@ export function createUpdatableUpdater(
         t.stringLiteral(key),
         t.arrayExpression(
           getDependencyIds(dependencies, usedStatementNamesSorted)
-        )
+        ),
       ]);
     })
   );
@@ -106,7 +110,7 @@ export function createUpdatableUpdater(
       t.identifier(containerVar), // old props
       dependencies, // dependencies
       propDependenciesMap, // propDependency
-      isStateUpdater ? t.booleanLiteral(false) : t.booleanLiteral(true) // shallowEqual
+      isStateUpdater ? t.booleanLiteral(false) : t.booleanLiteral(true), // shallowEqual
     ].concat(
       state.needsPropTransaction ? [t.identifier(PROP_VAR_TRANSACTION_VAR)] : [] // propTransactionContainer
     )
