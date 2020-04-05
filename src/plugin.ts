@@ -10,7 +10,7 @@ import { isComponent } from "./astExplorer/isComponent";
 import {
   createComponentElement,
   ElementDefenition,
-  transformerMap
+  transformerMap,
 } from "./astGenerator/elementDefinitions";
 import { createUpdatableUpdater } from "./astGenerator/createUpdatableUpdater";
 import { createStatementUpdater } from "./astGenerator/createStatementUpdater";
@@ -19,13 +19,13 @@ import { separateVariableDeclarations } from "./astTransformer/separateVariableD
 import { normalizeObjectPatternAssignment } from "./astTransformer/normalizeObjectPatternAssignment";
 import VariableStatementDependencyManager from "./utils/VariableStatementDependencyManager";
 
-import { RuntimeModuleSet, getModuleDeclarations } from "./utils/inlineRuntime";
+import { RuntimeModuleSet, getModuleDeclarations } from "./utils/runtimeHelpers";
 import { scanUpdatableValues } from "./astTransformer/scanUpdatableValues";
 import { scanForDeepDependencies } from "./astTransformer/scanDeepDependencies";
 import { declarationToAssignment } from "./astTransformer/declarationToAssignment";
 import {
   InternalStateRecord,
-  createStateDefinition
+  createStateDefinition,
 } from "./astGenerator/createStateDefinition";
 import { PROP_VAR_TRANSACTION_VAR } from "./constants";
 
@@ -67,7 +67,7 @@ function visitFunction(
     looseAssignments: new Set(),
     state: [],
     variableStatementDependencyManager,
-    moduleDependencies
+    moduleDependencies,
   };
 
   // Separate variable declarations with multiple declarators
@@ -88,14 +88,14 @@ function visitFunction(
       "body",
       t.variableDeclaration(
         "let",
-        Array.from(state.variablesWithDependencies).map(name =>
+        Array.from(state.variablesWithDependencies).map((name) =>
           t.variableDeclarator(t.identifier(name))
         )
       )
     );
   }
 
-  state.looseAssignments.forEach(path => {
+  state.looseAssignments.forEach((path) => {
     declarationToAssignment(path);
   });
 
@@ -117,13 +117,13 @@ function visitFunction(
     JSXElement(path) {
       const jsxState: JSXState = {
         elements: [],
-        moduleDependencies
+        moduleDependencies,
       };
 
       const name = shallowTraverseJSXElement(path.node, jsxState, path.scope);
       names.push(name);
 
-      jsxState.elements.forEach(definition => {
+      jsxState.elements.forEach((definition) => {
         const nodePaths: NodePath[] = [];
         const nodes = transformerMap[definition.type](definition as any, state);
 
@@ -203,7 +203,7 @@ function visitFunction(
       } else {
         path.replaceWith(name);
       }
-    }
+    },
   });
 
   fnPath.traverse({ VariableDeclaration: scanForDeepDependencies }, state);
@@ -226,7 +226,7 @@ function visitFunction(
           t.variableDeclarator(
             t.identifier(PROP_VAR_TRANSACTION_VAR),
             t.newExpression(t.identifier("Map"), [])
-          )
+          ),
         ])
       );
   }
@@ -244,11 +244,11 @@ function visitFunction(
   fnPath.skip();
 }
 
-export default function() {
+export default function () {
   const visitor: Visitor<PluginState> = {
     Program(path, { opts: { runtime = "module" } }) {
       const state: ProgramState = {
-        moduleDependencies: new Set()
+        moduleDependencies: new Set(),
       };
 
       path.stop();
@@ -257,13 +257,14 @@ export default function() {
         state.moduleDependencies,
         runtime
       );
+
       path.unshiftContainer("body", declarations);
-    }
+    },
   };
 
   return {
     name: "carrot",
     inherits: require("@babel/plugin-syntax-jsx").default,
-    visitor
+    visitor,
   };
 }

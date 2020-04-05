@@ -9,7 +9,7 @@ const runtimeModules = <const>[
   "append",
   "setContent",
   "consolidateExecuters",
-  "addPropTransaction"
+  "addPropTransaction",
 ];
 
 export type RuntimeModule = typeof runtimeModules[number];
@@ -17,7 +17,7 @@ export type RuntimeModuleSet = Set<RuntimeModule>;
 
 let inlineFiles: Map<string, ParseResult>;
 
-function getInlineRuntime() {
+function getInlineRuntimeHelpers() {
   if (inlineFiles) {
     return inlineFiles;
   }
@@ -35,7 +35,7 @@ function getInlineRuntime() {
       },
       ImportDeclaration(path) {
         path.remove();
-      }
+      },
     });
     inlineFiles.set(module, ast);
   }
@@ -47,21 +47,26 @@ export function getModuleDeclarations(
   set: RuntimeModuleSet,
   type: "inline" | "module"
 ): t.Node[] {
+  const modules = Array.from(set);
+  if (modules.length === 0) {
+    return [];
+  }
+
   if (type === "inline") {
-    const inlineModules = getInlineRuntime();
-    return Array.from(set).map(module => inlineModules.get(module));
+    const inlineModules = getInlineRuntimeHelpers();
+    return modules.map((module) => inlineModules.get(module));
   }
 
   return [
     t.addComment(
       t.importDeclaration(
-        Array.from(set).map(module =>
+        modules.map((module) =>
           t.importSpecifier(t.identifier(module), t.identifier(module))
         ),
-        t.stringLiteral("coroact/runtime")
+        t.stringLiteral("vidact/runtime")
       ),
       "trailing",
-      "--- Import Coroact Runtime Modules ---"
-    )
+      "--- Import Vidact Runtime Helpers ---"
+    ),
   ];
 }
