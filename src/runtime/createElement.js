@@ -10,7 +10,7 @@ export const createElement = (tag, props) => {
     element,
     type: Node,
     native: true,
-    updateProps
+    updateProps,
   };
 
   function updateProps(newProps) {
@@ -26,6 +26,8 @@ function setProperty(element, name, newProps, oldProps) {
   let oldValue = oldProps[name];
 
   if (name === "key" || name === "children") {
+  } else if (name === "ref") {
+    value.current = element;
   } else if (name === "style") {
     const s = element.style;
 
@@ -110,7 +112,7 @@ function setStyle(element, styles) {
     }
   });
 
-  _prevStyles.forEach(key => {
+  _prevStyles.forEach((key) => {
     elementStyle[key] = null;
   });
 

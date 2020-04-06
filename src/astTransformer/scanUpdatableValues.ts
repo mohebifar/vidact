@@ -7,7 +7,7 @@ import {
   PROP_VAR,
   STATE_VAR,
   KEY_STATE_UPDATER,
-  USE_STATE
+  USE_STATE,
 } from "../constants";
 import { declarationToAssignment } from "./declarationToAssignment";
 
@@ -27,6 +27,14 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
         const immediateStatement = objectReferencePath.findParent(
           findImmediateStatement
         );
+
+        const { leadingComments } = immediateStatement.node;
+        if (
+          leadingComments &&
+          leadingComments.some((v) => v.value.trim() === "@vidact-locked")
+        ) {
+          return;
+        }
 
         if (immediateStatement.isVariableDeclaration()) {
           // TODO: Check for object and array destruct
@@ -62,7 +70,7 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
                 );
                 scanDependees(objectReferencePath.scope, leftPath.node.name);
               }
-            }
+            },
           });
         }
       },
@@ -81,7 +89,7 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
         const tupleId = fnPath.scope.generateUidIdentifier("s");
 
         const declarations = statement.get("declarations");
-        const declarator = declarations.find(declarator => {
+        const declarator = declarations.find((declarator) => {
           const init = declarator.get("init");
           return init.node === callExpressionPath.node;
         });
@@ -97,10 +105,10 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
             t.expressionStatement(
               t.callExpression(t.identifier(KEY_STATE_UPDATER), [
                 t.objectExpression([
-                  t.objectProperty(tupleId, t.identifier("value"))
-                ])
+                  t.objectProperty(tupleId, t.identifier("value")),
+                ]),
               ])
-            )
+            ),
           ])
         );
 
@@ -120,7 +128,7 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
             .getStatementParent()
             .insertAfter(
               t.variableDeclaration("const", [
-                t.variableDeclarator(t.identifier(setterName), setterNode)
+                t.variableDeclarator(t.identifier(setterName), setterNode),
               ])
             );
 
@@ -137,11 +145,11 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
           state.state.push({
             originalName: valueName,
             name: tupleId,
-            initialValue
+            initialValue,
           });
           statement.remove();
         }
-      }
+      },
     },
     state
   );
@@ -149,7 +157,7 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
   function findImmediateStatement(s: NodePath) {
     return (
       s.parentPath.isBlockStatement() &&
-      s.parentPath.parentPath.isFunctionDeclaration()
+      s.parentPath.parentPath.node === fnPath.node
     );
   }
 
@@ -160,7 +168,7 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
 
     const binding = scope.getBinding(name);
 
-    Object.values(binding.referencePaths).forEach(n => {
+    Object.values(binding.referencePaths).forEach((n) => {
       const container = n.getStatementParent();
 
       const expression = container.isExpressionStatement()
@@ -177,7 +185,7 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
       }
 
       if (statement.isVariableDeclaration()) {
-        declarationToAssignment(statement).forEach(name =>
+        declarationToAssignment(statement).forEach((name) =>
           state.variablesWithDependencies.add(name)
         );
       }
@@ -207,7 +215,7 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
               );
               scanDependees(scope, leftPath.node.name);
             }
-          }
+          },
         });
 
         variableStatementDependencyManager.push(
