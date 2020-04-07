@@ -18,7 +18,6 @@ import { separateVariableDeclarations } from "./astTransformer/separateVariableD
 import { normalizeObjectPatternAssignment } from "./astTransformer/normalizeObjectPatternAssignment";
 import { normalizePropDefinition } from "./astTransformer/normalizePropDefinition";
 import { normalizeUseRef } from "./astTransformer/normalizeUseRef";
-import { normalizeUseEffect } from "./astTransformer/normalizeUseEffect";
 import VariableStatementDependencyManager from "./utils/VariableStatementDependencyManager";
 
 import {
@@ -34,6 +33,7 @@ import {
 } from "./astGenerator/createStateDefinition";
 import { PROP_VAR_TRANSACTION_VAR } from "./constants";
 import { hasAnnotation } from "./utils/annotations";
+import { scanHooks } from "./astTransformer/scanHooks";
 
 export interface ComponentState {
   moduleDependencies: RuntimeModuleSet;
@@ -90,8 +90,8 @@ function visitFunction(
   // Convert `useRef`s to {current} object style
   normalizeUseRef(fnPath);
 
-  // Convert `useEffect`s to proper updaters
-  normalizeUseEffect(fnPath, state);
+  // Convert `useEffect`, `useMemo`, and `useCallback` to proper updaters
+  scanHooks(fnPath, state);
 
   // Traverse all state and prop references
   scanUpdatableValues(fnPath, state);
