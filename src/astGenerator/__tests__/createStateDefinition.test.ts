@@ -12,9 +12,9 @@ describe("createStateDefinition", () => {
       state: [
         {
           name: t.identifier("myState"),
-          originalName: "myState"
-        }
-      ]
+          originalName: "myState",
+        },
+      ],
     });
     const ast = parseJSX("function MyComponent() {}");
     const [fnPath] = getNodePathForType(ast, "FunctionDeclaration");
@@ -35,9 +35,9 @@ describe("createStateDefinition", () => {
             "+",
             t.numericLiteral(2),
             t.numericLiteral(10)
-          )
-        }
-      ]
+          ),
+        },
+      ],
     });
     const ast = parseJSX("function MyComponent() {}");
     const [fnPath] = getNodePathForType(ast, "FunctionDeclaration");
@@ -68,6 +68,7 @@ function makeState(state: Partial<ComponentState> = {}): ComponentState {
     state: [],
     variableStatementDependencyManager: new VariableStatementDependencyManager(),
     moduleDependencies: new Set(),
-    ...state
+    finally: [],
+    ...state,
   };
 }

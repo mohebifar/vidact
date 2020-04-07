@@ -9,4 +9,6 @@ export const ELEMENT_VAR = "el_";
 export const ELEMENT_UPDATER_SUFFIX = "_update";
 export const USE_STATE = "useState";
 export const USE_REF = "useRef";
+export const USE_EFFECT = "useEffect";
 export const PROP_VAR_TRANSACTION_VAR = "__props_transactions";
+export const EFFECT_DEPENDENCY_VAR = "effectDepPrev";

@@ -7,6 +7,19 @@ import { ComponentState } from "../plugin";
 
 import { PROP_VAR, STATE_VAR, PROP_VAR_TRANSACTION_VAR } from "../constants";
 
+const isCallExpressionWithName = (o: t.Node, name: string) => {
+  if (t.isExpressionStatement(o) && t.isCallExpression(o.expression)) {
+    const callee = o.expression.callee;
+    return t.isIdentifier(callee) && callee.name === name;
+  }
+
+  return false;
+};
+
+const findCallee = (name: string) => (o: NodePath) => {
+  return isCallExpressionWithName(o.node, name);
+};
+
 export function createUpdatableUpdater(
   path: NodePath<t.BlockStatement>,
   state: ComponentState,
@@ -23,19 +36,27 @@ export function createUpdatableUpdater(
   }
 
   const statementNamesSorted = [...statementNamesMap.values()].sort((a, b) => {
-    const findCallee = (name: string) => (o: NodePath) => {
-      if (o.isExpressionStatement() && o.get("expression").isCallExpression()) {
-        const callee = o.get("expression").get("callee") as NodePath<
-          t.Expression
-        >;
-        if (callee.isIdentifier() && callee.node.name === name) {
-          return true;
-        }
+    let indexA = path.get("body").findIndex(findCallee(a));
+    let indexB = path.get("body").findIndex(findCallee(b));
+
+    if (indexA === -1) {
+      indexA = state.finally.findIndex((node) =>
+        isCallExpressionWithName(node, a)
+      );
+      if (indexA !== -1 && indexB >= 0) {
+        return 1;
       }
-      return false;
-    };
-    const indexA = path.get("body").findIndex(findCallee(a));
-    const indexB = path.get("body").findIndex(findCallee(b));
+    }
+
+    if (indexB === -1) {
+      indexB = state.finally.findIndex((node) =>
+        isCallExpressionWithName(node, b)
+      );
+      if (indexB !== -1 && indexA >= 0) {
+        return -1;
+      }
+    }
+
     return indexA > indexB ? 1 : -1;
   });
 

@@ -1,6 +1,7 @@
 import { NodePath } from "@babel/core";
 import * as t from "@babel/types";
 
+import { annotate } from "../utils/annotations";
 import { USE_REF } from "../constants";
 
 export function normalizeUseRef(functionPath: NodePath<t.FunctionDeclaration>) {
@@ -22,7 +23,7 @@ export function normalizeUseRef(functionPath: NodePath<t.FunctionDeclaration>) {
         t.objectExpression([t.objectProperty(t.identifier("current"), value)])
       );
       path.node.kind = "var";
-      path.addComment("leading", "@vidact-locked", true);
+      annotate(path, "locked");
     }
   }
 

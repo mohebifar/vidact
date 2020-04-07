@@ -10,6 +10,7 @@ import {
   USE_STATE,
 } from "../constants";
 import { declarationToAssignment } from "./declarationToAssignment";
+import { getAnnotations } from "../utils/annotations";
 
 export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
   const { variableStatementDependencyManager } = state;
@@ -28,11 +29,7 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
           findImmediateStatement
         );
 
-        const { leadingComments } = immediateStatement.node;
-        if (
-          leadingComments &&
-          leadingComments.some((v) => v.value.trim() === "@vidact-locked")
-        ) {
+        if (isStatementLocked(immediateStatement)) {
           return;
         }
 
@@ -177,6 +174,10 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
 
       const statement = n.findParent(findImmediateStatement);
 
+      if (isStatementLocked(statement)) {
+        return;
+      }
+
       let lVal: NodePath<t.LVal>;
       if (expression.isVariableDeclaration()) {
         lVal = expression.get("declarations")[0].get("id");
@@ -228,6 +229,10 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
     if (!skipDefinition) {
       const declaration = binding.path.findParent(findImmediateStatement);
 
+      if (isStatementLocked(declaration)) {
+        return;
+      }
+
       state.variablesWithDependencies.add(name);
       variableStatementDependencyManager.push(
         { type: "local", name },
@@ -242,4 +247,8 @@ export function scanUpdatableValues(fnPath: NodePath, state: ComponentState) {
       }
     }
   }
+}
+
+function isStatementLocked(statement: NodePath) {
+  return getAnnotations(statement.node).includes("locked");
 }

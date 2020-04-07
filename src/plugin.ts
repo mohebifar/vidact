@@ -14,9 +14,11 @@ import {
 } from "./astGenerator/elementDefinitions";
 import { createUpdatableUpdater } from "./astGenerator/createUpdatableUpdater";
 import { createStatementUpdater } from "./astGenerator/createStatementUpdater";
-import { normalizePropDefinition } from "./astTransformer/normalizePropDefinition";
 import { separateVariableDeclarations } from "./astTransformer/separateVariableDeclarations";
 import { normalizeObjectPatternAssignment } from "./astTransformer/normalizeObjectPatternAssignment";
+import { normalizePropDefinition } from "./astTransformer/normalizePropDefinition";
+import { normalizeUseRef } from "./astTransformer/normalizeUseRef";
+import { normalizeUseEffect } from "./astTransformer/normalizeUseEffect";
 import VariableStatementDependencyManager from "./utils/VariableStatementDependencyManager";
 
 import {
@@ -31,7 +33,7 @@ import {
   createStateDefinition,
 } from "./astGenerator/createStateDefinition";
 import { PROP_VAR_TRANSACTION_VAR } from "./constants";
-import { normalizeUseRef } from './astTransformer/normalizeUseRef';
+import { hasAnnotation } from "./utils/annotations";
 
 export interface ComponentState {
   moduleDependencies: RuntimeModuleSet;
@@ -41,6 +43,7 @@ export interface ComponentState {
   variablesWithDependencies: Set<string>;
   needsPropTransaction: boolean;
   looseAssignments: Set<NodePath<t.VariableDeclaration>>;
+  finally: t.Statement[];
 }
 
 export interface JSXState {
@@ -72,6 +75,7 @@ function visitFunction(
     state: [],
     variableStatementDependencyManager,
     moduleDependencies,
+    finally: [],
   };
 
   // Separate variable declarations with multiple declarators
@@ -85,6 +89,9 @@ function visitFunction(
 
   // Convert `useRef`s to {current} object style
   normalizeUseRef(fnPath);
+
+  // Convert `useEffect`s to proper updaters
+  normalizeUseEffect(fnPath, state);
 
   // Traverse all state and prop references
   scanUpdatableValues(fnPath, state);
@@ -107,13 +114,14 @@ function visitFunction(
   });
 
   for (const statementPath of variableStatementDependencyManager.statements.values()) {
-    const [updater, callUpdater] = createStatementUpdater(
-      statementPath,
-      fnPath.scope
-    );
-
-    statementPath.replaceWith(updater);
-    statementPath.insertAfter(callUpdater);
+    if (!hasAnnotation(statementPath.node, "useEffect")) {
+      const [updater, callUpdater] = createStatementUpdater(
+        statementPath,
+        fnPath.scope
+      );
+      statementPath.replaceWith(updater);
+      statementPath.insertAfter(callUpdater);
+    }
   }
 
   const names: t.Identifier[] = [];
@@ -221,9 +229,10 @@ function visitFunction(
   );
 
   state.moduleDependencies.add("propUpdater");
-  const returnPath = fnPath
+  const returnPath: NodePath<t.ReturnStatement> = fnPath
     .get("body")
     .pushContainer("body", t.returnStatement(componentElement))[0];
+
   if (state.needsPropTransaction) {
     fnPath
       .get("body")
@@ -246,6 +255,16 @@ function visitFunction(
 
     fnPath.get("body").unshiftContainer("body", internalStateDeclaration);
     returnPath.insertBefore(defineUpdater);
+  }
+
+  if (state.finally.length > 0) {
+    returnPath.replaceWith(
+      t.tryStatement(
+        t.blockStatement([returnPath.node]),
+        undefined,
+        t.blockStatement(state.finally)
+      )
+    );
   }
 
   fnPath.skip();
