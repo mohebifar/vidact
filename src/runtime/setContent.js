@@ -13,7 +13,7 @@ export function setContent(element, content) {
   }
 
   if (Array.isArray(content)) {
-    const normalizedElements = content.map(e =>
+    const normalizedElements = content.map((e) =>
       setContent(createText().element, e)
     );
 
@@ -48,7 +48,7 @@ export function setContent(element, content) {
     element.replaceWith(text);
     return text;
   } else {
-    element.textContent = content || "";
+    element.textContent = content || (content === 0 ? 0 : "");
     return element;
   }
 }
