@@ -1,3 +1,6 @@
+![Travis (.org)](https://img.shields.io/travis/mohebifar/vidact)
+![npm](https://img.shields.io/npm/v/vidact)
+
 # Vidact
 
 Vidact compiles your React source codes to VanillaJS code with **No Virtual DOM** ™️. It is similar to Svelte, but unlike [Svelte](https://svelte.dev/), Vidact does not introduce a new syntax. It takes in pure React-compatible JavaScript (JSX) and outputs plain JavaScript.
