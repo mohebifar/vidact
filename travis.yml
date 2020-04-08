@@ -1,0 +1,5 @@
+language: node_js
+node_js:
+- '13.2.0'
+script:
+- yarn test
