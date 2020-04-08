@@ -1,8 +1,18 @@
 # Vidact
 
-Vidact compiles your React source codes to VanillaJS code with **No Virtual DOM** ™️. It is similar to Svelte, but unlike [Svelte](https://svelte.dev/), Vidact is not a "language" and does not introduce a new syntax. It takes in pure JavaScript (or JSX to be accurate) and outputs JavaScript.
+Vidact compiles your React source codes to VanillaJS code with **No Virtual DOM** ™️. It is similar to Svelte, but unlike [Svelte](https://svelte.dev/), Vidact does not introduce a new syntax. It takes in pure JavaScript (JSX) and outputs JavaScript.
 
-It currently is in alpha phase and has known limitations. It does not fully comply with React's behaviour in some edge cases, and probably never will, but the goal is to get the behaviour as close as possible
+Vidact currently is in alpha phase and has known limitations. It does not fully comply with React's behaviour in some edge cases, and probably never will, but the goal is to get as close behaviour to React as possible. Also, it currently only supports functional components and does not support class components.
+
+## How does it work and how is it different from React?
+
+Vidact is a babel-plugin that scans your source code to find what parts of the UI need to be updated in response to a prop or state change and generates a plain JavaScript code that should have the same DOM result as the equivalent React code. Note that all of this is done in build time! Whereas React does the bulk of its work in runtime in the browser by leveraging Virtual DOMs to determine what needs to be updated in the actual DOM.
+
+## When should I use it instead of React?
+
+*Vidact is not currently ready to be used in production.*
+
+The goal is to have an alternative library for those who love React, but are looking for a more lightweight and high-performance implementation for smaller projects.
 
 # Roadmap
 
