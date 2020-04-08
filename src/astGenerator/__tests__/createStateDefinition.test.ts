@@ -48,14 +48,14 @@ describe("createStateDefinition", () => {
     );
   });
 
-  it("returns a stateUpdater function using propUpdater", () => {
+  it("returns a noop state updater when there is no dependencies", () => {
     const state = makeState();
     const ast = parseJSX("function MyComponent() {}");
     const [fnPath] = getNodePathForType(ast, "FunctionDeclaration");
 
     const [, stateUpdater] = createStateDefinition(state, fnPath);
     expect(generate(stateUpdater).code).toStrictEqual(
-      "const updateState = propUpdater(__internal_state, [], [], false);"
+      "const updateState = () => {};"
     );
   });
 });

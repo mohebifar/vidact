@@ -16,7 +16,6 @@
     "noImplicitAny": false,
     "noImplicitThis": false,
     "strictNullChecks": false,
-    "allowJs": true,
     "lib": ["ESNext"]
   },
   "include": ["src/**/*"],
