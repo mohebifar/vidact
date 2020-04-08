@@ -1,0 +1,21 @@
+body {
+  margin: 0;
+  font-family: "Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+  color: #222f3e;
+  line-height: 1.8;
+}
+
+:global(.repl-heading) {
+  margin: 0;
+  padding: 10px;
+  font-size: 1em;
+  border-bottom: 1px dashed #efefef;
+  color: #341f97;
+}
+
+h1,
+h2,
+h3 {
+  color: #5f27cd;
+}

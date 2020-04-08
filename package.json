@@ -1,8 +1,8 @@
 {
-  "name": "carrot",
+  "name": "vidact",
   "version": "0.0.0-alpha",
-  "description": "",
-  "main": "index.js",
+  "description": "A compiler that converts React-compatible codes to VanillaJS with no Virtual DOM",
+  "main": "build/index.js",
   "scripts": {
     "build:watch": "tsc -w -p tsconfig.release.json",
     "build": "tsc -p tsconfig.release.json",
@@ -10,6 +10,9 @@
   },
   "author": "Mohamad Mohebifar <mohamad@mohebifar.com>",
   "license": "MIT",
+  "files": [
+    "build"
+  ],
   "dependencies": {
     "@babel/core": "^7.8.4",
     "@babel/generator": "^7.8.4",

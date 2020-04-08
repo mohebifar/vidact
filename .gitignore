@@ -1,6 +1,7 @@
 node_modules
 .DS_Store
 .vscode
+example
 
 # Build
 build
@@ -12,3 +13,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
+
+# Docs
+docs/dist

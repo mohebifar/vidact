@@ -1,0 +1,59 @@
+.jsOutput {
+  counter-reset: output;
+  margin: 0;
+  line-height: 1.4;
+  overflow: auto;
+  width: 50%;
+  height: 100%;
+}
+
+.jsOutput > span {
+  counter-increment: output;
+}
+
+.jsOutput > span:before {
+  content: counter(output);
+  display: inline-block;
+  width: 40px;
+  text-align: right;
+  padding-right: 22px;
+  color: #858585;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+}
+
+.codeInputOutputWrapper {
+  display: flex;
+  height: 70%;
+}
+
+.resultWrapper {
+  height: 30%;
+}
+
+.resultIFrame {
+  width: 100%;
+  margin-top: 10px;
+  height: calc(100% - 60px);
+  border: none;
+}
+
+.error {
+  position: absolute;
+  background-color: tomato;
+  color: white;
+  font-size: .9em;
+  padding: 10px;
+  bottom: 0;
+  right: 0;
+  left: 0;
+}
+
+.error:empty {
+  display: none;
+}

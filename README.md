@@ -1,6 +1,6 @@
 # Vidact
 
-Vidact compiles your React source codes to VanillaJS code with **No Virtual DOM** ™️. It is similar to Svelte, but unlike [Svelte](https://svelte.dev/), Vidact does not introduce a new syntax. It takes in pure JavaScript (JSX) and outputs JavaScript.
+Vidact compiles your React source codes to VanillaJS code with **No Virtual DOM** ™️. It is similar to Svelte, but unlike [Svelte](https://svelte.dev/), Vidact does not introduce a new syntax. It takes in pure React-compatible JavaScript (JSX) and outputs plain JavaScript.
 
 Vidact currently is in alpha phase and has known limitations. It does not fully comply with React's behaviour in some edge cases, and probably never will, but the goal is to get as close behaviour to React as possible. Also, it currently only supports functional components and does not support class components.
 
@@ -10,7 +10,7 @@ Vidact is a babel-plugin that scans your source code to find what parts of the U
 
 ## When should I use it instead of React?
 
-*Vidact is not currently ready to be used in production.*
+_Vidact is not currently ready to be used in production._
 
 The goal is to have an alternative library for those who love React, but are looking for a more lightweight and high-performance implementation for smaller projects.
 
@@ -19,7 +19,7 @@ The goal is to have an alternative library for those who love React, but are loo
 - [x] JSX conversion for native HTML elements
 - [x] JSX conversion for component elements
 - [x] Support event listeners for native HTML elements
-  * Proxy onChange for text inputs and textarea
+  - Proxy onChange for text inputs and textarea
 - [x] Support inline styles
 - [x] Reactive props
 - [x] Basic array child nodes support
@@ -30,10 +30,11 @@ The goal is to have an alternative library for those who love React, but are loo
 - [ ] useEffect with cleanup (detect component unmount)
 - [x] useCallback
 - [x] useMemo
+- [ ] Conditional expression performance
 - [ ] Support custom hook functions built upon native hooks
 - [ ] Improve array child support
-  * Avoid refreshing elements with the same key and only do prop updates instead
-  * Avoid refreshing rearranged elements with the same key
+  - Avoid refreshing elements with the same key and only do prop updates instead
+  - Avoid refreshing rearranged elements with the same key
 - [ ] SVG support
 - [ ] Support components with multiple conditional return statements
 - [ ] Support context

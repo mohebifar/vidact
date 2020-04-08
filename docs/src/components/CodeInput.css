@@ -1,0 +1,8 @@
+.container {
+  width: 50%;
+}
+
+.wrapper {
+  height: calc(100% - 45px);
+  width: 100%;
+}
