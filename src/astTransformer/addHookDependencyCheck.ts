@@ -4,6 +4,7 @@ import * as t from "@babel/types";
 import { VariableDescriptor } from "../utils/VariableStatementDependencyManager";
 import { PROP_VAR, MEMO_DEPENDENCY_VAR } from "../constants";
 import { ensureArrowFunctionBlockStatement } from "./ensureArrowFunctionBlockStatement";
+import { getLeftMostMemberExpression } from "../astUtils/getLeftMostMemberExpression";
 
 export function addHookDependencyCheck(
   dependencies: NodePath<t.ArrayExpression>,
@@ -26,13 +27,22 @@ export function addHookDependencyCheck(
 
     if (t.isIdentifier(node)) {
       variableDescriptors.push({ type: "local", name: node.name });
-    } else if (
-      t.isMemberExpression(node) &&
-      t.isIdentifier(node.object) &&
-      node.object.name === PROP_VAR &&
-      t.isIdentifier(node.property)
-    ) {
-      variableDescriptors.push({ type: "prop", name: node.property.name });
+    } else if (t.isMemberExpression(node)) {
+      const leftMost = getLeftMostMemberExpression(node);
+
+      if (t.isIdentifier(leftMost.object)) {
+        if (leftMost.object.name === PROP_VAR) {
+          variableDescriptors.push({
+            type: "prop",
+            name: leftMost.property.name || leftMost.property.value,
+          });
+        } else {
+          variableDescriptors.push({
+            type: "local",
+            name: leftMost.object.name,
+          });
+        }
+      }
     }
 
     return [
