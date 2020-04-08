@@ -135,13 +135,17 @@ function App() {
           A compiler that converts React-compatible codes to{" "}
           <strong>VanillaJS with no Virtual DOM</strong>
         </h3>
+        <p>
+          <a target="_blank" href="https://github.com/mohebifar/vidact">
+            View source code on Github
+          </a>
+        </p>
         <iframe
-          src="https://ghbtns.com/github-btn.html?user=mohebifar&repo=carrot&type=star&count=true&size=large"
+          src="https://ghbtns.com/github-btn.html?user=mohebifar&repo=vidact&type=star&count=true&size=large"
           frameborder="0"
           scrolling="0"
-          width="160px"
+          width="120px"
           height="30px"
-          style={{ marginTop: 20 }}
         />
       </div>
       <div className={styles.container}>

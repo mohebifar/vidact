@@ -30,6 +30,10 @@
   font-weight: 300;
 }
 
+.hero a {
+  color: #8395a7;
+}
+
 .hero > h1,
 .hero > h3 {
   color: #f5f6fa;
