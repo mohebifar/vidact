@@ -1,23 +1,20 @@
 {
   "compilerOptions": {
-    "target": "es6",
-    "module": "commonjs",
-    "moduleResolution": "node",
+    "allowJs": true,
     "allowSyntheticDefaultImports": true,
-    "importHelpers": true,
-    "jsx": "react",
-    "alwaysStrict": true,
-    "sourceMap": true,
-    "forceConsistentCasingInFileNames": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitReturns": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitAny": false,
-    "noImplicitThis": false,
-    "strictNullChecks": false,
-    "lib": ["ESNext"]
-  },
-  "include": ["src/**/*"],
-  "files": ["./node_modules/@types/node/index.d.ts"]
+    // "baseUrl": ".",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    // "noEmit": true,
+    // "incremental": true,
+    "noErrorTruncation": true,
+    // "noUnusedLocals": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    // "target": "es6",
+    "jsx": "preserve",
+    "strictNullChecks": true,
+    "lib": ["ES2020", "dom"]
+  }
 }
