@@ -7,18 +7,15 @@ type UnfoldedBindingPattern = {
 };
 
 function getPropertyName(
-  propName?: ts.PropertyName
+  propName: ts.PropertyName
 ): ts.Identifier | ts.StringLiteral | ts.NumericLiteral {
-  if (!propName) {
-    throw new Error("Unkown error 1");
-  }
   if (ts.isIdentifier(propName)) {
     return ts.factory.createStringLiteral(propName.text);
   }
   if (ts.isStringLiteral(propName) || ts.isNumericLiteral(propName)) {
     return propName;
   }
-  throw new Error("Unknown error 2");
+  throw new Error("Unknown error unfoldBindingName#getPropertyName");
 }
 
 export function unfoldBindingName(
@@ -26,20 +23,19 @@ export function unfoldBindingName(
   parent: ts.ElementAccessExpression | ts.Identifier
 ): UnfoldedBindingPattern[] {
   if (ts.isIdentifier(pattern)) {
-    return [
-      {
-        identifier: pattern,
-      },
-    ];
+    return [{ identifier: pattern, defaultInitializer: parent }];
   }
+
   return pattern.elements
     .flatMap(
       (element: ts.BindingElement | ts.ArrayBindingElement, index: number) => {
         if (element.kind === ts.SyntaxKind.OmittedExpression) {
           return null;
         }
+
         const { name, propertyName, initializer } = element;
         let memberName: ts.Expression | number;
+
         if (propertyName) {
           memberName = ts.isIdentifier(name)
             ? ts.factory.createStringLiteral(name.text)
@@ -59,16 +55,14 @@ export function unfoldBindingName(
             path,
             defaultInitializer: initializer,
           };
-        } else if (
-          ts.isObjectBindingPattern(name) ||
-          ts.isArrayBindingPattern(name)
-        ) {
+        }
+
+        if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
           return unfoldBindingName(name, path as any);
         }
+
         return null;
       }
     )
-    .filter((t: UnfoldedBindingPattern | null): t is UnfoldedBindingPattern =>
-      Boolean(t)
-    );
+    .filter((t): t is UnfoldedBindingPattern => Boolean(t));
 }

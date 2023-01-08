@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-export function checkSymbolName(
+export function compareSymbolName(
   name: string | string[],
   symbol?: ts.Symbol
 ): boolean {
@@ -14,5 +14,5 @@ export function checkSymbolName(
     return currentPart;
   }
 
-  return currentPart && checkSymbolName(separatedName, (symbol as any).parent);
+  return currentPart && compareSymbolName(separatedName, (symbol as any).parent);
 }

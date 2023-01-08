@@ -1,6 +1,6 @@
-import React from "react";
 import * as ts from "typescript";
-import { isComponent } from "./utils/isComponent";
+import { componentAstToDescriptor } from "./analyzers/component/componentAstToDescriptor";
+import { isComponent } from "./analyzers/component/isComponent";
 
 export default function transformer(
   program: ts.Program
@@ -25,38 +25,32 @@ function visitNodeAndChildren(
   context: ts.TransformationContext
 ): ts.Node | undefined {
   return ts.visitEachChild(
-    visitNode(node, program),
+    visitNode(node, program, context),
     (childNode) => visitNodeAndChildren(childNode, program, context),
     context
   );
 }
 
-function visitNode(node: ts.SourceFile, program: ts.Program): ts.SourceFile;
-function visitNode(node: ts.Node, program: ts.Program): ts.Node | undefined;
-function visitNode(node: ts.Node, program: ts.Program): ts.Node | undefined {
+function visitNode(
+  node: ts.SourceFile,
+  program: ts.Program,
+  context: ts.TransformationContext
+): ts.SourceFile;
+function visitNode(
+  node: ts.Node,
+  program: ts.Program,
+  context: ts.TransformationContext
+): ts.Node | undefined;
+function visitNode(
+  node: ts.Node,
+  program: ts.Program,
+  context: ts.TransformationContext
+): ts.Node | undefined {
   const typeChecker = program.getTypeChecker();
-
-  if (isComponent(typeChecker, node)) {
+  const componentCheckResult = isComponent(node, typeChecker);
+  if (componentCheckResult.isComponent && componentCheckResult.body) {
+    componentAstToDescriptor(componentCheckResult.body, typeChecker, context);
     console.log("test", node.getText());
-  }
-
-  if (ts.isVariableDeclaration(node)) {
-    // newType = typeChecker.getTypeAtLocation(node);
-    // console.log("newType <<<", newType);
-  }
-
-  if (ts.isFunctionDeclaration(node)) {
-    let test = typeChecker.getTypeAtLocation(node);
-    // test = (typeChecker as any).isTypeAssignableTo(test, newType);
-
-    // let newType = typeChecker.getDeclaredTypeOfSymbol(symbol);
-    // console.log(newType);
-    // console.log(test);
-
-    // console.log(test);
-    return ts.factory.createExpressionStatement(
-      ts.factory.createCallExpression(ts.factory.createUniqueName("hi"), [], [])
-    );
   }
 
   return node;

@@ -1,0 +1,1 @@
+*DependentFunction* is any function that needs execution based on dependency change. This can be thought of as hooks like useEffect, useMemo, or useCallback or any statement that need re-evaluation based on a change in their dependencies.

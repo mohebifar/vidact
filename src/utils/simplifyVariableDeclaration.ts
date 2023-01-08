@@ -44,7 +44,10 @@ export function simplifyVariableDeclaration(
         }),
       ].filter(Boolean);
     })
-    .map((declaration) => {
-      return ts.factory.createVariableDeclarationList([declaration]);
-    });
+    .filter((declaration): declaration is ts.VariableDeclaration =>
+      Boolean(declaration)
+    )
+    .map((declaration) =>
+      ts.factory.createVariableDeclarationList([declaration])
+    );
 }
