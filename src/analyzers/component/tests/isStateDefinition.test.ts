@@ -5,9 +5,9 @@ import { isStateDefinition } from "../isStateDefinition";
 describe("isStateDefinition", () => {
   test("returns true if the given statement is variable declaration with named import useState call expression initializer", () => {
     const code = `import { useState } from 'react';
-  function Component() {
-      const [state, setState] = useState(2);
-  }`;
+function Component() {
+  const [state, setState] = useState(2);
+}`;
 
     const [ast, typeChecker] = parseAndTypeCheckForTesting(code);
     const [node] = tsquery.query(ast, "VariableStatement");
@@ -17,9 +17,9 @@ describe("isStateDefinition", () => {
 
   test("returns true if the given statement is variable declaration with namespace import React.useState call expression initializer", () => {
     const code = `import * as React from 'react';
-  function Component() {
-      const [state, setState] = React.useState(2);
-  }`;
+function Component() {
+  const [state, setState] = React.useState(2);
+}`;
 
     const [ast, typeChecker] = parseAndTypeCheckForTesting(code);
     const [node] = tsquery.query(ast, "VariableStatement");
@@ -29,9 +29,9 @@ describe("isStateDefinition", () => {
 
   test("returns false if the given statement is variable declaration with call expression initializer of a callback named useState but not the same as React.useState", () => {
     const code = `
-  function Component() {
-      const [state, setState] = useState(2);
-  }`;
+function Component() {
+  const [state, setState] = useState(2);
+}`;
 
     const [ast, typeChecker] = parseAndTypeCheckForTesting(code);
     const [node] = tsquery.query(ast, "VariableStatement");
