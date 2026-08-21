@@ -66,7 +66,9 @@ pnpm test:browser
 - Non-stabilizing updater feedback fails loudly instead of blocking the browser forever.
 
 The pinned React Compiler adapter and a bounded TSX-to-DOM codegen spike are now
-executable. The next milestone is replacing the lexical DOM/code extraction
-with OXC AST and semantic identities, then expanding diagnostics and Vite
+executable. The emitter parses once, preserves source expressions as OXC AST,
+rewrites state references by semantic binding identity, builds the output AST,
+and delegates printing to `oxc_codegen`. The next milestone is replacing the
+remaining lexical analysis classifier, then expanding diagnostics and Vite
 integration. The project is not production-ready until those paths,
 SSR/hydration policy, events, effects, and cross-browser corpora are complete.

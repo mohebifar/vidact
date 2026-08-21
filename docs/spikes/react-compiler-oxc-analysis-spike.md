@@ -60,7 +60,7 @@ Four browser-oriented TSX shapes lower to the existing `ComponentFacts` contract
 
 The tests execute the real OXC parser, OXC semantic builder, and vendored React Compiler pipeline. The counter edges are recovered through React Compiler's def-use chain, including unnamed temporaries, rather than lexical identifier matching. Declaration identity prevents a shadowed parameter named `count` from becoming a false state dependency. A fixture rejected by any stage returns an `AnalysisFailed` diagnostic rather than silently falling back. The bounded adapter also fails closed when a module contains multiple components, until the DOM classifier is scoped using OXC function spans.
 
-The `AliasCounter` fixture also crosses the full executable boundary. A Rust example regenerates a TypeScript module before the browser suite; that module creates one stable button and text node, installs compiler-ordered static updaters, and imports only the small Vidact runtime. Vitest Browser then proves initial rendering, click updates, functional setters, batching, updater order, attribute/text writes, and DOM node identity in Chromium. The test never hand-writes the updater graph.
+The `AliasCounter` fixture also crosses the full executable boundary. A Rust example regenerates the checked-in TypeScript module, and a Rust test requires that file to match current compiler output exactly before the browser suite runs. That module creates one stable button and text node, installs compiler-ordered static updaters, and imports only the small Vidact runtime. Vitest Browser then proves initial rendering, click updates, functional setters, batching, updater order, attribute/text writes, and DOM node identity in Chromium. The test never hand-writes the updater graph.
 
 Bundling that generated module and its runtime imports with esbuild 0.25.5 in browser ESM mode produces 2,066 minified bytes and 1,038 gzip bytes. This is a spike measurement, not a production budget claim: it includes test trace instrumentation, covers one component, and excludes a framework integration layer.
 
@@ -74,7 +74,7 @@ This is also why React Compiler scopes are not the same thing as signals. They a
 
 ## Spike limitations
 
-The current Vidact DOM classifier is intentionally a corpus probe, not a parser replacement. It recognizes a constrained set of source shapes using lexical extraction after React Compiler has accepted the module:
+The current Vidact analysis classifier is intentionally a corpus probe. It recognizes a constrained set of source shapes using lexical extraction after React Compiler has accepted the module:
 
 - named function components;
 - destructured props;
@@ -85,13 +85,13 @@ The current Vidact DOM classifier is intentionally a corpus probe, not a parser 
 
 It now handles straight-line aliases and distinguishes shadowed declarations in the captured def-use graph. It does not yet correctly classify nested component scopes, computed keys, fragments with mixed update sites, conditional trees, arbitrary destructuring, multiple returns, optional chaining, or source transforms. The keyed-array analysis test proves the intended IR boundary and the runtime has a tested reconciler, but the spike emitter does not connect those two paths yet.
 
-The executable emitter is deliberately narrower still: one numeric state tuple, numeric `const` derivations, one intrinsic root element, expression attributes, one text expression, and an optional inline setter-based click handler. String-bearing expressions and other unsupported input return `UnsupportedSyntax`; they are never approximated with a partial render.
+The executable emitter is deliberately narrower still: one numeric state tuple, numeric `const` derivations, one intrinsic root element, expression attributes, one text expression, and an optional inline setter-based click handler. Unlike the analysis classifier, its syntax path is OXC AST-backed. It clones source expressions with semantic IDs, rewrites only references resolved to the state tuple, constructs a fresh output AST, and prints with `oxc_codegen`. String literals are therefore preserved instead of being rejected or textually rewritten. Static attributes, mixed children, arrays, and other unsupported shapes return `UnsupportedSyntax`; they are never approximated with a partial render.
 
 ## Production path
 
-Keep the React Compiler fork limited to snapshot capture, then replace the lexical Vidact classifier with an OXC AST visitor backed by `oxc_semantic` symbol and reference IDs. The production adapter should:
+Keep the React Compiler fork limited to snapshot capture, then replace the remaining lexical Vidact analysis classifier with an OXC AST visitor backed by `oxc_semantic` symbol and reference IDs. The production adapter should:
 
-1. replace the remaining lexical source classifier with OXC AST nodes and map snapshot declaration IDs/spans to OXC symbols;
+1. replace the remaining lexical source classification in the analysis adapter with OXC AST nodes and map snapshot declaration IDs/spans to OXC symbols;
 2. assign stable source IDs for props, state, context, derived values, and external reads;
 3. classify every JSX expression container by its parent position;
 4. lower conditions into branch updaters and arrays into keyed structural regions;

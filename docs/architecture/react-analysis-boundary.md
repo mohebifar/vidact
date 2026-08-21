@@ -96,7 +96,10 @@ product.
 ## Next integration step
 
 The pinned adapter now captures owned pre-codegen def-use and reactive-scope
-facts and lowers them immediately into `ComponentFacts`. The next step is an
-OXC AST-backed DOM classifier and emitter for the documented language subset,
-with golden per-pass fixtures that detect drift whenever the vendored React
-Compiler revision changes.
+facts and lowers them immediately into `ComponentFacts`. The browser spike now
+extracts its supported JSX from OXC AST, rewrites expressions by semantic
+binding identity, constructs a fresh output AST, and prints it with
+`oxc_codegen`. The next step is moving the remaining lexical classification in
+the analysis adapter onto those same OXC identities and adding golden per-pass
+fixtures that detect drift whenever the vendored React Compiler revision
+changes.

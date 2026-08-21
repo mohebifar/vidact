@@ -240,6 +240,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxc_codegen"
+version = "0.143.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a945c0ab712d5c14f5962867d9336753f4ef363a69a85a5a9fc7f1a0dcdc2b5"
+dependencies = [
+ "bitflags",
+ "cow-utils",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_data_structures",
+ "oxc_ecmascript",
+ "oxc_index",
+ "oxc_semantic",
+ "oxc_span",
+ "oxc_str",
+ "oxc_syntax",
+ "rustc-hash",
+]
+
+[[package]]
 name = "oxc_data_structures"
 version = "0.143.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -653,10 +673,14 @@ name = "vidact-compiler"
 version = "0.1.0"
 dependencies = [
  "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_codegen",
  "oxc_parser",
  "oxc_react_compiler",
  "oxc_semantic",
  "oxc_span",
+ "oxc_syntax",
 ]
 
 [[package]]

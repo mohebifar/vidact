@@ -4,9 +4,10 @@ use std::{
 };
 
 use oxc_allocator::Allocator;
+use oxc_ast::ast::Program;
 use oxc_parser::Parser;
 use oxc_react_compiler::{CompileResult, FunctionAnalysis, PluginOptions, compile};
-use oxc_semantic::SemanticBuilder;
+use oxc_semantic::{Semantic, SemanticBuilder};
 use oxc_span::SourceType;
 
 use crate::{
@@ -27,48 +28,57 @@ pub struct OxcReactAnalysisAdapter;
 
 impl ReactAnalysisAdapter for OxcReactAnalysisAdapter {
     fn analyze(&self, input: ModuleInput<'_>) -> Result<Vec<ComponentFacts>, Vec<Diagnostic>> {
-        let analyses = run_react_analysis(input)?;
-        let [analysis] = analyses.as_slice() else {
+        let allocator = Allocator::default();
+        let source_type =
+            SourceType::from_path(Path::new(input.filename)).unwrap_or_else(|_| SourceType::tsx());
+        let parsed = Parser::new(&allocator, input.source, source_type).parse();
+        if !parsed.diagnostics.is_empty() {
             return Err(vec![analysis_error(format!(
-                "the analysis spike supports exactly one component per module; React Compiler found {} in {}",
-                analyses.len(),
-                input.filename
+                "OXC could not parse {}: {:?}",
+                input.filename, parsed.diagnostics
             ))]);
-        };
+        }
 
-        Ok(vec![lower_snapshot(input.source, analysis)])
+        let semantic = SemanticBuilder::new()
+            .with_build_nodes(true)
+            .with_check_syntax_error(true)
+            .build(&parsed.program);
+        if !semantic.diagnostics.is_empty() {
+            return Err(vec![analysis_error(format!(
+                "OXC semantic analysis failed for {}: {:?}",
+                input.filename, semantic.diagnostics
+            ))]);
+        }
+
+        analyze_program(input, &parsed.program, &semantic.semantic, &allocator)
     }
 }
 
-fn run_react_analysis(input: ModuleInput<'_>) -> Result<Vec<FunctionAnalysis>, Vec<Diagnostic>> {
-    let allocator = Allocator::default();
-    let source_type =
-        SourceType::from_path(Path::new(input.filename)).unwrap_or_else(|_| SourceType::tsx());
-    let parsed = Parser::new(&allocator, input.source, source_type).parse();
-    if !parsed.diagnostics.is_empty() {
+pub(crate) fn analyze_program(
+    input: ModuleInput<'_>,
+    program: &Program<'_>,
+    semantic: &Semantic<'_>,
+    allocator: &Allocator,
+) -> Result<Vec<ComponentFacts>, Vec<Diagnostic>> {
+    let analyses = run_react_analysis(input, program, semantic, allocator)?;
+    let [analysis] = analyses.as_slice() else {
         return Err(vec![analysis_error(format!(
-            "OXC could not parse {}: {:?}",
-            input.filename, parsed.diagnostics
+            "the analysis spike supports exactly one component per module; React Compiler found {} in {}",
+            analyses.len(),
+            input.filename
         ))]);
-    }
+    };
 
-    let semantic = SemanticBuilder::new()
-        .with_build_nodes(true)
-        .with_check_syntax_error(true)
-        .build(&parsed.program);
-    if !semantic.diagnostics.is_empty() {
-        return Err(vec![analysis_error(format!(
-            "OXC semantic analysis failed for {}: {:?}",
-            input.filename, semantic.diagnostics
-        ))]);
-    }
+    Ok(vec![lower_snapshot(input.source, analysis)])
+}
 
-    match compile(
-        &parsed.program,
-        &semantic.semantic,
-        &allocator,
-        PluginOptions::default(),
-    ) {
+fn run_react_analysis(
+    input: ModuleInput<'_>,
+    program: &Program<'_>,
+    semantic: &Semantic<'_>,
+    allocator: &Allocator,
+) -> Result<Vec<FunctionAnalysis>, Vec<Diagnostic>> {
+    match compile(program, semantic, allocator, PluginOptions::default()) {
         CompileResult::Success {
             output: Some(output),
             diagnostics,
