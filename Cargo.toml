@@ -1,0 +1,18 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+rust-version = "1.89"
+
+[workspace.metadata.vidact.react-compiler]
+repository = "https://github.com/facebook/react"
+revision = "eafeac097ba51e1eab809c07102126bd5f8e5425"
+pull-request = 36173
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+strip = true
