@@ -5,7 +5,7 @@
   "packageManager": "pnpm@10.19.0",
   "scripts": {
     "check": "pnpm typecheck && pnpm test",
-    "format:rust": "cargo fmt --all --check",
+    "format:rust": "cargo fmt -p vidact-compiler --check",
     "test": "pnpm test:rust && pnpm test:browser",
     "test:browser": "pnpm --filter @vidact/browser-corpus test",
     "test:rust": "cargo test --workspace",

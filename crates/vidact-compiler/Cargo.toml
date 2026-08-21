@@ -9,3 +9,10 @@ description = "React-to-Vanilla compiler core for Vidact"
 [lib]
 name = "vidact_compiler"
 path = "src/lib.rs"
+
+[dependencies]
+oxc_allocator = "0.143.0"
+oxc_parser = { version = "0.143.0", features = ["regular_expression"] }
+oxc_react_compiler = { path = "../../vendor/oxc_react_compiler" }
+oxc_semantic = "0.143.0"
+oxc_span = "0.143.0"

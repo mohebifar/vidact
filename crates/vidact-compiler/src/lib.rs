@@ -7,6 +7,8 @@
 pub mod analysis;
 mod diagnostic;
 pub mod ir;
+mod oxc_react;
 
 pub use diagnostic::{Diagnostic, DiagnosticCode};
 pub use ir::{ComponentIr, IrSource, IrUpdater, lower_component};
+pub use oxc_react::OxcReactAnalysisAdapter;

@@ -1,5 +1,6 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DiagnosticCode {
+    AnalysisFailed,
     CyclicUpdaterGraph,
     DuplicateSource,
     DuplicateUpdater,
