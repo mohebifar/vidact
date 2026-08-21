@@ -21,3 +21,12 @@ export {
   type KeyedListOptions,
   type KeyedRenderResult,
 } from './keyed-list.ts'
+export {
+  Fragment,
+  h,
+  mount,
+  useState,
+  type DirectChild,
+  type DirectComponent,
+  type DirectProps,
+} from './direct-dom.ts'

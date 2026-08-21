@@ -4,11 +4,15 @@
   "type": "module",
   "packageManager": "pnpm@10.19.0",
   "scripts": {
+    "build:examples": "pnpm --filter @vidact/example-todomvc build",
     "check": "pnpm typecheck && pnpm test",
+    "dev:todomvc": "pnpm --filter @vidact/example-todomvc dev",
     "format:rust": "cargo fmt -p vidact-compiler --check",
-    "test": "pnpm test:rust && pnpm test:browser",
+    "test": "pnpm test:rust && pnpm test:tools && pnpm test:browser && pnpm test:examples",
     "test:browser": "pnpm --filter @vidact/browser-corpus test",
+    "test:examples": "pnpm --filter @vidact/example-todomvc test",
     "test:rust": "cargo test --workspace",
+    "test:tools": "pnpm --filter @vidact/vite test",
     "typecheck": "pnpm --recursive typecheck"
   },
   "engines": {

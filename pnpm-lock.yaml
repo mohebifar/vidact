@@ -8,11 +8,54 @@ importers:
 
   .: {}
 
+  examples/todomvc:
+    dependencies:
+      '@vidact/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+    devDependencies:
+      '@types/node':
+        specifier: ^24.13.3
+        version: 24.13.3
+      '@vidact/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite-plugin
+      '@vitest/browser-playwright':
+        specifier: 4.1.11
+        version: 4.1.11(playwright@1.62.1)(vite@8.2.2(@types/node@24.13.3))(vitest@4.1.11)
+      playwright:
+        specifier: 1.62.1
+        version: 1.62.1
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vite:
+        specifier: 8.2.2
+        version: 8.2.2(@types/node@24.13.3)
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.13.3)(@vitest/browser-playwright@4.1.11)(vite@8.2.2(@types/node@24.13.3))
+
   packages/runtime:
     devDependencies:
       typescript:
         specifier: 7.0.2
         version: 7.0.2
+
+  packages/vite-plugin:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.13.3
+        version: 24.13.3
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vite:
+        specifier: 8.2.2
+        version: 8.2.2(@types/node@24.13.3)
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.13.3)(@vitest/browser-playwright@4.1.11)(vite@8.2.2(@types/node@24.13.3))
 
   tests/browser:
     dependencies:

@@ -37,7 +37,9 @@ the rationale and integration constraints.
 
 - `crates/vidact-compiler`: compiler-neutral analysis facts and updater IR
 - `packages/runtime`: tree-shakeable scheduler, state slots, and keyed arrays
+- `packages/vite-plugin`: analysis-first Vite adapter backed by Rust and OXC
 - `tests/browser`: Vitest Browser corpora running in Chromium
+- `examples/todomvc`: runnable array-state TodoMVC without a Virtual DOM
 - `docs/architecture`: durable architecture decisions and upstream constraints
 
 ## Development
@@ -52,6 +54,18 @@ pnpm test:browser
 ```
 
 `pnpm check` runs the typecheck and both Rust and browser test suites.
+
+Run the first example from the repository root:
+
+```sh
+pnpm dev:todomvc
+```
+
+Vite sends every TSX module to the Rust compiler before OXC lowers JSX through
+`@vidact/runtime/jsx-runtime`. The current compatibility renderer creates real
+DOM nodes directly and supports array children, but it reruns the component and
+replaces its root after state changes. It is an executable integration preview,
+not the final fine-grained keyed-list code generator.
 
 ## Current contract
 
@@ -68,7 +82,8 @@ pnpm test:browser
 The pinned React Compiler adapter and a bounded TSX-to-DOM codegen spike are now
 executable. The emitter parses once, preserves source expressions as OXC AST,
 rewrites state references by semantic binding identity, builds the output AST,
-and delegates printing to `oxc_codegen`. The next milestone is replacing the
-remaining lexical analysis classifier, then expanding diagnostics and Vite
-integration. The project is not production-ready until those paths,
+and delegates printing to `oxc_codegen`. An analysis-first Vite preview now
+proves the full TSX-to-browser workflow. The next milestone is replacing the
+remaining lexical analysis classifier, then moving the preview renderer onto
+compiler-emitted targeted updates. The project is not production-ready until those paths,
 SSR/hydration policy, events, effects, and cross-browser corpora are complete.

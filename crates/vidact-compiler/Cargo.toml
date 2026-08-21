@@ -20,3 +20,4 @@ oxc_react_compiler = { path = "../../vendor/oxc_react_compiler" }
 oxc_semantic = "0.143.0"
 oxc_span = "0.143.0"
 oxc_syntax = "0.143.0"
+serde_json = "1.0.149"
