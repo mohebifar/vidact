@@ -32,7 +32,8 @@ export function TodoApp(): Node {
       ...current,
       { id: crypto.randomUUID(), title, completed: false },
     ])
-    queueMicrotask(() => document.querySelector<HTMLInputElement>('.new-todo')?.focus())
+    if (input !== null) input.value = ''
+    queueMicrotask(() => input?.focus())
   }
 
   const toggleTodo = (id: string): void => {
@@ -45,10 +46,10 @@ export function TodoApp(): Node {
     setTodos((current) => current.filter((todo) => todo.id !== id))
   }
 
-  const beginEdit = (id: string): void => {
+  const beginEdit = (id: string, label: HTMLLabelElement): void => {
     setEditingId(id)
     queueMicrotask(() => {
-      const input = document.querySelector<HTMLInputElement>('.edit')
+      const input = label.closest('li')?.querySelector<HTMLInputElement>('.edit')
       input?.focus()
       input?.select()
     })
@@ -109,7 +110,10 @@ export function TodoApp(): Node {
                     aria-label={`Toggle ${todo.title}`}
                     onChange={() => toggleTodo(todo.id)}
                   />
-                  <label onDoubleClick={() => beginEdit(todo.id)}>{todo.title}</label>
+                  <label onDoubleClick={(event: MouseEvent) => beginEdit(
+                    todo.id,
+                    event.currentTarget as HTMLLabelElement,
+                  )}>{todo.title}</label>
                   <button
                     className="destroy"
                     aria-label={`Delete ${todo.title}`}

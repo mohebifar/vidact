@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mount } from '@vidact/runtime'
+import { mountCompiled } from '@vidact/runtime'
 import { TodoApp } from './TodoApp.tsx'
 
 let dispose: (() => void) | undefined
@@ -14,14 +14,22 @@ describe('Vidact TodoMVC', () => {
   it('adds, toggles, filters, edits, removes, and clears array items', () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
-    dispose = mount(TodoApp, host).dispose
+    dispose = mountCompiled(TodoApp, host).dispose
 
     addTodo(host, 'Study React Compiler')
+    expect(host.querySelector<HTMLInputElement>('.new-todo')?.value).toBe('')
     addTodo(host, 'Ship direct DOM')
     expect(labels(host)).toEqual(['Study React Compiler', 'Ship direct DOM'])
     expect(host.querySelector('.todo-count')?.textContent).toContain('2 items left')
 
+    const rootBeforeToggle = host.firstChild
+    const unaffectedTodoBeforeToggle = host.querySelectorAll('li')[1]
+    const draftInput = host.querySelector<HTMLInputElement>('.new-todo')
+    if (draftInput !== null) draftInput.value = 'Keep this draft'
     host.querySelector<HTMLInputElement>('.toggle')?.click()
+    expect(host.firstChild).toBe(rootBeforeToggle)
+    expect(host.querySelectorAll('li')[1]).toBe(unaffectedTodoBeforeToggle)
+    expect(host.querySelector<HTMLInputElement>('.new-todo')?.value).toBe('Keep this draft')
     expect(host.querySelectorAll('.completed')).toHaveLength(1)
     expect(host.querySelector('.todo-count')?.textContent).toContain('1 item left')
 

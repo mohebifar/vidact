@@ -30,3 +30,16 @@ export {
   type DirectComponent,
   type DirectProps,
 } from './direct-dom.ts'
+export {
+  binding,
+  compiledEvent,
+  compiledRoot,
+  createCompiledScope,
+  createCompiledState,
+  keyed,
+  mountCompiled,
+  when,
+  type CompiledBinding,
+  type CompiledScope,
+  type StructuralBinding,
+} from './compiled.ts'

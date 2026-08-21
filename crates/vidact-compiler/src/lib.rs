@@ -9,8 +9,12 @@ mod browser_codegen;
 mod diagnostic;
 pub mod ir;
 mod oxc_react;
+mod surgical_codegen;
 
 pub use browser_codegen::compile_spike_browser_module;
 pub use diagnostic::{Diagnostic, DiagnosticCode};
 pub use ir::{ComponentIr, IrSource, IrUpdater, lower_component};
 pub use oxc_react::OxcReactAnalysisAdapter;
+pub use surgical_codegen::{
+    SurgicalCompilation, compile_surgical_module, compile_surgical_module_with_ir,
+};

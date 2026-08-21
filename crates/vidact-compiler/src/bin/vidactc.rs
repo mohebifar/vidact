@@ -2,9 +2,9 @@ use std::{env, io::Read, process::ExitCode};
 
 use serde_json::{Value, json};
 use vidact_compiler::{
-    Diagnostic, OxcReactAnalysisAdapter,
+    ComponentIr, Diagnostic, OxcReactAnalysisAdapter,
     analysis::{ModuleInput, ReactAnalysisAdapter, SourceKind, UpdaterKind},
-    lower_component,
+    compile_surgical_module_with_ir, lower_component,
 };
 
 fn main() -> ExitCode {
@@ -22,10 +22,11 @@ fn main() -> ExitCode {
 
 fn run() -> Result<Value, String> {
     let mut arguments = env::args().skip(1);
-    if arguments.next().as_deref() != Some("analyze")
+    let command = arguments.next();
+    if !matches!(command.as_deref(), Some("analyze" | "compile"))
         || arguments.next().as_deref() != Some("--filename")
     {
-        return Err("usage: vidactc analyze --filename <path>".to_string());
+        return Err("usage: vidactc <analyze|compile> --filename <path>".to_string());
     }
     let filename = arguments
         .next()
@@ -42,16 +43,34 @@ fn run() -> Result<Value, String> {
         filename: &filename,
         source: &source,
     };
+    if command.as_deref() == Some("compile") {
+        let compilation = compile_surgical_module_with_ir(input)
+            .map_err(|diagnostics| format_diagnostics(&filename, &diagnostics))?;
+        return Ok(json!({
+            "protocol": "vidact-compile-v1",
+            "code": compilation.code,
+            "analysis": analysis_json([compilation.component]),
+        }));
+    }
+
+    analyze(input)
+}
+
+fn analyze(input: ModuleInput<'_>) -> Result<Value, String> {
     let facts = OxcReactAnalysisAdapter
         .analyze(input)
-        .map_err(|diagnostics| format_diagnostics(&filename, &diagnostics))?;
+        .map_err(|diagnostics| format_diagnostics(input.filename, &diagnostics))?;
     let components = facts
         .into_iter()
         .map(lower_component)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|diagnostic| format_diagnostics(&filename, &[diagnostic]))?;
+        .map_err(|diagnostic| format_diagnostics(input.filename, &[diagnostic]))?;
 
-    Ok(json!({
+    Ok(analysis_json(components))
+}
+
+fn analysis_json(components: impl IntoIterator<Item = ComponentIr>) -> Value {
+    json!({
         "protocol": "vidact-analysis-v1",
         "components": components.into_iter().map(|component| json!({
             "name": component.name,
@@ -67,7 +86,7 @@ fn run() -> Result<Value, String> {
                 "writes": updater.writes.into_iter().map(|source| source.get()).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
-    }))
+    })
 }
 
 fn source_kind(kind: SourceKind) -> &'static str {

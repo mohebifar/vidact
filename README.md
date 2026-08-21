@@ -7,8 +7,9 @@ tracking.
 
 This orphan branch is a from-scratch Rust rebuild. It currently contains the
 compiler-neutral updater IR, the runtime foundation, and executable browser
-corpora. A deliberately narrow codegen spike now compiles one TSX alias corpus
-to direct DOM operations; it is not a general TSX compiler yet.
+corpora. A surgical vertical slice now compiles the TodoMVC example into
+one-time DOM construction, scalar bindings, conditional ranges, and keyed list
+ranges. It is not a general TSX compiler yet.
 
 ## Architecture
 
@@ -37,7 +38,7 @@ the rationale and integration constraints.
 
 - `crates/vidact-compiler`: compiler-neutral analysis facts and updater IR
 - `packages/runtime`: tree-shakeable scheduler, state slots, and keyed arrays
-- `packages/vite-plugin`: analysis-first Vite adapter backed by Rust and OXC
+- `packages/vite-plugin`: Rust compilation and OXC JSX-lowering Vite adapter
 - `tests/browser`: Vitest Browser corpora running in Chromium
 - `examples/todomvc`: runnable array-state TodoMVC without a Virtual DOM
 - `docs/architecture`: durable architecture decisions and upstream constraints
@@ -62,28 +63,37 @@ pnpm dev:todomvc
 ```
 
 Vite sends every TSX module to the Rust compiler before OXC lowers JSX through
-`@vidact/runtime/jsx-runtime`. The current compatibility renderer creates real
-DOM nodes directly and supports array children, but it reruns the component and
-replaces its root after state changes. It is an executable integration preview,
-not the final fine-grained keyed-list code generator.
+`@vidact/runtime/jsx-runtime`. For the supported `useState` subset, Rust rewrites
+state reads and writes by semantic identity and emits static bindings before
+OXC prints and lowers the module. Components construct their DOM once. State
+writes run only compiler-selected derivations, DOM bindings, conditional
+ranges, and keyed-list ranges; they do not rerun the component or diff a tree.
 
 ## Current contract
 
 - Static updater order and read/write edges are preserved by the Rust IR.
+- Supported compiled components execute once and retain their root DOM identity.
+- Scalar text and properties update through compiler-emitted bindings.
+- Conditional blocks own comment-delimited DOM ranges and dispose nested bindings.
+- Keyed arrays preserve unaffected records and reject duplicate keys before mutation.
 - Updaters are topologically ordered; cycles and ambiguous writers fail before code generation.
 - Source masks scale beyond one 32-bit word.
 - Batches execute each affected updater once per flush.
+- Compiler-wrapped DOM events batch their synchronous state writes.
 - Keyed arrays reuse, move, insert, remove, and dispose DOM records.
 - Multi-node array records remain contiguous.
 - Duplicate keys fail before mutating the current DOM ordering.
 - Disposed component scopes ignore later invalidations.
 - Non-stabilizing updater feedback fails loudly instead of blocking the browser forever.
 
-The pinned React Compiler adapter and a bounded TSX-to-DOM codegen spike are now
-executable. The emitter parses once, preserves source expressions as OXC AST,
-rewrites state references by semantic binding identity, builds the output AST,
-and delegates printing to `oxc_codegen`. An analysis-first Vite preview now
-proves the full TSX-to-browser workflow. The next milestone is replacing the
-remaining lexical analysis classifier, then moving the preview renderer onto
-compiler-emitted targeted updates. The project is not production-ready until those paths,
-SSR/hydration policy, events, effects, and cross-browser corpora are complete.
+The pinned React Compiler adapter and a bounded TSX-to-DOM code generator are
+now executable. The emitter parses once, preserves source expressions as OXC
+AST, rewrites state references by semantic binding identity, builds the output
+AST, and delegates printing to `oxc_codegen`. TodoMVC proves the full
+TSX-to-browser path including array insertion, filtering, editing, removal, and
+surgical DOM identity. The next milestone is replacing the remaining lexical
+analysis classifier and turning this fail-closed slice into an explicit React
+subset. The project is not production-ready until events are batched, effects
+and component composition have ownership semantics, diagnostics cover the
+supported grammar, source maps reach the original TSX, and SSR/hydration and
+cross-browser gates exist.

@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { transformWithOxc, type Plugin } from 'vite'
-import { analyzeWithCompiler, type VidactAnalysis } from './compiler-client.ts'
+import { compileWithCompiler, type VidactAnalysis } from './compiler-client.ts'
 
 const REACT_MODULE = '\0vidact:react'
 
@@ -12,7 +12,10 @@ export interface VidactPluginOptions {
 
 export function vidact(options: VidactPluginOptions = {}): Plugin {
   let manifestPath = ''
-  const analysisCache = new Map<string, { source: string; analysis: VidactAnalysis }>()
+  const compilationCache = new Map<
+    string,
+    { source: string; code: string; analysis: VidactAnalysis }
+  >()
 
   return {
     name: 'vidact',
@@ -32,14 +35,15 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       const filename = id.split('?', 1)[0] ?? id
       if (!filename.endsWith('.tsx') || filename.includes('/node_modules/')) return null
 
-      const cached = analysisCache.get(filename)
-      let analysis = cached?.source === source ? cached.analysis : undefined
-      if (analysis === undefined) {
-        analysis = await analyzeWithCompiler(source, filename, manifestPath)
-        analysisCache.set(filename, { source, analysis })
+      const cached = compilationCache.get(filename)
+      let compilation = cached?.source === source ? cached : undefined
+      if (compilation === undefined) {
+        const result = await compileWithCompiler(source, filename, manifestPath)
+        compilation = { source, code: result.code, analysis: result.analysis }
+        compilationCache.set(filename, compilation)
       }
 
-      const transformed = await transformWithOxc(source, filename, {
+      const transformed = await transformWithOxc(compilation.code, filename, {
         lang: 'tsx',
         jsx: {
           runtime: 'automatic',
@@ -51,7 +55,7 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       return {
         code: transformed.code,
         ...(transformed.map === undefined ? {} : { map: transformed.map }),
-        meta: { vidact: analysis },
+        meta: { vidact: compilation.analysis },
       }
     },
   }
@@ -70,4 +74,8 @@ function findWorkspaceManifest(start: string): string {
   }
 }
 
-export type { VidactAnalysis, VidactComponentAnalysis } from './compiler-client.ts'
+export type {
+  VidactAnalysis,
+  VidactCompilation,
+  VidactComponentAnalysis,
+} from './compiler-client.ts'

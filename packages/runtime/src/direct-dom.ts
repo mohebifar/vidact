@@ -1,4 +1,12 @@
 import type { StateUpdate } from './state-slot.ts'
+import {
+  isCompiledBinding,
+  isStructuralBinding,
+  mountCompiledBinding,
+  mountCompiledProp,
+  type CompiledBinding,
+  type StructuralBinding,
+} from './compiled.ts'
 
 export type DirectChild =
   | Node
@@ -9,6 +17,8 @@ export type DirectChild =
   | null
   | undefined
   | readonly DirectChild[]
+  | CompiledBinding<unknown>
+  | StructuralBinding
 export type DirectProps = Record<string, unknown> | null
 export type DirectComponent = (props: Record<string, unknown>) => Node
 
@@ -149,29 +159,52 @@ function applyProps(element: HTMLElement, props: DirectProps): void {
   if (props === null) return
   for (const [name, value] of Object.entries(props)) {
     if (name === 'key' || value === null || value === undefined) continue
-    if (name === 'dangerouslySetInnerHTML') {
-      throw new Error('dangerouslySetInnerHTML is not supported by the direct DOM runtime')
-    }
-    if (name === 'style' && typeof value === 'object') {
-      Object.assign(element.style, value)
+    if (isCompiledBinding(value)) {
+      mountCompiledProp(value, (next) => applyProp(element, name, next))
       continue
     }
-    if (name.startsWith('on') && typeof value === 'function') {
-      const reactEventName = name.slice(2)
-      const eventName = reactEventName === 'DoubleClick' ? 'dblclick' : reactEventName.toLowerCase()
-      element.addEventListener(eventName, value as EventListener)
-      continue
-    }
-
-    const property = name === 'className' ? 'className' : name === 'htmlFor' ? 'htmlFor' : name
-    if (property in element && !name.startsWith('data-') && !name.startsWith('aria-')) {
-      Reflect.set(element, property, value)
-    } else if (value === true) {
-      element.setAttribute(name, '')
-    } else if (value !== false) {
-      element.setAttribute(name, String(value))
-    }
+    applyProp(element, name, value)
   }
+}
+
+function applyProp(element: HTMLElement, name: string, value: unknown): void {
+  const property = name === 'className' ? 'className' : name === 'htmlFor' ? 'htmlFor' : name
+  if (value === null || value === undefined) {
+    if (property in element && !name.startsWith('data-') && !name.startsWith('aria-')) {
+      Reflect.set(element, property, property === 'value' ? '' : false)
+    } else {
+      element.removeAttribute(name)
+    }
+    return
+  }
+  if (name === 'dangerouslySetInnerHTML') {
+    throw new Error('dangerouslySetInnerHTML is not supported by the direct DOM runtime')
+  }
+  if (name === 'style' && typeof value === 'object') {
+    Object.assign(element.style, value)
+    return
+  }
+  if (isEventProp(name) && typeof value === 'function') {
+    const reactEventName = name.slice(2)
+    const eventName = reactEventName === 'DoubleClick' ? 'dblclick' : reactEventName.toLowerCase()
+    element.addEventListener(eventName, value as EventListener)
+    return
+  }
+
+  if (property in element && !name.startsWith('data-') && !name.startsWith('aria-')) {
+    Reflect.set(element, property, value)
+  } else if (value === true) {
+    element.setAttribute(name, '')
+  } else if (value === false) {
+    element.removeAttribute(name)
+  } else {
+    element.setAttribute(name, String(value))
+  }
+}
+
+function isEventProp(name: string): boolean {
+  const firstEventCharacter = name.charCodeAt(2)
+  return name.startsWith('on') && firstEventCharacter >= 65 && firstEventCharacter <= 90
 }
 
 function appendChildren(parent: Node, children: readonly DirectChild[]): void {
@@ -180,6 +213,14 @@ function appendChildren(parent: Node, children: readonly DirectChild[]): void {
 
 function appendChild(parent: Node, child: DirectChild): void {
   if (child === null || child === undefined || typeof child === 'boolean') return
+  if (isStructuralBinding(child)) {
+    child.mount(parent, null)
+    return
+  }
+  if (isCompiledBinding(child)) {
+    mountCompiledBinding(parent, child)
+    return
+  }
   if (Array.isArray(child)) {
     appendChildren(parent, child)
     return

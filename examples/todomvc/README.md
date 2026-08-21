@@ -28,13 +28,15 @@ pnpm --filter @vidact/example-todomvc build
 ## What the plugin does
 
 1. `@vidact/vite` sends the untouched TSX source to `vidactc`.
-2. The Rust compiler runs the vendored React Compiler analysis and returns a
-   versioned Vidact source/updater manifest.
-3. Vite's OXC transform lowers JSX through `@vidact/runtime/jsx-runtime`.
-4. The runtime creates real DOM nodes and flattens array children directly.
+2. The Rust compiler runs the vendored React Compiler analysis, lowers a static
+   updater graph, and rewrites state, scalar, branch, and keyed-list expressions.
+3. OXC Codegen prints the transformed TSX; Vite's OXC transform then lowers JSX
+   through `@vidact/runtime/jsx-runtime`.
+4. The runtime constructs the component DOM once and runs only bindings whose
+   compiler-assigned source masks intersect the state change.
 
-This is intentionally called the analysis-first compatibility path. State
-changes currently rerun the component and replace its root node. It proves the
-complete Vite-to-browser workflow and makes TodoMVC testable now, while the
-production compiler path continues toward targeted DOM updates and keyed range
-reconciliation.
+The browser test asserts more than visible output: toggling one todo preserves
+the app root, an unrelated keyed `<li>`, and partially typed input. Filtering,
+editing, removing, and clearing still work without a Virtual DOM. This remains
+a bounded compiler slice rather than a production compatibility promise; see
+the repository README for the missing production gates.
