@@ -43,7 +43,9 @@ pub struct InstructionAnalysis {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ValueAnalysis {
     pub id: usize,
+    pub declaration_id: usize,
     pub name: Option<String>,
+    pub span: Option<(u32, u32)>,
 }
 
 pub(crate) fn capture(
@@ -160,19 +162,13 @@ impl<'arena> ReactiveFunctionVisitor<'arena> for ScopeSnapshotVisitor<'_, 'arena
 }
 
 impl ScopeSnapshotVisitor<'_, '_> {
-    fn identifier_name(
-        &self,
-        identifier: crate::react_compiler_hir::IdentifierId,
-    ) -> Option<String> {
-        self.environment.identifiers[identifier]
-            .name
-            .map(|name| name.value().to_owned())
-    }
-
     fn value_analysis(&self, identifier: crate::react_compiler_hir::IdentifierId) -> ValueAnalysis {
+        let identifier = &self.environment.identifiers[identifier];
         ValueAnalysis {
-            id: identifier.index(),
-            name: self.identifier_name(identifier),
+            id: identifier.id.index(),
+            declaration_id: identifier.declaration_id.index(),
+            name: identifier.name.map(|name| name.value().to_owned()),
+            span: identifier.span.map(|span| (span.start, span.end)),
         }
     }
 

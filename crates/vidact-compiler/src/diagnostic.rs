@@ -7,6 +7,7 @@ pub enum DiagnosticCode {
     EmptyComponentName,
     MultipleSourceWriters,
     UnknownSource,
+    UnsupportedSyntax,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

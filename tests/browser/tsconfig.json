@@ -4,5 +4,5 @@
     "lib": ["ES2024", "ESNext.Disposable", "DOM", "DOM.Iterable"],
     "types": ["node", "vitest/globals"]
   },
-  "include": ["corpus/**/*.ts", "vitest.config.ts"]
+  "include": ["corpus/**/*.ts", "generated/**/*.ts", "vitest.config.ts"]
 }

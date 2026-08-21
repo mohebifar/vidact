@@ -7,7 +7,8 @@ tracking.
 
 This orphan branch is a from-scratch Rust rebuild. It currently contains the
 compiler-neutral updater IR, the runtime foundation, and executable browser
-corpora. It does **not** compile TSX yet.
+corpora. A deliberately narrow codegen spike now compiles one TSX alias corpus
+to direct DOM operations; it is not a general TSX compiler yet.
 
 ## Architecture
 
@@ -16,7 +17,7 @@ React source
   -> React Compiler Rust analysis (AST, scope, HIR/CFG/SSA, dependencies)
   -> Vidact analysis adapter
   -> Vidact static updater IR
-  -> Vanilla DOM codegen (next milestone)
+  -> Vanilla DOM codegen
   -> @vidact/runtime
 ```
 
@@ -41,7 +42,7 @@ the rationale and integration constraints.
 
 ## Development
 
-Requirements: Rust 1.89, Node 24+, pnpm 10, and a Playwright Chromium install.
+Requirements: Rust 1.96, Node 24+, pnpm 10, and a Playwright Chromium install.
 
 ```sh
 pnpm install
@@ -64,7 +65,8 @@ pnpm test:browser
 - Disposed component scopes ignore later invalidations.
 - Non-stabilizing updater feedback fails loudly instead of blocking the browser forever.
 
-The next milestone is the pinned React Compiler adapter, followed by TSX-to-DOM
-code generation and Vite integration. The project is not production-ready until
-those paths, diagnostics, SSR/hydration policy, events, effects, and cross-browser
-corpora are complete.
+The pinned React Compiler adapter and a bounded TSX-to-DOM codegen spike are now
+executable. The next milestone is replacing the lexical DOM/code extraction
+with OXC AST and semantic identities, then expanding diagnostics and Vite
+integration. The project is not production-ready until those paths,
+SSR/hydration policy, events, effects, and cross-browser corpora are complete.

@@ -27,9 +27,11 @@ flowchart LR
     E --> F["Vidact DOM classification"]
     F --> G["ComponentFacts"]
     G --> H["Vidact static updater IR"]
+    H --> I["Direct DOM module"]
+    I --> J["Vitest Browser + Chromium"]
 ```
 
-The fork adds owned function, scope, dependency, instruction, and value records. No arena reference, React HIR node, or OXC AST node crosses the crate boundary. Local value IDs are copied as plain integers so Vidact can follow unnamed SSA temporaries without depending on React Compiler's index types.
+The fork adds owned function, scope, dependency, instruction, and value records. No arena reference, React HIR node, or OXC AST node crosses the crate boundary. Local value IDs and declaration IDs are copied as plain integers, with source spans, so Vidact can follow unnamed SSA temporaries and distinguish shadowed bindings without depending on React Compiler's index types.
 
 The seam has two capture moments. Def-use instructions are copied immediately before `prune_unused_lvalues`, because that optimization deliberately erases source binding lvalues that Vidact still needs to connect `count -> doubled`. Optimized reactive scopes are copied after pruning, merging, stable block IDs, renaming, and hoisted-context pruning. The two owned views are combined into one `FunctionAnalysis` before React codegen.
 
@@ -47,15 +49,20 @@ The owned snapshot is assembled before React Compiler codegen. Vidact neither ap
 
 ## Corpus result
 
-Three browser-oriented TSX shapes lower to the existing `ComponentFacts` contract:
+Four browser-oriented TSX shapes lower to the existing `ComponentFacts` contract:
 
 | Fixture | Facts demonstrated |
 | --- | --- |
 | `Counter` | `useState` source, derived `count -> doubled` edge, text updater |
 | `Greeting` | destructured prop, derived message, text and attribute updaters |
 | `Todos` | array state and keyed structural updater using `item.id` |
+| `AliasCounter` | `count -> direct -> alias -> doubled`, attribute and text updaters |
 
-The tests execute the real OXC parser, OXC semantic builder, and vendored React Compiler pipeline. The counter's `count -> doubled` edge is recovered through React Compiler's def-use chain, including unnamed temporaries, rather than lexical identifier matching. A fixture rejected by any stage returns an `AnalysisFailed` diagnostic rather than silently falling back. The bounded adapter also fails closed when a module contains multiple components, until the DOM classifier is scoped using OXC function spans.
+The tests execute the real OXC parser, OXC semantic builder, and vendored React Compiler pipeline. The counter edges are recovered through React Compiler's def-use chain, including unnamed temporaries, rather than lexical identifier matching. Declaration identity prevents a shadowed parameter named `count` from becoming a false state dependency. A fixture rejected by any stage returns an `AnalysisFailed` diagnostic rather than silently falling back. The bounded adapter also fails closed when a module contains multiple components, until the DOM classifier is scoped using OXC function spans.
+
+The `AliasCounter` fixture also crosses the full executable boundary. A Rust example regenerates a TypeScript module before the browser suite; that module creates one stable button and text node, installs compiler-ordered static updaters, and imports only the small Vidact runtime. Vitest Browser then proves initial rendering, click updates, functional setters, batching, updater order, attribute/text writes, and DOM node identity in Chromium. The test never hand-writes the updater graph.
+
+Bundling that generated module and its runtime imports with esbuild 0.25.5 in browser ESM mode produces 2,066 minified bytes and 1,038 gzip bytes. This is a spike measurement, not a production budget claim: it includes test trace instrumentation, covers one component, and excludes a framework integration layer.
 
 ## What React Compiler gives Vidact
 
@@ -76,13 +83,15 @@ The current Vidact DOM classifier is intentionally a corpus probe, not a parser 
 - JSX expression text and attributes;
 - direct `collection.map(...)` with a property key.
 
-It does not yet correctly handle aliases, shadowing, nested functions, computed keys, fragments with mixed update sites, conditional trees, arbitrary destructuring, multiple returns, optional chaining, or source transforms. The keyed-array test proves the intended IR boundary, not a production list reconciler.
+It now handles straight-line aliases and distinguishes shadowed declarations in the captured def-use graph. It does not yet correctly classify nested component scopes, computed keys, fragments with mixed update sites, conditional trees, arbitrary destructuring, multiple returns, optional chaining, or source transforms. The keyed-array analysis test proves the intended IR boundary and the runtime has a tested reconciler, but the spike emitter does not connect those two paths yet.
+
+The executable emitter is deliberately narrower still: one numeric state tuple, numeric `const` derivations, one intrinsic root element, expression attributes, one text expression, and an optional inline setter-based click handler. String-bearing expressions and other unsupported input return `UnsupportedSyntax`; they are never approximated with a partial render.
 
 ## Production path
 
 Keep the React Compiler fork limited to snapshot capture, then replace the lexical Vidact classifier with an OXC AST visitor backed by `oxc_semantic` symbol and reference IDs. The production adapter should:
 
-1. map React Compiler snapshot names and spans to OXC symbols without relying on strings;
+1. replace the remaining lexical source classifier with OXC AST nodes and map snapshot declaration IDs/spans to OXC symbols;
 2. assign stable source IDs for props, state, context, derived values, and external reads;
 3. classify every JSX expression container by its parent position;
 4. lower conditions into branch updaters and arrays into keyed structural regions;

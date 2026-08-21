@@ -95,7 +95,8 @@ product.
 
 ## Next integration step
 
-Create a dedicated adapter crate at the pinned upstream revision. It should run
-only the upstream passes required to produce stable source, read/write, effect,
-branch, and keyed-list facts, then immediately lower into `ComponentFacts`.
-Golden per-pass fixtures should detect drift when updating the React revision.
+The pinned adapter now captures owned pre-codegen def-use and reactive-scope
+facts and lowers them immediately into `ComponentFacts`. The next step is an
+OXC AST-backed DOM classifier and emitter for the documented language subset,
+with golden per-pass fixtures that detect drift whenever the vendored React
+Compiler revision changes.

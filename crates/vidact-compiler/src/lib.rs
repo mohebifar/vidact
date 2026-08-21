@@ -5,10 +5,12 @@
 //! static updater IR.
 
 pub mod analysis;
+mod browser_codegen;
 mod diagnostic;
 pub mod ir;
 mod oxc_react;
 
+pub use browser_codegen::compile_spike_browser_module;
 pub use diagnostic::{Diagnostic, DiagnosticCode};
 pub use ir::{ComponentIr, IrSource, IrUpdater, lower_component};
 pub use oxc_react::OxcReactAnalysisAdapter;

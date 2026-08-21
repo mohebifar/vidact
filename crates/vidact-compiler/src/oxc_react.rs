@@ -101,7 +101,7 @@ fn analysis_error(message: impl Into<String>) -> Diagnostic {
 }
 
 fn lower_snapshot(source: &str, analysis: &FunctionAnalysis) -> ComponentFacts {
-    eprintln!("{analysis:#?}");
+    let def_use = CompilerDefUse::new(source, analysis);
     let mut sources = BTreeMap::<String, SourceKind>::new();
 
     for prop in destructured_props(source) {
@@ -111,28 +111,47 @@ fn lower_snapshot(source: &str, analysis: &FunctionAnalysis) -> ComponentFacts {
         sources.insert(state, SourceKind::State);
     }
 
-    let derived = derived_bindings(source, sources.keys().map(String::as_str));
+    let candidates = simple_const_bindings(source);
+    let mut provisional_names = sources.keys().map(String::as_str).collect::<BTreeSet<_>>();
+    provisional_names.extend(candidates.iter().map(|(name, _)| name.as_str()));
+    let provisional_ids = provisional_names
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| (name, SourceId::new(index as u32)))
+        .collect::<BTreeMap<_, _>>();
+    let candidate_reads = candidates
+        .iter()
+        .map(|(name, _)| (name.as_str(), def_use.reads_for(name, &provisional_ids)))
+        .collect::<Vec<_>>();
+    let mut reachable = sources
+        .keys()
+        .filter_map(|name| provisional_ids.get(name.as_str()).copied())
+        .collect::<BTreeSet<_>>();
+    let mut derived_names = BTreeSet::new();
+    loop {
+        let mut changed = false;
+        for (name, reads) in &candidate_reads {
+            if !derived_names.contains(*name) && reads.iter().any(|read| reachable.contains(read)) {
+                derived_names.insert(*name);
+                reachable.insert(provisional_ids[name]);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let derived = candidates
+        .iter()
+        .filter_map(|(name, _)| {
+            derived_names
+                .contains(name.as_str())
+                .then_some(name.clone())
+        })
+        .collect::<Vec<_>>();
     for name in &derived {
         sources.insert(name.clone(), SourceKind::Derived);
     }
-
-    // Keep only named facts which survive React Compiler's optimized reactive
-    // scopes, plus explicit props/state roots needed by the Vidact runtime.
-    let compiler_names = analysis
-        .scopes
-        .iter()
-        .flat_map(|scope| {
-            scope
-                .dependencies
-                .iter()
-                .map(|dependency| dependency.name.as_str())
-                .chain(scope.declarations.iter().map(String::as_str))
-        })
-        .collect::<BTreeSet<_>>();
-    sources.retain(|name, kind| {
-        matches!(kind, SourceKind::Prop | SourceKind::State)
-            || compiler_names.contains(name.as_str())
-    });
 
     let source_facts = sources
         .into_iter()
@@ -149,7 +168,7 @@ fn lower_snapshot(source: &str, analysis: &FunctionAnalysis) -> ComponentFacts {
         let Some(&write) = source_ids.get(name.as_str()) else {
             continue;
         };
-        let reads = compiler_reads_for_declaration(analysis, &name, &source_ids);
+        let reads = def_use.reads_for(&name, &source_ids);
         push_updater(&mut updaters, UpdaterKind::Derived, reads, vec![write]);
     }
 
@@ -178,7 +197,12 @@ fn lower_snapshot(source: &str, analysis: &FunctionAnalysis) -> ComponentFacts {
             );
         }
     } else {
-        let reads = names_read_by(jsx, &source_ids);
+        let reads: Vec<SourceId> = jsx_child_expressions(jsx)
+            .into_iter()
+            .flat_map(|expression| names_read_by(expression, &source_ids))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
         if !reads.is_empty() {
             push_updater(&mut updaters, UpdaterKind::Text, reads, vec![]);
         }
@@ -240,8 +264,7 @@ fn state_bindings(source: &str) -> Vec<String> {
         .collect()
 }
 
-fn derived_bindings<'a>(source: &str, roots: impl Iterator<Item = &'a str>) -> Vec<String> {
-    let roots = roots.map(str::to_owned).collect::<Vec<_>>();
+pub(crate) fn simple_const_bindings(source: &str) -> Vec<(String, &str)> {
     source
         .split("const ")
         .skip(1)
@@ -252,66 +275,129 @@ fn derived_bindings<'a>(source: &str, roots: impl Iterator<Item = &'a str>) -> V
             let (name, expression) = tail.split_once('=')?;
             let name = identifier(name)?.to_owned();
             let expression = expression.split(';').next().unwrap_or(expression);
-            roots
-                .iter()
-                .any(|root| contains_identifier(expression, root))
-                .then_some(name)
+            Some((name, expression.trim()))
         })
         .collect()
 }
 
-fn compiler_reads_for_declaration(
-    analysis: &FunctionAnalysis,
-    declaration: &str,
-    source_ids: &BTreeMap<&str, SourceId>,
-) -> Vec<SourceId> {
-    let producers = analysis
-        .instructions
-        .iter()
-        .flat_map(|instruction| {
-            instruction
-                .lvalues
-                .iter()
-                .map(move |lvalue| (lvalue.id, instruction))
-        })
-        .collect::<BTreeMap<_, _>>();
-    let roots = analysis
-        .instructions
-        .iter()
-        .flat_map(|instruction| &instruction.lvalues)
-        .filter(|lvalue| lvalue.name.as_deref() == Some(declaration));
-    let mut reads = BTreeSet::new();
-    let mut visited = BTreeSet::new();
-
-    for root in roots {
-        collect_compiler_reads(root.id, &producers, source_ids, &mut visited, &mut reads);
-    }
-
-    reads.into_iter().collect()
+struct CompilerDefUse<'a> {
+    source: &'a str,
+    analysis: &'a FunctionAnalysis,
+    producers: BTreeMap<usize, &'a oxc_react_compiler::InstructionAnalysis>,
 }
 
-fn collect_compiler_reads(
-    value: usize,
-    producers: &BTreeMap<usize, &oxc_react_compiler::InstructionAnalysis>,
-    source_ids: &BTreeMap<&str, SourceId>,
-    visited: &mut BTreeSet<usize>,
-    reads: &mut BTreeSet<SourceId>,
-) {
-    if !visited.insert(value) {
-        return;
-    }
-    let Some(instruction) = producers.get(&value) else {
-        return;
-    };
-    for dependency in &instruction.dependencies {
-        if let Some(name) = dependency.name.as_deref()
-            && let Some(source) = source_ids.get(name)
-        {
-            reads.insert(*source);
-        } else {
-            collect_compiler_reads(dependency.id, producers, source_ids, visited, reads);
+impl<'a> CompilerDefUse<'a> {
+    fn new(source: &'a str, analysis: &'a FunctionAnalysis) -> Self {
+        let producers = analysis
+            .instructions
+            .iter()
+            .flat_map(|instruction| {
+                instruction
+                    .lvalues
+                    .iter()
+                    .map(move |lvalue| (lvalue.id, instruction))
+            })
+            .collect();
+        Self {
+            source,
+            analysis,
+            producers,
         }
     }
+
+    fn reads_for(&self, declaration: &str, source_ids: &BTreeMap<&str, SourceId>) -> Vec<SourceId> {
+        let source_declarations = source_ids
+            .iter()
+            .filter_map(|(name, source)| {
+                self.declaration_id(name)
+                    .map(|declaration| (declaration, *source))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let Some(root_declaration) = self.declaration_id(declaration) else {
+            return Vec::new();
+        };
+        let roots = self
+            .analysis
+            .instructions
+            .iter()
+            .flat_map(|instruction| &instruction.lvalues)
+            .filter(|lvalue| lvalue.declaration_id == root_declaration);
+        let mut reads = BTreeSet::new();
+        let mut visited = BTreeSet::new();
+
+        for root in roots {
+            self.collect_reads(root.id, &source_declarations, &mut visited, &mut reads);
+        }
+        reads.into_iter().collect()
+    }
+
+    fn declaration_id(&self, name: &str) -> Option<usize> {
+        let offset = declaration_offset(self.source, name)?;
+        self.analysis
+            .instructions
+            .iter()
+            .flat_map(|instruction| &instruction.lvalues)
+            .find(|value| value.span.is_some_and(|span| span.0 == offset))
+            .map(|value| value.declaration_id)
+    }
+
+    fn collect_reads(
+        &self,
+        value: usize,
+        source_declarations: &BTreeMap<usize, SourceId>,
+        visited: &mut BTreeSet<usize>,
+        reads: &mut BTreeSet<SourceId>,
+    ) {
+        if !visited.insert(value) {
+            return;
+        }
+        let Some(instruction) = self.producers.get(&value) else {
+            return;
+        };
+        for dependency in &instruction.dependencies {
+            if let Some(source) = source_declarations.get(&dependency.declaration_id) {
+                reads.insert(*source);
+            } else {
+                self.collect_reads(dependency.id, source_declarations, visited, reads);
+            }
+        }
+    }
+}
+
+fn declaration_offset(source: &str, name: &str) -> Option<u32> {
+    for (start, _) in source.match_indices("const ") {
+        let binding_start = start + "const ".len();
+        let tail = &source[binding_start..];
+        if let Some(bindings) = tail.strip_prefix('[') {
+            let (bindings, remainder) = bindings.split_once(']')?;
+            let initializer = remainder.split(';').next().unwrap_or(remainder);
+            if initializer.contains("useState")
+                && let Some(relative) = identifier_offset(bindings, name)
+            {
+                return u32::try_from(binding_start + 1 + relative).ok();
+            }
+        } else if identifier(tail) == Some(name) {
+            let whitespace = tail.len() - tail.trim_start().len();
+            return u32::try_from(binding_start + whitespace).ok();
+        }
+    }
+
+    let function = source.find("function ")?;
+    let signature_end = function + source[function..].find(')')?;
+    let signature = &source[function..signature_end];
+    let destructuring = signature.find('{')?;
+    let props = &signature[destructuring + 1..signature.find('}')?];
+    identifier_offset(props, name)
+        .and_then(|relative| u32::try_from(function + destructuring + 1 + relative).ok())
+}
+
+fn identifier_offset(source: &str, name: &str) -> Option<usize> {
+    source.match_indices(name).find_map(|(start, _)| {
+        let before = source[..start].chars().next_back();
+        let after = source[start + name.len()..].chars().next();
+        (!before.is_some_and(is_identifier_continue) && !after.is_some_and(is_identifier_continue))
+            .then_some(start)
+    })
 }
 
 fn jsx_attributes(jsx: &str) -> Vec<(String, &str)> {
@@ -322,7 +408,7 @@ fn jsx_attributes(jsx: &str) -> Vec<(String, &str)> {
         let name = before
             .rsplit(|character: char| character.is_whitespace() || character == '<')
             .next()
-            .and_then(identifier);
+            .and_then(jsx_attribute_name);
         let expression = &remainder[open + 2..];
         let Some(close) = expression.find('}') else {
             break;
@@ -336,6 +422,49 @@ fn jsx_attributes(jsx: &str) -> Vec<(String, &str)> {
         remainder = &expression[close + 1..];
     }
     attributes
+}
+
+pub(crate) fn jsx_attribute_name(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty()
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '_' | '$' | '-' | ':')
+        }))
+    .then_some(value)
+}
+
+fn jsx_child_expressions(jsx: &str) -> Vec<&str> {
+    let Some(opening_tag_end) = jsx_opening_tag_end(jsx) else {
+        return Vec::new();
+    };
+    let children = &jsx[opening_tag_end + 1..];
+    let children = children
+        .find("</")
+        .map_or(children, |closing_tag| &children[..closing_tag]);
+    let mut expressions = Vec::new();
+    let mut remainder = children;
+    while let Some(open) = remainder.find('{') {
+        let expression = &remainder[open + 1..];
+        let Some(close) = expression.find('}') else {
+            break;
+        };
+        expressions.push(&expression[..close]);
+        remainder = &expression[close + 1..];
+    }
+    expressions
+}
+
+pub(crate) fn jsx_opening_tag_end(source: &str) -> Option<usize> {
+    let mut depth = 0_u32;
+    for (index, character) in source.char_indices() {
+        match character {
+            '{' => depth += 1,
+            '}' => depth = depth.checked_sub(1)?,
+            '>' if depth == 0 => return Some(index),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn keyed_map(jsx: &str) -> Option<(String, String)> {
@@ -357,7 +486,7 @@ fn names_read_by(expression: &str, source_ids: &BTreeMap<&str, SourceId>) -> Vec
         .collect()
 }
 
-fn identifier(value: &str) -> Option<&str> {
+pub(crate) fn identifier(value: &str) -> Option<&str> {
     let value = value.trim();
     let end = value
         .find(|character: char| {
@@ -380,6 +509,6 @@ fn contains_identifier(haystack: &str, needle: &str) -> bool {
     })
 }
 
-fn is_identifier_continue(character: char) -> bool {
+pub(crate) fn is_identifier_continue(character: char) -> bool {
     character.is_ascii_alphanumeric() || character == '_' || character == '$'
 }
