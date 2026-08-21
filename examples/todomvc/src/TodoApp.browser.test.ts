@@ -23,11 +23,13 @@ describe('Vidact TodoMVC', () => {
     expect(host.querySelector('.todo-count')?.textContent).toContain('2 items left')
 
     const rootBeforeToggle = host.firstChild
+    const affectedTodoBeforeToggle = host.querySelectorAll('li')[0]
     const unaffectedTodoBeforeToggle = host.querySelectorAll('li')[1]
     const draftInput = host.querySelector<HTMLInputElement>('.new-todo')
     if (draftInput !== null) draftInput.value = 'Keep this draft'
     host.querySelector<HTMLInputElement>('.toggle')?.click()
     expect(host.firstChild).toBe(rootBeforeToggle)
+    expect(host.querySelectorAll('li')[0]).toBe(affectedTodoBeforeToggle)
     expect(host.querySelectorAll('li')[1]).toBe(unaffectedTodoBeforeToggle)
     expect(host.querySelector<HTMLInputElement>('.new-todo')?.value).toBe('Keep this draft')
     expect(host.querySelectorAll('.completed')).toHaveLength(1)

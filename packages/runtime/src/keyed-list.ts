@@ -26,11 +26,12 @@ interface RecordState<T, K> {
 export function createKeyedList<T, K>(
   parent: Node,
   options: KeyedListOptions<T, K>,
+  before: Node | null = null,
 ): KeyedList<T> {
   const start = document.createComment('vidact:list')
   const end = document.createComment('/vidact:list')
-  parent.appendChild(start)
-  parent.appendChild(end)
+  parent.insertBefore(start, before)
+  parent.insertBefore(end, before)
 
   let disposed = false
   let records: readonly RecordState<T, K>[] = []
@@ -43,32 +44,31 @@ export function createKeyedList<T, K>(
 
     const previousByKey = new Map<K, RecordState<T, K>>()
     for (const record of records) previousByKey.set(record.key, record)
-    const nextRecords = values.map((value, index): RecordState<T, K> => {
-      const key = keys[index] as K
-      const previous = previousByKey.get(key)
-      if (previous !== undefined) {
-        previousByKey.delete(key)
-        previous.update?.(value, index)
-        return previous
-      }
-
-      const item = normalizeRenderResult(options.render(value, index))
-      return { key, ...item }
-    })
-
-    let cleanupFailed = false
-    let firstCleanupError: unknown
-    for (const removed of previousByKey.values()) {
-      removeNodes(parent, removed.nodes)
-      try {
-        removed.dispose?.()
-      } catch (error) {
-        if (!cleanupFailed) {
-          cleanupFailed = true
-          firstCleanupError = error
+    const created: RecordState<T, K>[] = []
+    const retained: Array<{ record: RecordState<T, K>; value: T; index: number }> = []
+    let nextRecords: RecordState<T, K>[]
+    try {
+      nextRecords = values.map((value, index): RecordState<T, K> => {
+        const key = keys[index] as K
+        const previous = previousByKey.get(key)
+        if (previous !== undefined) {
+          previousByKey.delete(key)
+          retained.push({ record: previous, value, index })
+          return previous
         }
-      }
+
+        const item = normalizeRenderResult(options.render(value, index))
+        const record = { key, ...item }
+        created.push(record)
+        return record
+      })
+      for (const { record, value, index } of retained) record.update?.(value, index)
+    } catch (error) {
+      disposeRecords(parent, created)
+      throw error
     }
+
+    const cleanup = disposeRecords(parent, previousByKey.values())
 
     let cursor: Node = end
     for (let recordIndex = nextRecords.length - 1; recordIndex >= 0; recordIndex -= 1) {
@@ -81,29 +81,17 @@ export function createKeyedList<T, K>(
     }
 
     records = nextRecords
-    if (cleanupFailed) throw firstCleanupError
+    if (cleanup.failed) throw cleanup.error
   }
 
   const dispose = (): void => {
     if (disposed) return
     disposed = true
-    let cleanupFailed = false
-    let firstCleanupError: unknown
-    for (const record of records) {
-      removeNodes(parent, record.nodes)
-      try {
-        record.dispose?.()
-      } catch (error) {
-        if (!cleanupFailed) {
-          cleanupFailed = true
-          firstCleanupError = error
-        }
-      }
-    }
+    const cleanup = disposeRecords(parent, records)
     records = []
     start.remove()
     end.remove()
-    if (cleanupFailed) throw firstCleanupError
+    if (cleanup.failed) throw cleanup.error
   }
 
   return { dispose, update }
@@ -151,4 +139,22 @@ function removeNodes(parent: Node, nodes: readonly Node[]): void {
   for (const node of nodes) {
     if (node.parentNode === parent) parent.removeChild(node)
   }
+}
+
+function disposeRecords<T, K>(
+  parent: Node,
+  records: Iterable<RecordState<T, K>>,
+): { readonly error: unknown; readonly failed: boolean } {
+  let firstError: unknown
+  let failed = false
+  for (const record of records) {
+    removeNodes(parent, record.nodes)
+    try {
+      record.dispose?.()
+    } catch (error) {
+      if (!failed) firstError = error
+      failed = true
+    }
+  }
+  return { error: firstError, failed }
 }

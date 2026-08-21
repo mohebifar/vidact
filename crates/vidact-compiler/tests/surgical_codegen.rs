@@ -63,3 +63,38 @@ fn rejects_reactive_structures_that_do_not_have_surgical_range_semantics() {
                 .contains("keyed map or an && conditional")
     }));
 }
+
+#[test]
+fn compiles_keyed_item_and_parent_reads_into_separate_static_domains() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "Items.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function Items(): Node {
+                const [items, setItems] = useState([{ id: 1, label: 'one' }]);
+                const [selected, setSelected] = useState(1);
+                return <ul>{items.map((item, index) => (
+                    <li
+                        key={item.id}
+                        className={selected === item.id ? 'selected' : ''}
+                        onClick={() => setSelected(item.id)}
+                    >{index}: {item.label}</li>
+                ))}</ul>;
+            }
+        "#,
+    })
+    .expect("keyed item bindings belong to the supported surgical slice");
+
+    assert!(output.contains("keyed as __vidactKeyed"), "{output}");
+    assert!(
+        output.contains("(item, index, __vidactItemScope)"),
+        "{output}"
+    );
+    assert!(output.contains("(item, index) => item.id"), "{output}");
+    assert!(output.contains("item.get().id"), "{output}");
+    assert!(output.contains("index.get()"), "{output}");
+    assert!(
+        output.contains("__vidactItemScope, __vidactSource(0)"),
+        "{output}"
+    );
+}

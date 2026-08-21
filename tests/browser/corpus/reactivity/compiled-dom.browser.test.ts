@@ -6,6 +6,7 @@ import {
   compiledRoot,
   createCompiledScope,
   createCompiledState,
+  type DirectComponent,
   Fragment,
   h,
   keyed,
@@ -52,7 +53,11 @@ describe('compiled DOM corpus', () => {
             itemsSource,
             items.get,
             (item) => item.id,
-            (item) => h('li', { 'data-id': item.id }, item.label),
+            (item, _index, itemScope) => h(
+              'li',
+              { 'data-id': item.get().id },
+              binding(itemScope, source(0), () => item.get().label),
+            ),
           ),
         ),
       ))
@@ -91,7 +96,17 @@ describe('compiled DOM corpus', () => {
       return compiledRoot(scope, () => h(
         'ul',
         null,
-        keyed(scope, itemsSource, items.get, (item) => item.id, (item) => h('li', null, item.label)),
+        keyed(
+          scope,
+          itemsSource,
+          items.get,
+          (item) => item.id,
+          (item, _index, itemScope) => h(
+            'li',
+            null,
+            binding(itemScope, source(0), () => item.get().label),
+          ),
+        ),
       ))
     }, host)
     const before = host.innerHTML
@@ -113,6 +128,7 @@ describe('compiled DOM corpus', () => {
       const scope = createCompiledScope()
       const items = createCompiledState<readonly Item[]>(scope, itemsSource, [
         { id: 1, label: 'one' },
+        { id: 2, label: 'two' },
       ])
       setItems = items.set
       return compiledRoot(scope, () => h('ul', null, keyed(
@@ -120,15 +136,18 @@ describe('compiled DOM corpus', () => {
         itemsSource,
         items.get,
         (item) => item.id,
-        (item) => {
-          if (item.label === 'broken') throw new Error('render failed')
-          return h('li', null, item.label)
+        (item, _index, itemScope) => {
+          if (item.get().label === 'broken') throw new Error('render failed')
+          return h('li', null, binding(itemScope, source(0), () => item.get().label))
         },
       )))
     }, host)
     const before = host.innerHTML
 
-    expect(() => setItems([{ id: 1, label: 'broken' }])).toThrow('render failed')
+    expect(() => setItems([
+      { id: 1, label: 'ONE' },
+      { id: 3, label: 'broken' },
+    ])).toThrow('render failed')
     expect(host.innerHTML).toBe(before)
 
     mounted.dispose()
@@ -185,6 +204,164 @@ describe('compiled DOM corpus', () => {
     host.querySelector('button')?.click()
 
     expect(updaterRuns).toBe(1)
+    mounted.dispose()
+  })
+
+  it('updates same-key records through item slots without replacing their DOM', () => {
+    const itemsSource = source(0)
+    const prefixSource = source(1)
+    const itemSource = source(0)
+    const indexSource = source(1)
+    let setItems!: ReturnType<typeof createCompiledState<readonly Item[]>>['set']
+    let setPrefix!: ReturnType<typeof createCompiledState<string>>['set']
+    const host = document.createElement('div')
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const items = createCompiledState<readonly Item[]>(scope, itemsSource, [
+        { id: 1, label: 'one' },
+        { id: 2, label: 'two' },
+      ])
+      const prefix = createCompiledState(scope, prefixSource, 'row')
+      setItems = items.set
+      setPrefix = prefix.set
+      return compiledRoot(scope, () => h('ul', null, keyed(
+        scope,
+        itemsSource,
+        items.get,
+        (item) => item.id,
+        (item, index, itemScope) => h(
+          'li',
+          {
+            'data-id': binding(
+              itemScope,
+              itemSource,
+              () => item.get().id,
+            ),
+            className: binding(
+              scope,
+              prefixSource,
+              () => `${prefix.get()}-${item.get().id}`,
+              itemScope,
+              itemSource,
+            ),
+          },
+          binding(
+            itemScope,
+            combineSources(itemSource, indexSource),
+            () => `${index.get()}:${item.get().label}`,
+          ),
+        ),
+      )))
+    }, host)
+    const first = host.querySelector('[data-id="1"]')
+    const second = host.querySelector('[data-id="2"]')
+
+    setItems([
+      { id: 2, label: 'TWO' },
+      { id: 1, label: 'ONE' },
+    ])
+
+    expect(host.querySelector('[data-id="1"]')).toBe(first)
+    expect(host.querySelector('[data-id="2"]')).toBe(second)
+    expect(host.querySelectorAll('li')[0]).toBe(second)
+    expect(host.querySelectorAll('li')[1]).toBe(first)
+    expect(host.textContent).toBe('0:TWO1:ONE')
+
+    setPrefix('item')
+    expect(first?.className).toBe('item-1')
+    expect(second?.className).toBe('item-2')
+
+    mounted.dispose()
+  })
+
+  it('mounts a compiler-owned block through props exactly once', () => {
+    const itemsSource = source(0)
+    const itemSource = source(0)
+    let setItems!: ReturnType<typeof createCompiledState<readonly Item[]>>['set']
+    const host = document.createElement('div')
+    const List: DirectComponent = (props): Node => h(
+      'ul',
+      null,
+      props.rows as ReturnType<typeof keyed<Item, number>>,
+    )
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const items = createCompiledState<readonly Item[]>(scope, itemsSource, [
+        { id: 1, label: 'one' },
+      ])
+      setItems = items.set
+      const rows = keyed(
+        scope,
+        itemsSource,
+        items.get,
+        (item) => item.id,
+        (item, _index, itemScope) => h(
+          'li',
+          null,
+          binding(itemScope, itemSource, () => item.get().label),
+        ),
+      )
+      return compiledRoot(scope, () => h(List, { rows }))
+    }, host)
+    const row = host.querySelector('li')
+
+    setItems([{ id: 1, label: 'ONE' }])
+    expect(host.querySelector('li')).toBe(row)
+    expect(row?.textContent).toBe('ONE')
+
+    const duplicateHost = document.createElement('div')
+    const scope = createCompiledScope()
+    const duplicate = keyed(
+      scope,
+      itemsSource,
+      () => [{ id: 1, label: 'one' }],
+      (item) => item.id,
+      (item) => h('li', null, item.get().label),
+    )
+    duplicate.mount(duplicateHost, null)
+    expect(() => duplicate.mount(duplicateHost, null)).toThrow(/already mounted/i)
+    scope.dispose()
+
+    mounted.dispose()
+  })
+
+  it('disposes a removed keyed record item scope', () => {
+    const itemsSource = source(0)
+    const itemSource = source(0)
+    let setItems!: ReturnType<typeof createCompiledState<readonly Item[]>>['set']
+    let removedItem!: ReturnType<typeof createCompiledState<Item>>
+    let removedUpdaterRuns = 0
+    const host = document.createElement('div')
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const items = createCompiledState<readonly Item[]>(scope, itemsSource, [
+        { id: 1, label: 'one' },
+        { id: 2, label: 'two' },
+      ])
+      setItems = items.set
+      return compiledRoot(scope, () => h('ul', null, keyed(
+        scope,
+        itemsSource,
+        items.get,
+        (item) => item.id,
+        (item, _index, itemScope) => {
+          if (item.get().id === 1) {
+            removedItem = item
+            itemScope.add({
+              reads: itemSource,
+              run: () => { removedUpdaterRuns += 1 },
+            })
+          }
+          return h('li', null, binding(itemScope, itemSource, () => item.get().label))
+        },
+      )))
+    }, host)
+
+    setItems([{ id: 2, label: 'two' }])
+    removedItem.set({ id: 1, label: 'ONE' })
+
+    expect(removedUpdaterRuns).toBe(0)
+    expect(host.textContent).toBe('two')
     mounted.dispose()
   })
 })

@@ -7,6 +7,7 @@ use oxc_allocator::{Allocator, CloneIn, GetAllocator};
 use oxc_ast::{ast::*, builder::AstBuilder};
 use oxc_ast_visit::{
     Visit, VisitMut,
+    walk::walk_call_expression,
     walk_mut::{walk_expression as walk_expression_mut, walk_jsx_attribute},
 };
 use oxc_codegen::Codegen;
@@ -34,6 +35,8 @@ const COMPILED_ROOT: &str = "__vidactCompiledRoot";
 const CREATE_SCOPE: &str = "__vidactCreateScope";
 const CREATE_STATE: &str = "__vidactCreateState";
 const KEYED: &str = "__vidactKeyed";
+const ITEM_INDEX: &str = "__vidactItemIndex";
+const ITEM_SCOPE: &str = "__vidactItemScope";
 const SOURCE: &str = "__vidactSource";
 const WHEN: &str = "__vidactWhen";
 
@@ -106,6 +109,8 @@ fn transform_program<'a>(
         CREATE_SCOPE,
         CREATE_STATE,
         KEYED,
+        ITEM_INDEX,
+        ITEM_SCOPE,
         SOURCE,
         WHEN,
     ] {
@@ -132,6 +137,8 @@ fn transform_program<'a>(
         .collect::<BTreeMap<_, _>>();
     let mut source_symbols = BTreeMap::<SymbolId, SourceId>::new();
     let mut state_symbols = BTreeMap::<SymbolId, StateReference<'a>>::new();
+    let (item_source_symbols, item_state_symbols) = item_parameters(body, &ast);
+    state_symbols.extend(item_state_symbols);
 
     for statement in &body.statements {
         let Statement::VariableDeclaration(declaration) = statement else {
@@ -228,6 +235,7 @@ fn transform_program<'a>(
         ast: &ast,
         scoping,
         source_symbols: &source_symbols,
+        item_source_symbols: &item_source_symbols,
         diagnostic: None,
     };
     jsx_transformer.visit_function_body(body);
@@ -397,6 +405,7 @@ struct JsxBindingTransformer<'a, 'b, 's> {
     ast: &'b AstBuilder<'a>,
     scoping: &'s Scoping,
     source_symbols: &'s BTreeMap<SymbolId, SourceId>,
+    item_source_symbols: &'s BTreeMap<SymbolId, SourceId>,
     diagnostic: Option<Diagnostic>,
 }
 
@@ -436,7 +445,12 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
         if let Expression::LogicalExpression(logical) = expression
             && logical.operator == LogicalOperator::And
         {
-            let reads = dependencies(&logical.left, self.scoping, self.source_symbols);
+            let reads = dependencies(
+                &logical.left,
+                self.scoping,
+                self.source_symbols,
+                self.item_source_symbols,
+            );
             self.visit_expression(&mut logical.right);
             if reads.is_empty() {
                 return;
@@ -447,43 +461,51 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             let render = logical
                 .right
                 .clone_in_with_semantic_ids(self.ast.allocator());
+            let mut arguments = vec![
+                ident(self.ast, SCOPE),
+                dependency_mask(self.ast, &reads.parent),
+                arrow_expression(self.ast, [], condition),
+                arrow_expression(self.ast, [], render),
+            ];
+            append_item_dependency(self.ast, &mut arguments, &reads);
+            *expression = call_name(self.ast, WHEN, arguments);
+            return;
+        }
+
+        if let Some((collection, key, mut render)) = keyed_map(expression, self.ast) {
+            let reads = dependencies(
+                &collection,
+                self.scoping,
+                self.source_symbols,
+                self.item_source_symbols,
+            );
+            if !reads.item.is_empty() {
+                self.diagnostic = Some(unsupported(
+                    "nested keyed collections that depend on an outer item are unsupported",
+                ));
+                return;
+            }
+            self.visit_expression(&mut render);
             *expression = call_name(
                 self.ast,
-                WHEN,
+                KEYED,
                 [
                     ident(self.ast, SCOPE),
-                    mask(self.ast, &reads),
-                    arrow_expression(self.ast, [], condition),
-                    arrow_expression(self.ast, [], render),
+                    dependency_mask(self.ast, &reads.parent),
+                    arrow_expression(self.ast, [], collection),
+                    key,
+                    render,
                 ],
             );
             return;
         }
 
-        if let Some((collection, key, mut render)) = keyed_map(expression, self.ast) {
-            // A list can depend on sources used by its collection and by bindings
-            // inside the item template. Keeping the complete read set lets static
-            // collections (for example, a filter picker) retain their keyed records
-            // while their nested bindings update surgically.
-            let reads = dependencies(expression, self.scoping, self.source_symbols);
-            self.visit_expression(&mut render);
-            if !reads.is_empty() {
-                *expression = call_name(
-                    self.ast,
-                    KEYED,
-                    [
-                        ident(self.ast, SCOPE),
-                        mask(self.ast, &reads),
-                        arrow_expression(self.ast, [], collection),
-                        key,
-                        render,
-                    ],
-                );
-                return;
-            }
-        }
-
-        let reads = dependencies(expression, self.scoping, self.source_symbols);
+        let reads = dependencies(
+            expression,
+            self.scoping,
+            self.source_symbols,
+            self.item_source_symbols,
+        );
         let contains_reactive_jsx = contains_jsx(expression);
         self.visit_expression(expression);
         if reads.is_empty() {
@@ -496,15 +518,13 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             return;
         }
         let evaluate = expression.clone_in_with_semantic_ids(self.ast.allocator());
-        *expression = call_name(
-            self.ast,
-            BINDING,
-            [
-                ident(self.ast, SCOPE),
-                mask(self.ast, &reads),
-                arrow_expression(self.ast, [], evaluate),
-            ],
-        );
+        let mut arguments = vec![
+            ident(self.ast, SCOPE),
+            dependency_mask(self.ast, &reads.parent),
+            arrow_expression(self.ast, [], evaluate),
+        ];
+        append_item_dependency(self.ast, &mut arguments, &reads);
+        *expression = call_name(self.ast, BINDING, arguments);
     }
 }
 
@@ -554,6 +574,9 @@ fn keyed_map<'a>(
     let Expression::ArrowFunctionExpression(render) = argument.as_expression()? else {
         return None;
     };
+    if !(1..=2).contains(&render.params.items.len()) {
+        return None;
+    }
     let key_expression = key_expression(render)?;
     let parameter_names = render
         .params
@@ -567,12 +590,17 @@ fn keyed_map<'a>(
     let key = arrow_expression(
         ast,
         parameter_names,
-        key_expression.clone_in_with_semantic_ids(ast.allocator()),
+        key_expression.clone_in(ast.allocator()),
     );
+    let mut render = render.clone_in_with_semantic_ids(ast.allocator());
+    if render.params.items.len() == 1 {
+        append_arrow_parameter(ast, &mut render, ITEM_INDEX);
+    }
+    append_arrow_parameter(ast, &mut render, ITEM_SCOPE);
     Some((
         member.object.clone_in_with_semantic_ids(ast.allocator()),
         key,
-        Expression::ArrowFunctionExpression(render.clone_in_with_semantic_ids(ast.allocator())),
+        Expression::ArrowFunctionExpression(render),
     ))
 }
 
@@ -598,10 +626,23 @@ fn key_expression<'a>(render: &'a ArrowFunctionExpression<'a>) -> Option<&'a Exp
     })
 }
 
+#[derive(Default)]
+struct DependencyReads {
+    parent: BTreeSet<SourceId>,
+    item: BTreeSet<SourceId>,
+}
+
+impl DependencyReads {
+    fn is_empty(&self) -> bool {
+        self.parent.is_empty() && self.item.is_empty()
+    }
+}
+
 struct DependencyFinder<'s> {
     scoping: &'s Scoping,
     source_symbols: &'s BTreeMap<SymbolId, SourceId>,
-    reads: BTreeSet<SourceId>,
+    item_source_symbols: &'s BTreeMap<SymbolId, SourceId>,
+    reads: DependencyReads,
 }
 
 impl<'a> Visit<'a> for DependencyFinder<'_> {
@@ -612,10 +653,12 @@ impl<'a> Visit<'a> for DependencyFinder<'_> {
         let Some(symbol) = self.scoping.get_reference(reference).symbol_id() else {
             return;
         };
-        let Some(source) = self.source_symbols.get(&symbol) else {
-            return;
-        };
-        self.reads.insert(*source);
+        if let Some(source) = self.source_symbols.get(&symbol) {
+            self.reads.parent.insert(*source);
+        }
+        if let Some(source) = self.item_source_symbols.get(&symbol) {
+            self.reads.item.insert(*source);
+        }
     }
 }
 
@@ -623,14 +666,87 @@ fn dependencies(
     expression: &Expression<'_>,
     scoping: &Scoping,
     source_symbols: &BTreeMap<SymbolId, SourceId>,
-) -> Vec<SourceId> {
+    item_source_symbols: &BTreeMap<SymbolId, SourceId>,
+) -> DependencyReads {
     let mut finder = DependencyFinder {
         scoping,
         source_symbols,
-        reads: BTreeSet::new(),
+        item_source_symbols,
+        reads: DependencyReads::default(),
     };
     finder.visit_expression(expression);
-    finder.reads.into_iter().collect()
+    finder.reads
+}
+
+fn append_item_dependency<'a>(
+    ast: &AstBuilder<'a>,
+    arguments: &mut Vec<Expression<'a>>,
+    reads: &DependencyReads,
+) {
+    if reads.item.is_empty() {
+        return;
+    }
+    arguments.push(ident(ast, ITEM_SCOPE));
+    arguments.push(dependency_mask(ast, &reads.item));
+}
+
+fn dependency_mask<'a>(ast: &AstBuilder<'a>, sources: &BTreeSet<SourceId>) -> Expression<'a> {
+    mask(ast, &sources.iter().copied().collect::<Vec<_>>())
+}
+
+fn item_parameters<'a>(
+    body: &FunctionBody<'a>,
+    ast: &AstBuilder<'a>,
+) -> (
+    BTreeMap<SymbolId, SourceId>,
+    BTreeMap<SymbolId, StateReference<'a>>,
+) {
+    let mut collector = ItemParameterCollector {
+        ast,
+        sources: BTreeMap::new(),
+        states: BTreeMap::new(),
+    };
+    collector.visit_function_body(body);
+    (collector.sources, collector.states)
+}
+
+struct ItemParameterCollector<'a, 'b> {
+    ast: &'b AstBuilder<'a>,
+    sources: BTreeMap<SymbolId, SourceId>,
+    states: BTreeMap<SymbolId, StateReference<'a>>,
+}
+
+impl<'a> Visit<'a> for ItemParameterCollector<'a, '_> {
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        let is_map = matches!(
+            &call.callee,
+            Expression::StaticMemberExpression(member) if member.property.name == "map"
+        );
+        if is_map
+            && let [argument] = call.arguments.as_slice()
+            && let Some(Expression::ArrowFunctionExpression(render)) = argument.as_expression()
+            && (1..=2).contains(&render.params.items.len())
+            && key_expression(render).is_some()
+        {
+            for (index, parameter) in render.params.items.iter().take(2).enumerate() {
+                let BindingPattern::BindingIdentifier(identifier) = &parameter.pattern else {
+                    continue;
+                };
+                let Some(symbol) = identifier.symbol_id.get() else {
+                    continue;
+                };
+                self.sources.insert(symbol, SourceId::new(index as u32));
+                self.states.insert(
+                    symbol,
+                    StateReference {
+                        state_name: self.ast.allocator().alloc_str(identifier.name.as_str()),
+                        setter: false,
+                    },
+                );
+            }
+        }
+        walk_call_expression(self, call);
+    }
 }
 
 struct MultiStateReferenceRewriter<'a, 'b, 's> {

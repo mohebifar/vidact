@@ -40,6 +40,8 @@ export {
   mountCompiled,
   when,
   type CompiledBinding,
+  type CompiledDependency,
   type CompiledScope,
+  type OwnedBlock,
   type StructuralBinding,
 } from './compiled.ts'

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Record Vidact Architecture"
+  short_description: "Capture Vidact compiler and runtime decisions"
+  default_prompt: "Use $record-vidact-architecture to document this Vidact architectural decision and update the architecture index."

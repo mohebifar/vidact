@@ -1,10 +1,12 @@
 import {
   intersectsSources,
   isEmptySources,
+  source,
   unionSources,
   type SourceMask,
 } from './source-mask.ts'
 import { createStateSlot, type StateSlot } from './state-slot.ts'
+import { createKeyedList } from './keyed-list.ts'
 
 const MAX_FLUSH_PASSES = 100
 const BINDING = Symbol('Vidact.Binding')
@@ -34,12 +36,20 @@ export interface CompiledBinding<T> {
   readonly evaluate: () => T
   readonly reads: SourceMask
   readonly scope: CompiledScope
+  readonly additional: CompiledDependency | undefined
 }
 
-export interface StructuralBinding {
+export interface CompiledDependency {
+  readonly reads: SourceMask
+  readonly scope: CompiledScope
+}
+
+export interface OwnedBlock {
   readonly [STRUCTURAL]: true
   readonly mount: (parent: Node, before: Node | null) => void
 }
+
+export type StructuralBinding = OwnedBlock
 
 type RenderValue = Node | string | number | bigint | boolean | null | undefined | readonly RenderValue[]
 
@@ -157,8 +167,13 @@ export function binding<T>(
   scope: CompiledScope,
   reads: SourceMask,
   evaluate: () => T,
+  additionalScope?: CompiledScope,
+  additionalReads?: SourceMask,
 ): CompiledBinding<T> {
-  return { [BINDING]: true, evaluate, reads, scope }
+  const additional = additionalScope === undefined || additionalReads === undefined
+    ? undefined
+    : { scope: additionalScope, reads: additionalReads }
+  return { [BINDING]: true, evaluate, reads, scope, additional }
 }
 
 export function compiledEvent<T extends Event>(
@@ -173,6 +188,8 @@ export function when(
   reads: SourceMask,
   condition: () => unknown,
   render: () => RenderValue,
+  additionalScope?: CompiledScope,
+  additionalReads?: SourceMask,
 ): StructuralBinding {
   return structural((parent, before) => {
     const start = document.createComment('vidact:when')
@@ -197,7 +214,12 @@ export function when(
     }
 
     update()
-    const removeUpdater = scope.add({ reads, run: update })
+    const removeUpdater = subscribe(
+      { scope, reads, additional: additionalScope === undefined || additionalReads === undefined
+        ? undefined
+        : { scope: additionalScope, reads: additionalReads } },
+      update,
+    )
     onCleanup(() => {
       removeUpdater()
       if (branchOwner !== null) disposeOwner(branchOwner)
@@ -213,97 +235,50 @@ export function keyed<T, K>(
   reads: SourceMask,
   values: () => readonly T[],
   key: (value: T, index: number) => K,
-  render: (value: T, index: number) => RenderValue,
+  render: (
+    value: StateSlot<T>,
+    index: StateSlot<number>,
+    itemScope: CompiledScope,
+  ) => RenderValue,
 ): StructuralBinding {
   return structural((parent, before) => {
-    const start = document.createComment('vidact:keyed')
-    const end = document.createComment('/vidact:keyed')
-    parent.insertBefore(start, before)
-    parent.insertBefore(end, before)
-
-    interface RecordState {
-      readonly key: K
-      value: T
-      index: number
-      nodes: Node[]
-      owner: Owner
-    }
-
-    let records: RecordState[] = []
-    const createRecord = (value: T, index: number, itemKey: K): RecordState => {
-      const owner = createOwner()
-      try {
-        const rendered = withOwner(owner, () => render(value, index))
-        return { key: itemKey, value, index, nodes: materialize(rendered), owner }
-      } catch (error) {
-        disposeOwner(owner)
-        throw error
-      }
-    }
-    const update = (): void => {
-      const nextValues = values()
-      const nextKeys = nextValues.map(key)
-      const seen = new Set<K>()
-      for (const itemKey of nextKeys) {
-        if (seen.has(itemKey)) throw new Error(`duplicate key in compiled list: ${String(itemKey)}`)
-        seen.add(itemKey)
-      }
-
-      const previousByKey = new Map(records.map((record) => [record.key, record]))
-      const created: RecordState[] = []
-      const replaced: RecordState[] = []
-      const reused: Array<{ record: RecordState; index: number }> = []
-      let nextRecords: RecordState[]
-      try {
-        nextRecords = nextValues.map((value, index) => {
-          const itemKey = nextKeys[index] as K
-          const record = previousByKey.get(itemKey)
-          if (record !== undefined) previousByKey.delete(itemKey)
-          if (
-            record !== undefined
-            && Object.is(record.value, value)
-            && (record.index === index || render.length < 2)
-          ) {
-            reused.push({ record, index })
-            return record
+    const itemSource = source(0)
+    const indexSource = source(1)
+    const list = createKeyedList(parent, {
+      key,
+      render(value, index) {
+        const owner = createOwner()
+        const itemScope = createCompiledScope()
+        const valueSlot = createCompiledState(itemScope, itemSource, value)
+        const indexSlot = createCompiledState(itemScope, indexSource, index)
+        try {
+          const rendered = withOwner(owner, () => {
+            onCleanup(itemScope.dispose)
+            return render(valueSlot, indexSlot, itemScope)
+          })
+          return {
+            nodes: materialize(rendered),
+            update(nextValue: T, nextIndex: number) {
+              itemScope.batch(() => {
+                valueSlot.set(nextValue)
+                indexSlot.set(nextIndex)
+              })
+            },
+            dispose: () => disposeOwner(owner),
           }
-          if (record !== undefined) replaced.push(record)
-          const nextRecord = createRecord(value, index, itemKey)
-          created.push(nextRecord)
-          return nextRecord
-        })
-      } catch (error) {
-        for (const record of created) disposeOwner(record.owner)
-        throw error
-      }
-
-      for (const removed of [...replaced, ...previousByKey.values()]) {
-        disposeOwner(removed.owner)
-        for (const node of removed.nodes) node.parentNode?.removeChild(node)
-      }
-      for (const item of reused) item.record.index = item.index
-      let cursor: Node = end
-      for (let recordIndex = nextRecords.length - 1; recordIndex >= 0; recordIndex -= 1) {
-        const record = nextRecords[recordIndex]
-        if (record === undefined) continue
-        for (let nodeIndex = record.nodes.length - 1; nodeIndex >= 0; nodeIndex -= 1) {
-          const node = record.nodes[nodeIndex]
-          if (node !== undefined && node.nextSibling !== cursor) parent.insertBefore(node, cursor)
-          if (node !== undefined) cursor = node
+        } catch (error) {
+          disposeOwner(owner)
+          itemScope.dispose()
+          throw error
         }
-      }
-      records = nextRecords
-    }
-
+      },
+    }, before)
+    const update = (): void => list.update(values())
     update()
     const removeUpdater = scope.add({ reads, run: update })
     onCleanup(() => {
       removeUpdater()
-      for (const record of records) disposeOwner(record.owner)
-      records = []
-      removeBetween(start, end)
-      start.remove()
-      end.remove()
+      list.dispose()
     })
   })
 }
@@ -343,14 +318,11 @@ export function mountCompiledBinding(parent: Node, value: CompiledBinding<unknow
   let current = toText(value.evaluate())
   const text = document.createTextNode(current)
   parent.appendChild(text)
-  const removeUpdater = value.scope.add({
-    reads: value.reads,
-    run: () => {
+  const removeUpdater = subscribe(value, () => {
       const next = toText(value.evaluate())
       if (next === current) return
       current = next
       text.data = next
-    },
   })
   onCleanup(removeUpdater)
 }
@@ -361,20 +333,37 @@ export function mountCompiledProp(
 ): void {
   let current = value.evaluate()
   apply(current)
-  const removeUpdater = value.scope.add({
-    reads: value.reads,
-    run: () => {
+  const removeUpdater = subscribe(value, () => {
       const next = value.evaluate()
       if (Object.is(next, current)) return
       current = next
       apply(next)
-    },
   })
   onCleanup(removeUpdater)
 }
 
 function structural(mount: StructuralBinding['mount']): StructuralBinding {
-  return { [STRUCTURAL]: true, mount }
+  let mounted = false
+  return {
+    [STRUCTURAL]: true,
+    mount(parent, before) {
+      if (mounted) throw new Error('compiled block is already mounted')
+      mounted = true
+      mount(parent, before)
+    },
+  }
+}
+
+function subscribe(
+  dependency: CompiledDependency & { readonly additional: CompiledDependency | undefined },
+  run: () => void,
+): () => void {
+  const removers = [dependency, dependency.additional]
+    .filter((item): item is CompiledDependency => item !== undefined && !isEmptySources(item.reads))
+    .map((item) => item.scope.add({ reads: item.reads, run }))
+  return () => {
+    for (const remove of removers) remove()
+  }
 }
 
 function createOwner(): Owner {

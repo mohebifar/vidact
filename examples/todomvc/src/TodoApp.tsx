@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { TodoList } from './TodoList.tsx'
 
 interface Todo {
   readonly id: string
@@ -95,8 +96,8 @@ export function TodoApp(): Node {
             })))}
           />
           <label htmlFor="toggle-all">Mark all as complete</label>
-          <ul className="todo-list">
-            {visibleTodos.map((todo) => (
+          <TodoList
+            rows={visibleTodos.map((todo) => (
               <li
                 key={todo.id}
                 className={`${todo.completed ? 'completed' : ''} ${editingId === todo.id ? 'editing' : ''}`.trim()}
@@ -138,7 +139,7 @@ export function TodoApp(): Node {
                 )}
               </li>
             ))}
-          </ul>
+          />
         </main>
       )}
 

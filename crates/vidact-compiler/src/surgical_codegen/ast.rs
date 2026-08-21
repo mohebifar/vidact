@@ -81,6 +81,25 @@ pub(super) fn arrow_expression<'a>(
     )
 }
 
+pub(super) fn append_arrow_parameter<'a>(
+    ast: &AstBuilder<'a>,
+    arrow: &mut ArrowFunctionExpression<'a>,
+    name: &str,
+) {
+    arrow.params.items.push(FormalParameter::new(
+        SPAN,
+        [],
+        BindingPattern::new_binding_identifier(SPAN, atom(ast, name), ast),
+        None,
+        None,
+        false,
+        None,
+        false,
+        false,
+        ast,
+    ));
+}
+
 pub(super) fn arrow_block<'a>(
     ast: &AstBuilder<'a>,
     params: impl IntoIterator<Item = &'a str>,
