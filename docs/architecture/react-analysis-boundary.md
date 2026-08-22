@@ -93,13 +93,50 @@ Bundle budgets will be enforced once code generation produces representative
 artifacts; claiming a size before that would measure the scaffold rather than the
 product.
 
+## Semantic classification contract
+
+React Compiler owns control-flow, SSA, alias, effect, and def-use analysis.
+Vidact's smaller DOM classifier operates on the same parsed OXC program and
+semantic scope graph:
+
+- component parameters, state tuples, declarations, returns, JSX attributes,
+  JSX children, and keyed maps are selected from AST nodes rather than source
+  slices;
+- named and namespace `useState` imports are resolved through OXC `SymbolId`s,
+  so aliases work and a foreign function with the same spelling is rejected;
+- React Compiler declaration IDs are joined to OXC bindings through captured
+  source spans, then its def-use edges determine derived-source dependencies;
+- reachable derived updaters are emitted in source declaration order; ordered
+  sets are used for reachability only and never define execution order;
+- JSX updater reads are collected from resolved identifier references, so
+  comments, strings, shadowed bindings, and textual JSX lookalikes cannot create
+  updater edges;
+- JSX-producing `.map` calls enter the keyed-list IR only for `key={item}` or
+  `key={item.property}`. Parent-dependent, computed, and index keys fail closed
+  instead of falling through to a text updater or being reinterpreted by codegen.
+
+The currently accepted component form remains one named function component per
+module. Multiple components and other function forms fail closed until React
+Compiler's owned snapshot exposes a stable function span for per-component
+matching.
+
 ## Next integration step
 
-The pinned adapter now captures owned pre-codegen def-use and reactive-scope
-facts and lowers them immediately into `ComponentFacts`. The browser spike now
-extracts its supported JSX from OXC AST, rewrites expressions by semantic
-binding identity, constructs a fresh output AST, and prints it with
-`oxc_codegen`. The next step is moving the remaining lexical classification in
-the analysis adapter onto those same OXC identities and adding golden per-pass
-fixtures that detect drift whenever the vendored React Compiler revision
-changes.
+The pinned adapter captures owned pre-codegen def-use and reactive-scope facts
+and lowers them immediately into `ComponentFacts`. Vidact classification and
+both executable emitters now use OXC AST and semantic identities; generated
+output is printed with `oxc_codegen`. The next step is adding stable source-range
+diagnostics, accepted/rejected/different fixture manifests, per-component span
+analysis, and golden per-pass fixtures that detect drift whenever the vendored
+React Compiler revision changes.
+
+## Verification
+
+- `crates/vidact-compiler/tests/oxc_react_adapter.rs` covers aliased and namespace
+  React imports, foreign-hook rejection, shadowed bindings, source-text
+  lookalikes, derived declaration order, and the normalized keyed-map subset.
+- `crates/vidact-compiler/tests/surgical_codegen.rs` and
+  `crates/vidact-compiler/tests/browser_codegen.rs` prove the executable paths
+  transform aliased and namespace hooks using the same semantic contract;
+  surgical codegen also proves unsupported key forms cannot bypass analysis.
+- Run `cargo test -p vidact-compiler`.

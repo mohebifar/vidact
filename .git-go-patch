@@ -1,0 +1,6 @@
+{
+  "MinimumToolVersion": "v1.0.1",
+  "SubmoduleDir": "vendor/oxc",
+  "PatchesDir": "patches/oxc",
+  "StatusFileDir": ".artifacts/git-go-patch/oxc"
+}

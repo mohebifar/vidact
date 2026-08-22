@@ -7,3 +7,4 @@ test-results/
 **/.vitest-attachments/
 **/__screenshots__/
 .DS_Store
+.artifacts/

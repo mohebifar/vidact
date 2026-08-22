@@ -49,7 +49,8 @@ pub fn compile_spike_browser_module(input: ModuleInput<'_>) -> Result<String, Ve
         )]
     })?;
     let ir = lower_component(facts).map_err(|diagnostic| vec![diagnostic])?;
-    let syntax = syntax::extract(&parsed.program, &ir.name).map_err(|error| vec![error])?;
+    let syntax = syntax::extract(&parsed.program, semantic.semantic.scoping(), &ir.name)
+        .map_err(|error| vec![error])?;
     let output = emitter::emit_program(&allocator, semantic.semantic.scoping(), &ir, &syntax)
         .map_err(|error| vec![error])?;
     Ok(Codegen::new().build(&output).code)

@@ -1,13 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use oxc_ast::ast::{
-    BindingPattern, Declaration, Expression, Function, JSXAttributeItem, JSXAttributeName,
-    JSXAttributeValue, JSXChild, JSXElement, JSXElementName, Program, Statement,
+    BindingPattern, Expression, JSXAttributeItem, JSXAttributeName, JSXAttributeValue, JSXChild,
+    JSXElement, JSXElementName, Program, Statement,
 };
+use oxc_semantic::Scoping;
 use oxc_span::GetSpan;
 use oxc_syntax::symbol::SymbolId;
 
-use crate::{Diagnostic, DiagnosticCode};
+use crate::{
+    Diagnostic, DiagnosticCode, ast_utils::component_function, react_bindings::ReactBindings,
+};
 
 #[derive(Debug)]
 pub(super) struct ComponentSyntax<'a> {
@@ -88,6 +91,7 @@ pub(super) struct RootSyntax<'a> {
 
 pub(super) fn extract<'a>(
     program: &'a Program<'a>,
+    scoping: &Scoping,
     component_name: &str,
 ) -> Result<ComponentSyntax<'a>, Diagnostic> {
     let function = component_function(program, component_name).ok_or_else(|| {
@@ -103,12 +107,14 @@ pub(super) fn extract<'a>(
     let mut state = None;
     let mut derivations = BTreeMap::new();
     let mut root = None;
+    let react = ReactBindings::new(program, scoping);
 
     for statement in &body.statements {
         match statement {
             Statement::VariableDeclaration(declaration) => {
                 for declarator in &declaration.declarations {
-                    if let Some(binding) = state_binding(&declarator.id, declarator.init.as_ref())?
+                    if let Some(binding) =
+                        state_binding(&declarator.id, declarator.init.as_ref(), &react)?
                     {
                         if state.replace(binding).is_some() {
                             return Err(unsupported(
@@ -149,31 +155,10 @@ pub(super) fn extract<'a>(
     })
 }
 
-fn component_function<'a>(program: &'a Program<'a>, name: &str) -> Option<&'a Function<'a>> {
-    program.body.iter().find_map(|statement| match statement {
-        Statement::FunctionDeclaration(function) if function_name(function) == Some(name) => {
-            Some(function.as_ref())
-        }
-        Statement::ExportDeclaration(export) => match &export.declaration {
-            Declaration::FunctionDeclaration(function) if function_name(function) == Some(name) => {
-                Some(function.as_ref())
-            }
-            _ => None,
-        },
-        _ => None,
-    })
-}
-
-fn function_name<'a>(function: &'a Function<'a>) -> Option<&'a str> {
-    function
-        .id
-        .as_ref()
-        .map(|identifier| identifier.name.as_str())
-}
-
 fn state_binding<'a>(
     pattern: &'a BindingPattern<'a>,
     initializer: Option<&'a Expression<'a>>,
+    react: &ReactBindings<'_>,
 ) -> Result<Option<StateSyntax<'a>>, Diagnostic> {
     let BindingPattern::ArrayPattern(pattern) = pattern else {
         return Ok(None);
@@ -181,10 +166,7 @@ fn state_binding<'a>(
     let Some(Expression::CallExpression(call)) = initializer else {
         return Ok(None);
     };
-    let Expression::Identifier(callee) = &call.callee else {
-        return Ok(None);
-    };
-    if callee.name != "useState" {
+    if !react.is_use_state_call(call) {
         return Ok(None);
     }
 

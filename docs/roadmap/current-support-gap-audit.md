@@ -15,9 +15,10 @@ The first component-boundary gaps are now bridged: direct destructured props
 use child-local updater slots, nested compiled scopes are adopted by their
 owner, generic bindings own recursive value ranges, and host refs have
 commit-time cleanup. Early returns, reactive spreads, and data-flow omissions
-now fail closed for the covered shapes. The main remaining risk is the lexical
-classifier and broad DOM/React surface: diagnostics still lack spans and many
-unsupported forms are not yet classified precisely.
+now fail closed for the covered shapes. Source and render classification now
+uses OXC AST nodes and semantic bindings. The main remaining risks are the
+broad DOM/React surface and compatibility boundary: diagnostics still lack
+spans and many unsupported forms are not yet classified precisely.
 
 Status terms in this audit:
 
@@ -38,7 +39,7 @@ The promise IDs come from
 | R1: direct DOM, no Virtual DOM | **Partial** | The Vite path lowers JSX through `@vidact/runtime/jsx-runtime`, whose `h` creates DOM nodes directly. Dynamic keyed and conditional structures are owned blocks, not runtime element trees. Generic JSX still goes through a general `h` helper rather than fully specialized DOM codegen. |
 | R2: construct once, targeted updates | **Proven for the supported component slice** | `compiledRoot`, prop slots, bindings, `when`, and `keyed` preserve component and retained-row DOM. Unsupported early/nested returns are rejected. The classifier still limits which component shapes enter this slice. |
 | R3: versioned compatibility contract | **Missing** | README language is intentionally cautious, but there is no accepted/rejected/different fixture manifest or versioned public subset. |
-| R4: lexical component and hook identity | **Unsafe** | React Compiler supplies semantic facts, but Vidact still discovers props, state, derived bindings, JSX attributes, and lists using source-string scans in `oxc_react.rs`. Surgical lowering recognizes a callee spelled `useState`; it does not resolve the imported binding. |
+| R4: lexical component and hook identity | **Proven for the accepted named-function slice** | Props, state, derived declarations, returns, JSX sites, and keyed lists come from OXC AST. Named aliases and namespace `React.useState` calls resolve through import symbols; foreign hook-shaped calls fail closed. Multiple components and non-declaration component forms remain explicitly unsupported until analysis is keyed by function span. |
 | R5: source-located diagnostics | **Unsafe** | `Diagnostic` contains only a code and message. Generated nodes use empty spans, and the CLI reports a filename without a source range. Some unsupported forms are accepted and become stale instead of producing a diagnostic. |
 | R6: one model for state, props, effects, hooks, errors, disposal | **Partial** | State and direct destructured prop slots, batching, static bridge subscriptions, list-item scopes, adopted child scopes, refs, and cleanup owners exist. Effects, custom hooks beyond `useRef`, context, error boundaries, and a complete prop store do not. |
 | R7: effect cleanup | **Missing** | No effect hook or effect scheduling phase exists. Internal owner cleanups do run in reverse registration order on explicit disposal. |
@@ -120,18 +121,19 @@ return <div {...attrs} />
 Current outcome: reactive JSX spreads are rejected until a deletion-aware
 spread reconciler exists.
 
-#### The analysis adapter is semantic only in the middle
+#### Source-string classification could corrupt semantic facts
 
-React Compiler's def-use edges are used after Vidact has found candidate names.
-Candidate discovery still uses operations such as `split("const ")`,
-`split_once("return")`, and text searches for `.map(` and `key={`. Nested
-scopes, comments, strings, defaults, rest patterns, computed expressions, and
-multiple return sites can therefore be classified incorrectly before the
-semantic graph helps.
+Current outcome: bridged. Components, imported hooks, props, state tuples,
+declarations, returns, JSX sites, and keyed maps are selected from OXC AST.
+OXC symbols distinguish aliases, namespaces, foreign hooks, and shadowed
+bindings. React Compiler remains responsible for derived def-use facts. Tests
+also prove that strings containing `return`, JSX, `.map(`, and `key={` do not
+affect classification.
 
-Required outcome: derive components, imported hooks, props, state tuples,
-declarations, JSX sites, and list syntax from OXC AST and semantic identities;
-use React Compiler analysis only for data-flow facts.
+Remaining gap: React Compiler's owned snapshot exposes a component name but no
+stable function span. Vidact therefore accepts exactly one named function
+component per module and rejects multiple components rather than risking mixed
+facts. Diagnostics still need original source ranges.
 
 ### P1: runtime behavior is incomplete or observably different
 
@@ -144,10 +146,11 @@ use React Compiler analysis only for data-flow facts.
 | Arbitrary external `Node[]` | Static construction recursively appends it, with no reactive update or ownership | Treat as an explicit DOM escape hatch, not React-array compatibility. |
 | Foreign `ReactElement[]` | Not a supported runtime value | Reject at compile/runtime boundary with a stable diagnostic. |
 | Nested keyed map depending on an outer item | Explicitly rejected | Add nested owner/source domains before supporting it. |
-| Unkeyed `.map` | Rejected indirectly as unsupported reactive JSX | Add a distinct index reconciler and an intentional diagnostic; never fall back from broken keys. |
+| Unkeyed `.map` | Rejected with a keyed-map diagnostic | Add a distinct index reconciler and keep it separate from keyed lowering. |
 | Destructured map parameters or block-bodied callbacks | Not recognized as keyed maps | Either lower from AST or reject precisely. |
 | Fragment-rooted keyed rows | Key extraction requires an expression-bodied `JSXElement` root | Support keyed fragments through an explicit key form and multi-node ranges. |
-| Object, symbol, or unstable keys | Runtime accepts any `Map` key type | Restrict public keys to string/number and diagnose missing, duplicate, object, random, or index keys according to the contract. |
+| Parent-dependent, computed, or index key expressions | Rejected before IR lowering; the current normalized subset is `key={item}` or `key={item.property}` | Extend `KeyPath` deliberately before accepting more syntax; never let codegen broaden the classifier contract. |
+| Object, symbol, or unstable values produced by an accepted key path | Runtime accepts any `Map` key type | Restrict public keys to string/number and diagnose object, symbol, random, or otherwise unstable values according to the contract. |
 | Retained row updater throws | Earlier retained rows and state slots may already be updated while `records` still points to the old sequence | Define failure atomicity or route the whole batch to an error boundary with a consistent recovery policy. |
 
 #### DOM, events, forms, and refs
@@ -235,9 +238,10 @@ until the implementation is ready.
 
 Before adding broad React compatibility claims:
 
-1. Replace source-string classification with AST and semantic identities.
-2. Introduce accepted/rejected/different fixture manifests; make all known P0
+1. Introduce accepted/rejected/different fixture manifests; make all known P0
    cases reject with spans.
+2. Key React Compiler snapshots and Vidact classification by component function
+   spans so multiple components and supported function forms cannot mix facts.
 3. Extend the implemented direct-prop/adopted-owner ABI into a complete prop
    store and multi-root component range.
 4. Extend the implemented mixed-value ranges with explicit foreign-object and

@@ -1,0 +1,325 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mohamad Mohebifar <mohebifar@users.noreply.github.com>
+Date: Sat, 22 Aug 2026 00:00:05 -0700
+Subject: [PATCH] feat(react-compiler): expose owned analysis snapshots
+
+---
+ crates/oxc_react_compiler/src/analysis.rs     | 193 ++++++++++++++++++
+ crates/oxc_react_compiler/src/lib.rs          |   4 +
+ .../src/react_compiler/entrypoint/imports.rs  |   4 +
+ .../src/react_compiler/entrypoint/pipeline.rs |   6 +
+ .../src/react_compiler/entrypoint/program.rs  |   7 +
+ 5 files changed, 214 insertions(+)
+ create mode 100644 crates/oxc_react_compiler/src/analysis.rs
+
+diff --git a/crates/oxc_react_compiler/src/analysis.rs b/crates/oxc_react_compiler/src/analysis.rs
+new file mode 100644
+index 00000000000000..7920c999907c41
+--- /dev/null
++++ b/crates/oxc_react_compiler/src/analysis.rs
+@@ -0,0 +1,193 @@
++//! Owned, pre-codegen analysis snapshots for compiler integrations.
++//!
++//! These types intentionally do not expose the arena-backed React Compiler HIR.
++//! Scope facts are captured immediately before code generation. Def-use facts
++//! are captured just before lvalue pruning, while source binding identities are
++//! still available.
++
++use crate::react_compiler_hir::{
++    ReactiveFunction, ReactiveInstruction, ReactiveScopeBlock, ReactiveValue,
++    environment::Environment,
++    visitors::{each_instruction_value_lvalue, each_instruction_value_operand},
++};
++use crate::react_compiler_reactive_scopes::visitors::{
++    ReactiveFunctionVisitor, visit_reactive_function,
++};
++
++#[derive(Clone, Debug, Eq, PartialEq)]
++pub struct FunctionAnalysis {
++    pub name: Option<String>,
++    pub scopes: Vec<ScopeAnalysis>,
++    pub instructions: Vec<InstructionAnalysis>,
++}
++
++#[derive(Clone, Debug, Eq, PartialEq)]
++pub struct ScopeAnalysis {
++    pub dependencies: Vec<DependencyAnalysis>,
++    pub declarations: Vec<String>,
++}
++
++#[derive(Clone, Debug, Eq, PartialEq)]
++pub struct DependencyAnalysis {
++    pub name: String,
++    pub path: Vec<String>,
++    pub reactive: bool,
++}
++
++#[derive(Clone, Debug, Eq, PartialEq)]
++pub struct InstructionAnalysis {
++    pub lvalues: Vec<ValueAnalysis>,
++    pub dependencies: Vec<ValueAnalysis>,
++}
++
++#[derive(Clone, Debug, Eq, PartialEq)]
++pub struct ValueAnalysis {
++    pub id: usize,
++    pub declaration_id: usize,
++    pub name: Option<String>,
++    pub span: Option<(u32, u32)>,
++}
++
++pub(crate) fn capture(
++    function: &ReactiveFunction<'_>,
++    environment: &Environment<'_>,
++    instructions: Vec<InstructionAnalysis>,
++) -> FunctionAnalysis {
++    let visitor = ScopeSnapshotVisitor { environment };
++    let mut state = SnapshotState::default();
++    visit_reactive_function(function, &visitor, &mut state);
++
++    FunctionAnalysis {
++        name: function.id.or(function.name_hint).map(|name| name.as_str().to_owned()),
++        scopes: state.scopes,
++        instructions,
++    }
++}
++
++pub(crate) fn capture_instructions(
++    function: &ReactiveFunction<'_>,
++    environment: &Environment<'_>,
++) -> Vec<InstructionAnalysis> {
++    let visitor = ScopeSnapshotVisitor { environment };
++    let mut state = SnapshotState::default();
++    visit_reactive_function(function, &visitor, &mut state);
++    state.instructions
++}
++
++#[derive(Default)]
++struct SnapshotState {
++    scopes: Vec<ScopeAnalysis>,
++    instructions: Vec<InstructionAnalysis>,
++}
++
++struct ScopeSnapshotVisitor<'env, 'arena> {
++    environment: &'env Environment<'arena>,
++}
++
++impl<'arena> ReactiveFunctionVisitor<'arena> for ScopeSnapshotVisitor<'_, 'arena> {
++    type State = SnapshotState;
++
++    fn env(&self) -> &Environment<'arena> {
++        self.environment
++    }
++
++    fn visit_scope(&self, block: &ReactiveScopeBlock<'arena>, state: &mut Self::State) {
++        let scope = &self.environment.scopes[block.scope];
++        let dependencies = scope
++            .dependencies
++            .iter()
++            .filter_map(|dependency| {
++                let identifier = &self.environment.identifiers[dependency.identifier];
++                let name = identifier.name?.value().to_owned();
++                Some(DependencyAnalysis {
++                    name,
++                    path: dependency.path.iter().map(|entry| entry.property.to_string()).collect(),
++                    reactive: dependency.reactive,
++                })
++            })
++            .collect();
++        let declarations = scope
++            .declarations
++            .iter()
++            .filter_map(|(_, declaration)| {
++                self.environment.identifiers[declaration.identifier]
++                    .name
++                    .map(|name| name.value().to_owned())
++            })
++            .collect();
++
++        state.scopes.push(ScopeAnalysis { dependencies, declarations });
++        self.traverse_scope(block, state);
++    }
++
++    fn visit_instruction(
++        &self,
++        instruction: &ReactiveInstruction<'arena>,
++        state: &mut Self::State,
++    ) {
++        let mut lvalues = instruction
++            .lvalue
++            .into_iter()
++            .map(|place| self.value_analysis(place.identifier))
++            .collect::<Vec<_>>();
++        if let ReactiveValue::Instruction(value) = &instruction.value {
++            lvalues.extend(
++                each_instruction_value_lvalue(value)
++                    .into_iter()
++                    .map(|place| self.value_analysis(place.identifier)),
++            );
++        }
++        lvalues.sort_unstable_by_key(|value| value.id);
++        lvalues.dedup_by_key(|value| value.id);
++        let mut dependencies = Vec::new();
++        self.collect_value_dependencies(&instruction.value, &mut dependencies);
++        dependencies.sort_unstable_by_key(|value| value.id);
++        dependencies.dedup_by_key(|value| value.id);
++        state.instructions.push(InstructionAnalysis { lvalues, dependencies });
++        self.traverse_instruction(instruction, state);
++    }
++}
++
++impl ScopeSnapshotVisitor<'_, '_> {
++    fn value_analysis(&self, identifier: crate::react_compiler_hir::IdentifierId) -> ValueAnalysis {
++        let identifier = &self.environment.identifiers[identifier];
++        ValueAnalysis {
++            id: identifier.id.index(),
++            declaration_id: identifier.declaration_id.index(),
++            name: identifier.name.map(|name| name.value().to_owned()),
++            span: identifier.span.map(|span| (span.start, span.end)),
++        }
++    }
++
++    fn collect_value_dependencies(
++        &self,
++        value: &ReactiveValue<'_>,
++        dependencies: &mut Vec<ValueAnalysis>,
++    ) {
++        match value {
++            ReactiveValue::Instruction(value) => dependencies.extend(
++                each_instruction_value_operand(value, self.environment)
++                    .into_iter()
++                    .map(|place| self.value_analysis(place.identifier)),
++            ),
++            ReactiveValue::LogicalExpression { left, right, .. } => {
++                self.collect_value_dependencies(left, dependencies);
++                self.collect_value_dependencies(right, dependencies);
++            }
++            ReactiveValue::ConditionalExpression { test, consequent, alternate } => {
++                self.collect_value_dependencies(test, dependencies);
++                self.collect_value_dependencies(consequent, dependencies);
++                self.collect_value_dependencies(alternate, dependencies);
++            }
++            ReactiveValue::SequenceExpression { instructions, value, .. } => {
++                for instruction in instructions {
++                    self.collect_value_dependencies(&instruction.value, dependencies);
++                }
++                self.collect_value_dependencies(value, dependencies);
++            }
++            ReactiveValue::OptionalExpression { value, .. } => {
++                self.collect_value_dependencies(value, dependencies);
++            }
++        }
++    }
++}
+diff --git a/crates/oxc_react_compiler/src/lib.rs b/crates/oxc_react_compiler/src/lib.rs
+index 8a70ae4793897a..b3a7bbf1869953 100644
+--- a/crates/oxc_react_compiler/src/lib.rs
++++ b/crates/oxc_react_compiler/src/lib.rs
+@@ -1,5 +1,6 @@
+ use oxc_allocator::Allocator;
+ 
++pub mod analysis;
+ mod diagnostics;
+ mod options;
+ mod scope;
+@@ -22,6 +23,9 @@ use crate::react_compiler::entrypoint::program::compile_program;
+ 
+ pub use crate::react_compiler::entrypoint::compile_result::CompileResult;
+ pub use crate::react_compiler::entrypoint::program::CompileOutput;
++pub use analysis::{
++    DependencyAnalysis, FunctionAnalysis, InstructionAnalysis, ScopeAnalysis, ValueAnalysis,
++};
+ 
+ // Re-exported so integrations needn't depend on the upstream `react_compiler` crates.
+ pub use crate::options::{
+diff --git a/crates/oxc_react_compiler/src/react_compiler/entrypoint/imports.rs b/crates/oxc_react_compiler/src/react_compiler/entrypoint/imports.rs
+index c0b785a355cbb4..7a4a18ad868bd3 100644
+--- a/crates/oxc_react_compiler/src/react_compiler/entrypoint/imports.rs
++++ b/crates/oxc_react_compiler/src/react_compiler/entrypoint/imports.rs
+@@ -12,6 +12,7 @@ use oxc_allocator::Allocator;
+ use oxc_ast::ast::{ImportDeclarationSpecifier, ModuleExportName, Program, Statement};
+ use oxc_str::{Ident, IdentHashSet, format_ident};
+ 
++use crate::analysis::FunctionAnalysis;
+ use crate::diagnostics::ErrorCategory;
+ use crate::scope::ScopeResolver;
+ 
+@@ -41,6 +42,8 @@ pub struct ProgramContext<'a> {
+     /// Diagnostics (errors/warnings) accumulated during compilation. Fatality is
+     /// decided separately by `panicThreshold`.
+     pub diagnostics: Diagnostics,
++    /// Owned snapshots captured after reactive-scope optimization and before codegen.
++    pub analyses: Vec<FunctionAnalysis>,
+     // Pre-resolved import local names for codegen
+     pub instrument_fn_name: Option<Ident<'a>>,
+     pub instrument_gating_name: Option<Ident<'a>>,
+@@ -69,6 +72,7 @@ impl<'a> ProgramContext<'a> {
+             suppressions,
+             has_module_scope_opt_out,
+             diagnostics: Diagnostics::new(),
++            analyses: Vec::new(),
+             instrument_fn_name: None,
+             instrument_gating_name: None,
+             hook_guard_name: None,
+diff --git a/crates/oxc_react_compiler/src/react_compiler/entrypoint/pipeline.rs b/crates/oxc_react_compiler/src/react_compiler/entrypoint/pipeline.rs
+index 8308dcf8dabbce..a346707fe9e28b 100644
+--- a/crates/oxc_react_compiler/src/react_compiler/entrypoint/pipeline.rs
++++ b/crates/oxc_react_compiler/src/react_compiler/entrypoint/pipeline.rs
+@@ -320,6 +320,8 @@ fn run_pipeline<'a>(
+ 
+     propagate_early_returns(&mut reactive_fn, &mut env);
+ 
++    let analysis_instructions = crate::analysis::capture_instructions(&reactive_fn, &env);
++
+     prune_unused_lvalues(&mut reactive_fn, &env);
+ 
+     promote_used_temporaries(&mut reactive_fn, &mut env);
+@@ -336,6 +338,8 @@ fn run_pipeline<'a>(
+ 
+     prune_hoisted_contexts(&mut reactive_fn, &env)?;
+ 
++    let analysis = crate::analysis::capture(&reactive_fn, &env, analysis_instructions);
++
+     if env.config.enable_preserve_existing_memoization_guarantees
+         || env.config.validate_preserve_existing_memoization_guarantees
+     {
+@@ -415,6 +419,8 @@ fn run_pipeline<'a>(
+         context.merge_uid_known_names(&uid_names);
+     }
+ 
++    context.analyses.push(analysis);
++
+     Ok(Ok(Some(CodegenFunction {
+         span: codegen_result.span,
+         id: codegen_result.id,
+diff --git a/crates/oxc_react_compiler/src/react_compiler/entrypoint/program.rs b/crates/oxc_react_compiler/src/react_compiler/entrypoint/program.rs
+index a1676d88a8d085..e414c5c921e29e 100644
+--- a/crates/oxc_react_compiler/src/react_compiler/entrypoint/program.rs
++++ b/crates/oxc_react_compiler/src/react_compiler/entrypoint/program.rs
+@@ -2034,6 +2034,11 @@ pub struct CompileOutput<'a> {
+ }
+ 
+ impl<'a> CompileOutput<'a> {
++    /// Return owned analysis snapshots captured immediately before codegen.
++    pub fn analyses(&self) -> &[crate::analysis::FunctionAnalysis] {
++        &self.context.analyses
++    }
++
+     /// Rewrite `program` in place: substitute each original function with its
+     /// memoized version (matched by the `scope_id` cells populated when the
+     /// caller built `Semantic`), insert outlined declarations, add the required
+@@ -2924,12 +2929,14 @@ pub fn compile_program<'a>(
+     let mut compiled_fns: Vec<CompiledFunction<'_, '_, '_, '_>> = Vec::new();
+ 
+     for source in &queue {
++        let analysis_checkpoint = context.analyses.len();
+         match process_fn(&ast, source, &scope, output_mode, &options.environment, &mut context) {
+             Ok(Some(codegen_fn)) => {
+                 compiled_fns.push(CompiledFunction { kind: source.kind, source, codegen_fn });
+             }
+             Ok(None) => {
+                 // Function was skipped or lint-only
++                context.analyses.truncate(analysis_checkpoint);
+             }
+             Err(fatal_result) => {
+                 return fatal_result;

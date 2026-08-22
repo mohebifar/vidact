@@ -6,10 +6,10 @@
     "build:examples": "pnpm --filter @vidact/example-todomvc build",
     "check": "pnpm lint && pnpm format && pnpm typecheck && pnpm test",
     "dev:todomvc": "pnpm --filter @vidact/example-todomvc dev",
-    "format": "oxfmt \"**/*.{js,jsx,ts,tsx,json,jsonc,css}\" --check",
-    "format:fix": "oxfmt \"**/*.{js,jsx,ts,tsx,json,jsonc,css}\" --write",
+    "format": "oxfmt --disable-nested-config \"**/*.{js,jsx,ts,tsx,json,jsonc,css}\" --check",
+    "format:fix": "oxfmt --disable-nested-config \"**/*.{js,jsx,ts,tsx,json,jsonc,css}\" --write",
     "format:rust": "cargo fmt -p vidact-compiler --check",
-    "lint": "oxlint .",
+    "lint": "oxlint --disable-nested-config . && ast-grep scan --globs '!vendor/**'",
     "lint:fix": "oxlint . --fix",
     "test": "pnpm test:rust && pnpm test:runtime && pnpm test:tools && pnpm test:browser && pnpm test:examples",
     "test:browser": "pnpm --filter @vidact/browser-corpus test",
@@ -20,6 +20,7 @@
     "typecheck": "pnpm --recursive typecheck"
   },
   "devDependencies": {
+    "@ast-grep/cli": "^0.45.1",
     "oxfmt": "^0.64.0",
     "oxlint": "^1.79.0"
   },

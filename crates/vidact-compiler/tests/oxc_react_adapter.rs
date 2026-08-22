@@ -53,6 +53,40 @@ fn lowers_state_and_derived_dependencies() {
 }
 
 #[test]
+fn preserves_source_order_for_independent_derived_updaters() {
+    let facts = analyze(
+        "derived-order.tsx",
+        r#"
+            import { useState } from "react";
+            export function Counter() {
+                const [count] = useState(0);
+                const zed = count + 1;
+                const alpha = count + 2;
+                return <p>{zed}{alpha}</p>;
+            }
+        "#,
+    );
+
+    let derived_writes = facts
+        .updaters
+        .iter()
+        .filter(|updater| updater.kind == UpdaterKind::Derived)
+        .map(|updater| {
+            let write = updater.writes[0];
+            facts
+                .sources
+                .iter()
+                .find(|source| source.id == write)
+                .expect("derived updater writes a known source")
+                .name
+                .as_str()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(derived_writes, ["zed", "alpha"]);
+}
+
+#[test]
 fn lowers_props_into_text_and_attribute_updaters() {
     let facts = analyze(
         "greeting.tsx",
@@ -115,6 +149,206 @@ fn does_not_classify_an_earlier_tuple_as_state() {
 
     assert!(facts.sources.iter().any(|source| source.name == "count"));
     assert!(!facts.sources.iter().any(|source| source.name == "left"));
+}
+
+#[test]
+fn resolves_aliased_react_state_imports_by_symbol_identity() {
+    let facts = analyze(
+        "aliased-state.tsx",
+        r#"
+            import { useState as state } from "react";
+            export function Counter() {
+                const [count] = state(0);
+                const doubled = count * 2;
+                return <p>{doubled}</p>;
+            }
+        "#,
+    );
+
+    assert!(
+        facts
+            .sources
+            .iter()
+            .any(|source| { source.name == "count" && source.kind == SourceKind::State })
+    );
+    assert!(
+        facts
+            .sources
+            .iter()
+            .any(|source| { source.name == "doubled" && source.kind == SourceKind::Derived })
+    );
+    assert!(facts.updaters.iter().any(|updater| {
+        updater.kind == UpdaterKind::Text
+            && updater.reads.iter().any(|read| {
+                facts
+                    .sources
+                    .iter()
+                    .any(|source| source.id == *read && source.name == "doubled")
+            })
+    }));
+}
+
+#[test]
+fn resolves_namespace_react_state_calls_by_symbol_identity() {
+    let facts = analyze(
+        "namespace-state.tsx",
+        r#"
+            import * as React from "react";
+            export function Counter() {
+                const [count] = React.useState(0);
+                return <p>{count}</p>;
+            }
+        "#,
+    );
+
+    assert!(
+        facts
+            .sources
+            .iter()
+            .any(|source| { source.name == "count" && source.kind == SourceKind::State })
+    );
+    assert!(
+        facts
+            .updaters
+            .iter()
+            .any(|updater| updater.kind == UpdaterKind::Text)
+    );
+}
+
+#[test]
+fn rejects_foreign_namespace_hooks() {
+    let diagnostics = OxcReactAnalysisAdapter
+        .analyze(ModuleInput {
+            filename: "foreign-namespace-state.tsx",
+            source: r#"
+                import * as React from "not-react";
+                export function Counter() {
+                    const [count] = React.useState(0);
+                    return <p>{count}</p>;
+                }
+            "#,
+        })
+        .expect_err("a foreign namespace must never become Vidact state");
+
+    assert_eq!(diagnostics[0].code, DiagnosticCode::AnalysisFailed);
+    assert!(
+        diagnostics[0]
+            .message
+            .contains("callee resolves to React useState")
+    );
+}
+
+#[test]
+fn lowers_identity_keyed_array_rendering() {
+    let facts = analyze(
+        "identity-key.tsx",
+        r#"
+            import { useState } from "react";
+            export function Items() {
+                const [items] = useState(["one"]);
+                return <ul>{items.map(item => <li key={item}>{item}</li>)}</ul>;
+            }
+        "#,
+    );
+
+    let items = facts
+        .sources
+        .iter()
+        .find(|source| source.name == "items")
+        .expect("items must be a state source");
+    assert!(facts.updaters.iter().any(|updater| {
+        updater.kind
+            == UpdaterKind::KeyedList {
+                key: KeyPath::Identity,
+            }
+            && updater.reads.contains(&items.id)
+    }));
+}
+
+#[test]
+fn rejects_keyed_maps_outside_the_normalized_key_subset() {
+    for (filename, key) in [
+        ("parent-key.tsx", "prefix + item.id"),
+        ("computed-key.tsx", "item[idField]"),
+        ("index-key.tsx", "index"),
+    ] {
+        let source = format!(
+            r#"
+                import {{ useState }} from "react";
+                export function Items() {{
+                    const [items] = useState([{{ id: 1 }}]);
+                    const prefix = "todo";
+                    const idField = "id";
+                    return <ul>{{items.map((item, index) => <li key={{{key}}}>{{item.id}}</li>)}}</ul>;
+                }}
+            "#
+        );
+        let diagnostics = OxcReactAnalysisAdapter
+            .analyze(ModuleInput {
+                filename,
+                source: &source,
+            })
+            .expect_err("unsupported key expressions must not fall through as text updaters");
+
+        assert_eq!(diagnostics[0].code, DiagnosticCode::AnalysisFailed);
+        assert!(diagnostics[0].message.contains("keyed maps require"));
+    }
+}
+
+#[test]
+fn rejects_foreign_hooks_instead_of_classifying_by_name() {
+    let diagnostics = OxcReactAnalysisAdapter
+        .analyze(ModuleInput {
+            filename: "foreign-state.tsx",
+            source: r#"
+                import { useState } from "not-react";
+                export function Counter() {
+                    const [count] = useState(0);
+                    return <p>{count}</p>;
+                }
+            "#,
+        })
+        .expect_err("a foreign function named useState must never become Vidact state");
+
+    assert_eq!(diagnostics[0].code, DiagnosticCode::AnalysisFailed);
+    assert!(
+        diagnostics[0]
+            .message
+            .contains("callee resolves to React useState")
+    );
+}
+
+#[test]
+fn ignores_return_and_jsx_lookalikes_outside_the_render_ast() {
+    let facts = analyze(
+        "source-lookalikes.tsx",
+        r#"
+            import { useState } from "react";
+            export function Counter() {
+                const note = "return <p title={wrong}>{wrong.map(item => <i key={item.id} />)}</p>";
+                const [count] = useState(0);
+                const doubled = count * 2;
+                return <p data-note={note}>{doubled}</p>;
+            }
+        "#,
+    );
+
+    assert!(!facts.sources.iter().any(|source| source.name == "note"));
+    assert!(
+        !facts
+            .updaters
+            .iter()
+            .any(|updater| { matches!(updater.kind, UpdaterKind::KeyedList { .. }) })
+    );
+    assert!(facts.updaters.iter().any(|updater| {
+        updater.kind == UpdaterKind::Text
+            && updater.reads.iter().any(|read| {
+                facts
+                    .sources
+                    .iter()
+                    .any(|source| source.id == *read && source.name == "doubled")
+            })
+    }));
 }
 
 #[test]

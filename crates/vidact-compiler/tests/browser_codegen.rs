@@ -54,6 +54,44 @@ fn preserves_string_literals_while_rewriting_bound_identifiers() {
 }
 
 #[test]
+fn resolves_aliased_state_hooks_in_the_spike_emitter() {
+    let output = compile_spike_browser_module(ModuleInput {
+        filename: "aliased-hook.tsx",
+        source: r#"
+            import { useState as state } from "react";
+            export function AliasedHook() {
+                const [count, setCount] = state(1);
+                const doubled = count * 2;
+                return <button onClick={() => setCount(2)}>{doubled}</button>;
+            }
+        "#,
+    })
+    .expect("the spike emitter must use the React import binding, not hook spelling");
+
+    assert!(output.contains("count = createStateSlot"), "{output}");
+    assert!(!output.contains("state(1)"), "{output}");
+}
+
+#[test]
+fn resolves_namespace_state_hooks_in_the_spike_emitter() {
+    let output = compile_spike_browser_module(ModuleInput {
+        filename: "namespace-hook.tsx",
+        source: r#"
+            import * as React from "react";
+            export function NamespaceHook() {
+                const [count, setCount] = React.useState(1);
+                const doubled = count * 2;
+                return <button onClick={() => setCount(2)}>{doubled}</button>;
+            }
+        "#,
+    })
+    .expect("the spike emitter must resolve React namespace bindings semantically");
+
+    assert!(output.contains("count = createStateSlot"), "{output}");
+    assert!(!output.contains("React.useState(1)"), "{output}");
+}
+
+#[test]
 fn rejects_non_numeric_state_before_emitting_number_types() {
     let diagnostics = compile_spike_browser_module(ModuleInput {
         filename: "string-state.tsx",

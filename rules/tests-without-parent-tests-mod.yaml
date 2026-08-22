@@ -1,0 +1,14 @@
+id: tests-without-parent-tests-mod
+language: rust
+severity: warning
+ignores:
+  - "**/tests/**/*.rs"
+rule:
+  pattern: "#[test]"
+  not:
+    inside:
+      kind: declaration_list
+      inside:
+        pattern: mod $TEST { $$$ }
+        follows:
+          pattern: "#[cfg(test)]"

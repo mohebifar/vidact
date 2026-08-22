@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/*"]
-exclude = ["vendor/oxc_react_compiler"]
+exclude = ["vendor/oxc"]
 resolver = "3"
 
 [workspace.package]
@@ -11,7 +11,11 @@ rust-version = "1.95"
 [workspace.metadata.vidact.react-compiler]
 repository = "https://github.com/oxc-project/oxc"
 crate-version = "0.143.0"
-vendored-path = "vendor/oxc_react_compiler"
+revision = "45a17c25d188bf1b289638483e2bc61adbadd364"
+vendored-path = "vendor/oxc"
+patches-path = "patches/oxc"
+git-go-patch-module-version = "v0.0.16"
+git-go-patch-tool-version = "v1.0.1"
 react-rust-pull-request = 36173
 
 [profile.release]

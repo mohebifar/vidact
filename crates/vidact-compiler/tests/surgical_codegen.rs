@@ -20,6 +20,44 @@ fn turns_todomvc_into_one_time_construction_and_static_bindings() {
 }
 
 #[test]
+fn compiles_aliased_react_state_imports() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "AliasedState.tsx",
+        source: r#"
+            import { useState as state } from 'react';
+            export function AliasedState(): Node {
+                const [count, setCount] = state(0);
+                return <button onClick={() => setCount(count + 1)}>{count}</button>;
+            }
+        "#,
+    })
+    .expect("React hook aliases must be resolved from their imported symbol");
+
+    assert!(output.contains("__vidactCreateState("), "{output}");
+    assert!(!output.contains("state(0)"), "{output}");
+    assert!(output.contains("count.set(count.get() + 1)"), "{output}");
+}
+
+#[test]
+fn compiles_namespace_react_state_imports() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "NamespaceState.tsx",
+        source: r#"
+            import * as React from 'react';
+            export function NamespaceState(): Node {
+                const [count, setCount] = React.useState(0);
+                return <button onClick={() => setCount(count + 1)}>{count}</button>;
+            }
+        "#,
+    })
+    .expect("React namespace hooks must be resolved from their import symbol");
+
+    assert!(output.contains("__vidactCreateState("), "{output}");
+    assert!(!output.contains("React.useState(0)"), "{output}");
+    assert!(output.contains("count.set(count.get() + 1)"), "{output}");
+}
+
+#[test]
 fn rejects_user_bindings_that_collide_with_generated_names() {
     let diagnostics = compile_surgical_module(ModuleInput {
         filename: "Collision.tsx",
@@ -100,6 +138,31 @@ fn compiles_keyed_item_and_parent_reads_into_separate_static_domains() {
 }
 
 #[test]
+fn rejects_keyed_maps_the_analysis_ir_cannot_represent() {
+    for key in ["prefix + item.id", "item[idField]", "index"] {
+        let source = format!(
+            r#"
+                import {{ useState }} from 'react';
+                export function Items(): Node {{
+                    const [items] = useState([{{ id: 1 }}]);
+                    const prefix = 'todo';
+                    const idField = 'id';
+                    return <ul>{{items.map((item, index) => <li key={{{key}}}>{{item.id}}</li>)}}</ul>;
+                }}
+            "#
+        );
+        let diagnostics = compile_surgical_module(ModuleInput {
+            filename: "UnsupportedKey.tsx",
+            source: &source,
+        })
+        .expect_err("surgical codegen must be gated by the normalized key subset");
+
+        assert_eq!(diagnostics[0].code, DiagnosticCode::AnalysisFailed);
+        assert!(diagnostics[0].message.contains("keyed maps require"));
+    }
+}
+
+#[test]
 fn compiles_static_component_props_into_local_updater_slots() {
     let output = compile_surgical_module(ModuleInput {
         filename: "Greeting.tsx",
@@ -120,6 +183,25 @@ fn compiles_static_component_props_into_local_updater_slots() {
     assert!(output.contains("() => name.get()"), "{output}");
     assert!(output.contains("__vidactCompiledRoot("), "{output}");
     assert!(output.contains("__vidactBinding("), "{output}");
+}
+
+#[test]
+fn rejects_aliased_props_instead_of_emitting_mount_snapshots() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "AliasedProp.tsx",
+        source: r#"
+            export function AliasedProp({ name: label }): Node {
+                return <p>{label}</p>;
+            }
+        "#,
+    })
+    .expect_err("unsupported prop aliases must not disappear from the source graph");
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.message.contains("aliased prop destructuring") })
+    );
 }
 
 #[test]

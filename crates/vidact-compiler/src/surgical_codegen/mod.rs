@@ -21,8 +21,10 @@ use oxc_syntax::{operator::LogicalOperator, scope::ScopeFlags, symbol::SymbolId}
 use crate::{
     Diagnostic, DiagnosticCode,
     analysis::{ModuleInput, SourceId, SourceKind},
+    ast_utils::is_event_attribute,
     ir::{ComponentIr, lower_component},
     oxc_react::analyze_program,
+    react_bindings::ReactBindings,
 };
 
 mod ast;
@@ -132,6 +134,7 @@ fn transform_program<'a>(
         .filter(|source| source.kind == SourceKind::Prop)
         .map(|source| source.name.as_str())
         .collect::<BTreeSet<_>>();
+    let react = ReactBindings::new(program, scoping);
     let function = component_function_mut(program, &ir.name)
         .ok_or_else(|| unsupported(format!("could not find component function {}", ir.name)))?;
     let prop_bindings = prop_binding_symbols(function, &source_ids, &prop_sources, allocator)?;
@@ -160,7 +163,7 @@ fn transform_program<'a>(
             continue;
         };
         for declarator in &declaration.declarations {
-            if let Some((value, setter)) = state_binding_symbols(declarator, &source_ids)? {
+            if let Some((value, setter)) = state_binding_symbols(declarator, &source_ids, &react)? {
                 source_symbols.insert(value.symbol, value.source);
                 state_symbols.insert(
                     value.symbol,
@@ -193,7 +196,7 @@ fn transform_program<'a>(
         };
         let mut contains_derived = false;
         for declarator in &mut declaration.declarations {
-            transform_state_declarator(&ast, declarator, &source_ids)?;
+            transform_state_declarator(&ast, declarator, &source_ids, &react)?;
             if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
                 && ir.sources.iter().any(|source| {
                     source.kind == SourceKind::Derived && source.name == identifier.name.as_str()
@@ -308,6 +311,7 @@ struct StateReference<'a> {
 fn state_binding_symbols<'a>(
     declarator: &'a VariableDeclarator<'a>,
     sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
 ) -> Result<Option<(StateBinding<'a>, StateBinding<'a>)>, Diagnostic> {
     let BindingPattern::ArrayPattern(pattern) = &declarator.id else {
         return Ok(None);
@@ -315,10 +319,7 @@ fn state_binding_symbols<'a>(
     let Some(Expression::CallExpression(call)) = &declarator.init else {
         return Ok(None);
     };
-    let Expression::Identifier(callee) = &call.callee else {
-        return Ok(None);
-    };
-    if callee.name != "useState" {
+    if !react.is_use_state_call(call) {
         return Ok(None);
     }
     let [
@@ -358,8 +359,9 @@ fn transform_state_declarator<'a>(
     ast: &AstBuilder<'a>,
     declarator: &mut VariableDeclarator<'a>,
     sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
 ) -> Result<(), Diagnostic> {
-    let Some((value, _)) = state_binding_symbols(declarator, sources)? else {
+    let Some((value, _)) = state_binding_symbols(declarator, sources, react)? else {
         return Ok(());
     };
     let value_name = atom(ast, value.name);
@@ -584,12 +586,6 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
         append_item_dependency(self.ast, &mut arguments, &reads);
         *expression = call_name(self.ast, BINDING, arguments);
     }
-}
-
-fn is_event_attribute(name: &str) -> bool {
-    name.strip_prefix("on")
-        .and_then(|suffix| suffix.chars().next())
-        .is_some_and(|first| first.is_ascii_uppercase())
 }
 
 fn prop_binding_symbols<'a>(

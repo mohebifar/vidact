@@ -5,10 +5,12 @@
 //! static updater IR.
 
 pub mod analysis;
+mod ast_utils;
 mod browser_codegen;
 mod diagnostic;
 pub mod ir;
 mod oxc_react;
+mod react_bindings;
 mod surgical_codegen;
 
 pub use browser_codegen::compile_spike_browser_module;

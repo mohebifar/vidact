@@ -48,6 +48,7 @@ the rationale and integration constraints.
 Requirements: Rust 1.96, Node 24+, pnpm 10, and a Playwright Chromium install.
 
 ```sh
+scripts/prepare-oxc.sh
 pnpm install
 pnpm typecheck
 cargo test --workspace
@@ -55,6 +56,10 @@ pnpm test:browser
 ```
 
 `pnpm check` runs the typecheck and both Rust and browser test suites.
+The prepare script initializes the pinned Oxc submodule and applies Vidact's
+checked-in React Compiler patch. Maintainers editing that patch install the
+pinned tool with `go install github.com/microsoft/go-infra/cmd/git-go-patch@v0.0.16`;
+ordinary builds do not require Go.
 
 Run the first example from the repository root:
 
@@ -91,9 +96,10 @@ now executable. The emitter parses once, preserves source expressions as OXC
 AST, rewrites state references by semantic binding identity, builds the output
 AST, and delegates printing to `oxc_codegen`. TodoMVC proves the full
 TSX-to-browser path including array insertion, filtering, editing, removal, and
-surgical DOM identity. The next milestone is replacing the remaining lexical
-analysis classifier and turning this fail-closed slice into an explicit React
-subset. The project is not production-ready until events are batched, effects
-and component composition have ownership semantics, diagnostics cover the
-supported grammar, source maps reach the original TSX, and SSR/hydration and
-cross-browser gates exist.
+surgical DOM identity. Vidact-specific source and render classification now
+uses OXC AST nodes and semantic binding identities; aliased and namespace React
+state imports work, while foreign hook-shaped calls fail closed. The next
+milestone is a source-located accepted/rejected compatibility corpus and
+per-component span analysis. The project is not production-ready until effects,
+complete component/DOM ownership semantics, original-TSX source maps,
+SSR/hydration, and cross-browser gates exist.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Manage Patched Oxc"
+  short_description: "Maintain the pinned Oxc patch stack"
+  default_prompt: "Use $manage-patched-oxc-submodule to update the pinned Oxc submodule and rebase Vidact patches."

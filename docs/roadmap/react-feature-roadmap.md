@@ -67,6 +67,12 @@ cancellation, and scheduler integration.
 
 **Goal:** no accepted program silently falls outside the updater model.
 
+Current baseline: named-function components, lexical React `useState` imports
+(including aliases and namespaces), direct props/state/derived declarations,
+returns, JSX binding sites, and keyed maps are now classified from OXC AST and
+semantic symbols. Multiple-component span matching, typed control-flow IR,
+source-located diagnostics, and the compatibility manifests remain.
+
 Build:
 
 - OXC AST/semantic classification for components, lexical React imports, hook

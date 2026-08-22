@@ -6,15 +6,15 @@ This spike answers one question: can Vidact reuse the Rust/OXC React Compiler an
 
 ## Decision
 
-Vendor `oxc_react_compiler` for the spike and maintain a deliberately narrow patch. The published `0.143.0` crate provides `compile` and `lint`, but its pipeline modules and optimized `ReactiveFunction` are private. Installing it unchanged cannot expose the analysis result Vidact needs. Reimplementing the entire analysis on `oxc_semantic` would discard the hardest and most valuable parts of React Compiler: control-flow lowering, SSA, effects, alias analysis, and reactive dependency inference.
+Pin the official Oxc repository as a submodule and maintain a deliberately narrow `oxc_react_compiler` patch. The published `0.143.0` crate provides `compile` and `lint`, but its pipeline modules and optimized `ReactiveFunction` are private. Installing it unchanged cannot expose the analysis result Vidact needs. Reimplementing the entire analysis on `oxc_semantic` would discard the hardest and most valuable parts of React Compiler: control-flow lowering, SSA, effects, alias analysis, and reactive dependency inference.
 
 | Option | Access to React analysis | Maintenance | Upstream drift | Spike verdict |
 | --- | --- | --- | --- | --- |
 | Published dependency | No private pre-codegen IR | Low | Low | Insufficient API |
-| Vendored OXC React Compiler | Full, with a small local seam | Medium | Must rebase deliberately | Chosen |
+| Pinned Oxc submodule + patch | Full, with a small local seam | Medium | Explicit patch rebase | Chosen |
 | Rewrite on OXC semantic | Only syntax, scopes, and symbols initially | Very high | Independent | Wrong starting point |
 
-The vendored source is pinned to `oxc_react_compiler 0.143.0` and requires Rust 1.95 or newer. The workspace toolchain is 1.96.0.
+The Oxc submodule is pinned to upstream release commit `45a17c25d188bf1b289638483e2bc61adbadd364` for `0.143.0`. The patch series is maintained with `git-go-patch`; ordinary builds apply it with `scripts/prepare-oxc.sh`. Oxc `0.143.0` requires Rust 1.95 or newer, and the workspace toolchain is 1.96.0.
 
 ## Architecture proven
 
@@ -74,7 +74,7 @@ This is also why React Compiler scopes are not the same thing as signals. They a
 
 ## Spike limitations
 
-The current Vidact analysis classifier is intentionally a corpus probe. It recognizes a constrained set of source shapes using lexical extraction after React Compiler has accepted the module:
+The Vidact analysis classifier remains intentionally narrow, but it now recognizes its supported shapes through OXC AST nodes and semantic identities after React Compiler has accepted the module:
 
 - named function components;
 - destructured props;
@@ -83,21 +83,20 @@ The current Vidact analysis classifier is intentionally a corpus probe. It recog
 - JSX expression text and attributes;
 - direct `collection.map(...)` with a property key.
 
-It now handles straight-line aliases and distinguishes shadowed declarations in the captured def-use graph. It does not yet correctly classify nested component scopes, computed keys, fragments with mixed update sites, conditional trees, arbitrary destructuring, multiple returns, optional chaining, or source transforms. A newer surgical codegen slice connects the analysis, state rewriting, conditional ranges, and keyed-list runtime for TodoMVC. Its browser test proves stable root identity and preservation of an unaffected keyed record. This is a vertical proof, not a declaration that arbitrary TSX is supported.
+It handles hook import aliases and namespaces, straight-line value aliases, and shadowed declarations. Foreign hook-shaped calls fail closed. It does not yet support multiple components, nested component scopes, computed keys, fragments with mixed update sites, arbitrary destructuring, multiple returns, optional chaining, or source transforms. A newer surgical codegen slice connects the analysis, state rewriting, conditional ranges, and keyed-list runtime for TodoMVC. Its browser test proves stable root identity and preservation of an unaffected keyed record. This is a vertical proof, not a declaration that arbitrary TSX is supported.
 
 The executable emitter is deliberately narrower still: one numeric state tuple, numeric `const` derivations, one intrinsic root element, expression attributes, one text expression, and an optional inline setter-based click handler. Unlike the analysis classifier, its syntax path is OXC AST-backed. It clones source expressions with semantic IDs, rewrites only references resolved to the state tuple, constructs a fresh output AST, and prints with `oxc_codegen`. String literals are therefore preserved instead of being rejected or textually rewritten. Static attributes, mixed children, arrays, and other unsupported shapes return `UnsupportedSyntax`; they are never approximated with a partial render.
 
 ## Production path
 
-Keep the React Compiler fork limited to snapshot capture, then replace the remaining lexical Vidact analysis classifier with an OXC AST visitor backed by `oxc_semantic` symbol and reference IDs. The production adapter should:
+Keep the React Compiler fork limited to snapshot capture and keep Vidact's OXC AST/semantic classifier as the DOM-specific boundary. The production adapter should next:
 
-1. replace the remaining lexical source classification in the analysis adapter with OXC AST nodes and map snapshot declaration IDs/spans to OXC symbols;
-2. assign stable source IDs for props, state, context, derived values, and external reads;
-3. classify every JSX expression container by its parent position;
-4. lower conditions into branch updaters and arrays into keyed structural regions;
-5. reject unkeyed or unstable-key list shapes with precise source diagnostics;
-6. snapshot the normalized facts rather than private React HIR;
-7. add upstream-version conformance tests before each vendor update;
-8. measure compiler binary size, compile latency, generated JavaScript size, and runtime allocation count.
+1. expose stable component spans in the owned React Compiler snapshot and classify each component independently;
+2. assign stable source IDs for context and external reads in addition to the implemented props, state, and derived values;
+3. lower all supported control-flow and structural sites into typed IR variants;
+4. reject unkeyed or unstable-key list shapes with precise source diagnostics;
+5. snapshot the normalized facts rather than private React HIR;
+6. add upstream-version conformance tests before each vendor update;
+7. measure compiler binary size, compile latency, generated JavaScript size, and runtime allocation count.
 
-For a production dependency strategy, first propose the owned snapshot API upstream. Until such an API is accepted, the vendored fork is the most robust route because the patch is small, explicit, and tested at the exact seam Vidact needs.
+For a production dependency strategy, first propose the owned snapshot API upstream. Until such an API is accepted, the pinned submodule and explicit patch series are the most robust route because the effective fork is small, reviewable, and tested at the exact seam Vidact needs. See [Patched Oxc submodule](../architecture/patched-oxc-submodule.md) for the maintenance contract.
