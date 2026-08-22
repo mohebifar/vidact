@@ -3,6 +3,10 @@ import { useState } from 'react'
 export function SynchronousFlowApp(): JSX.Element {
   const [mode, setMode] = useState<'a' | 'b'>('a')
   const [values, setValues] = useState([1, -1, 2, 99, 10])
+  const [rows, setRows] = useState([
+    { id: 'ada', label: 'Ada' },
+    { id: 'grace', label: 'Grace' },
+  ])
 
   let label = ''
   switch (mode) {
@@ -42,6 +46,16 @@ export function SynchronousFlowApp(): JSX.Element {
     doWhileCount += 1
   } while (doWhileCount < values.length)
 
+  const keyedLoopRows = []
+  for (const row of rows) {
+    keyedLoopRows.push(
+      <li key={row.id} data-keyed-row-id={row.id}>
+        <input aria-label={`keyed-${row.id}`} />
+        <span>{row.label}</span>
+      </li>,
+    )
+  }
+
   return (
     <section data-synchronous-flow>
       <output data-switch>{label}</output>
@@ -50,6 +64,15 @@ export function SynchronousFlowApp(): JSX.Element {
       <output data-for-in>{keys}</output>
       <output data-while>{whileCount}</output>
       <output data-do-while>{doWhileCount}</output>
+      <ul data-indexed-list>
+        {rows.map((row, index) => (
+          <li data-row-id={row.id} data-row-index={index}>
+            <input aria-label={`owner-${index}`} />
+            <span>{row.label}</span>
+          </li>
+        ))}
+      </ul>
+      <ol data-keyed-loop-list>{keyedLoopRows}</ol>
       <button data-mode-b onClick={() => setMode('b')}>
         mode b
       </button>
@@ -58,6 +81,28 @@ export function SynchronousFlowApp(): JSX.Element {
       </button>
       <button data-noop onClick={() => setValues((current) => current)}>
         noop
+      </button>
+      <button
+        data-prepend-row
+        onClick={() => setRows((current) => [{ id: 'new', label: 'New' }, ...current])}
+      >
+        prepend row
+      </button>
+      <button data-reverse-rows onClick={() => setRows((current) => current.toReversed())}>
+        reverse rows
+      </button>
+      <button data-truncate-rows onClick={() => setRows((current) => current.slice(0, 1))}>
+        truncate rows
+      </button>
+      <button
+        data-update-row
+        onClick={() =>
+          setRows((current) =>
+            current.map((row) => (row.id === 'ada' ? { ...row, label: 'ADA' } : row)),
+          )
+        }
+      >
+        update row
       </button>
     </section>
   )

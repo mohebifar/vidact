@@ -63,6 +63,25 @@ fn represents_keyed_array_updates_as_structural_updaters() {
 }
 
 #[test]
+fn represents_unkeyed_array_updates_as_indexed_structural_updaters() {
+    let items = SourceId::new(0);
+    let facts = ComponentFacts::new(
+        "Rows",
+        vec![SourceFact::new(items, "items", SourceKind::State)],
+        vec![UpdaterFact::new(
+            UpdaterId::new(0),
+            UpdaterKind::IndexedList,
+            vec![items],
+            vec![],
+        )],
+    );
+
+    let ir = lower_component(facts).expect("indexed arrays are supported");
+
+    assert_eq!(ir.updaters[0].kind, UpdaterKind::IndexedList);
+}
+
+#[test]
 fn rejects_analysis_that_references_an_unknown_source() {
     let facts = ComponentFacts::new(
         "Broken",

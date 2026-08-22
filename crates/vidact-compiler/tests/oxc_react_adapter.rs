@@ -137,6 +137,27 @@ fn lowers_keyed_array_rendering_as_a_structural_updater() {
 }
 
 #[test]
+fn lowers_unkeyed_array_rendering_as_an_indexed_structural_updater() {
+    let facts = analyze(
+        "indexed.tsx",
+        r#"
+            import { useState } from 'react';
+            export function Indexed() {
+                const [items] = useState([{ label: 'one' }]);
+                return <ul>{items.map(item => <li>{item.label}</li>)}</ul>;
+            }
+        "#,
+    );
+
+    assert!(
+        facts
+            .updaters
+            .iter()
+            .any(|updater| updater.kind == UpdaterKind::IndexedList)
+    );
+}
+
+#[test]
 fn does_not_classify_an_earlier_tuple_as_state() {
     let facts = analyze(
         "tuple-before-state.tsx",

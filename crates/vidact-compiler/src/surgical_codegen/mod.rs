@@ -29,6 +29,7 @@ use crate::{
 
 mod ast;
 mod derived;
+mod iterative;
 mod render;
 
 use ast::*;
@@ -43,6 +44,7 @@ const CREATE_PROP: &str = "__vidactCreateProp";
 const CREATE_SCOPE: &str = "__vidactCreateScope";
 const CREATE_STATE: &str = "__vidactCreateState";
 const DISPATCH: &str = "__vidactDispatch";
+const INDEXED: &str = "__vidactIndexed";
 const KEYED: &str = "__vidactKeyed";
 const ITEM_INDEX: &str = "__vidactItemIndex";
 const ITEM_SCOPE: &str = "__vidactItemScope";
@@ -118,6 +120,7 @@ fn transform_program<'a>(
         CREATE_SCOPE,
         CREATE_STATE,
         DISPATCH,
+        INDEXED,
         KEYED,
         ITEM_INDEX,
         ITEM_SCOPE,
@@ -168,10 +171,17 @@ fn transform_component<'a>(
         .body
         .as_deref_mut()
         .ok_or_else(|| unsupported("compiled component has no body"))?;
-    let render_start = render_suffix_start(body, ir)?;
+    let mut render_start = render_suffix_start(body, ir)?;
     let mut source_symbols = BTreeMap::<SymbolId, SourceId>::new();
     let mut state_symbols = BTreeMap::<SymbolId, StateReference<'a>>::new();
-    let (item_source_symbols, item_state_symbols) = item_parameters(body, &ast);
+    let iterative_plans = iterative::collect(&ast, body, scoping)?;
+    let (mut item_source_symbols, mut item_state_symbols) = item_parameters(body, &ast);
+    iterative::register_item_sources(
+        &ast,
+        &iterative_plans,
+        &mut item_source_symbols,
+        &mut item_state_symbols,
+    );
     state_symbols.extend(item_state_symbols);
     for prop in &prop_bindings {
         source_symbols.insert(prop.symbol, prop.source);
@@ -215,7 +225,7 @@ fn transform_component<'a>(
     }
 
     reject_untracked_derived_bindings(body, scoping, &source_symbols, &item_source_symbols)?;
-    let render_expression = render::lower_component_render(
+    let mut render_expression = render::lower_component_render(
         &ast,
         allocator,
         scoping,
@@ -224,6 +234,22 @@ fn transform_component<'a>(
         &source_symbols,
         &item_source_symbols,
     )?;
+    iterative::lower(
+        &ast,
+        &mut render_expression,
+        &iterative_plans,
+        scoping,
+        &source_symbols,
+        &item_source_symbols,
+    )?;
+
+    let removed_statements = iterative::removed_statement_indexes(&iterative_plans);
+    for index in removed_statements.iter().rev().copied() {
+        body.statements.remove(index);
+        if index < render_start {
+            render_start -= 1;
+        }
+    }
 
     for statement in &mut body.statements {
         let Statement::VariableDeclaration(declaration) = statement else {
@@ -597,6 +623,11 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             return;
         };
 
+        if is_generated_list_call(expression) {
+            walk_expression_mut(self, expression);
+            return;
+        }
+
         if let Expression::LogicalExpression(logical) = expression
             && logical.operator == LogicalOperator::And
             && is_syntactically_boolean(&logical.left)
@@ -676,7 +707,7 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             return;
         }
 
-        if let Some((collection, key, mut render)) = keyed_map(expression, self.ast) {
+        if let Some((collection, key, mut render)) = jsx_map(expression, self.ast) {
             let reads = dependencies(
                 &collection,
                 self.scoping,
@@ -690,17 +721,19 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
                 return;
             }
             self.visit_expression(&mut render);
-            *expression = call_name(
-                self.ast,
-                KEYED,
-                [
-                    ident(self.ast, SCOPE),
-                    dependency_mask(self.ast, &reads.parent),
-                    arrow_expression(self.ast, [], collection),
-                    key,
-                    render,
-                ],
-            );
+            let mut arguments = vec![
+                ident(self.ast, SCOPE),
+                dependency_mask(self.ast, &reads.parent),
+                arrow_expression(self.ast, [], collection),
+            ];
+            if let Some(key) = key {
+                arguments.push(key);
+                arguments.push(render);
+                *expression = call_name(self.ast, KEYED, arguments);
+            } else {
+                arguments.push(render);
+                *expression = call_name(self.ast, INDEXED, arguments);
+            }
             return;
         }
 
@@ -730,6 +763,15 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
         append_item_dependency(self.ast, &mut arguments, &reads);
         *expression = call_name(self.ast, BINDING, arguments);
     }
+}
+
+fn is_generated_list_call(expression: &Expression<'_>) -> bool {
+    let Expression::CallExpression(call) = expression.without_parentheses() else {
+        return false;
+    };
+    call.callee
+        .get_identifier_reference()
+        .is_some_and(|identifier| identifier.name == KEYED || identifier.name == INDEXED)
 }
 
 fn is_syntactically_boolean(expression: &Expression<'_>) -> bool {
@@ -931,10 +973,10 @@ fn contains_jsx(expression: &Expression<'_>) -> bool {
     finder.found
 }
 
-fn keyed_map<'a>(
+fn jsx_map<'a>(
     expression: &Expression<'a>,
     ast: &AstBuilder<'a>,
-) -> Option<(Expression<'a>, Expression<'a>, Expression<'a>)> {
+) -> Option<(Expression<'a>, Option<Expression<'a>>, Expression<'a>)> {
     let Expression::CallExpression(call) = expression.without_parentheses() else {
         return None;
     };
@@ -953,7 +995,13 @@ fn keyed_map<'a>(
     if !(1..=2).contains(&render.params.items.len()) {
         return None;
     }
-    let key_expression = key_expression(render)?;
+    if !matches!(
+        render.body.as_expression()?.without_parentheses(),
+        Expression::JSXElement(_) | Expression::JSXFragment(_)
+    ) {
+        return None;
+    }
+    let key_expression = key_expression(render);
     let parameter_names = render
         .params
         .items
@@ -963,11 +1011,13 @@ fn keyed_map<'a>(
             _ => None,
         })
         .collect::<Option<Vec<_>>>()?;
-    let key = arrow_expression(
-        ast,
-        parameter_names,
-        key_expression.clone_in(ast.allocator()),
-    );
+    let key = key_expression.map(|key_expression| {
+        arrow_expression(
+            ast,
+            parameter_names,
+            key_expression.clone_in(ast.allocator()),
+        )
+    });
     let mut render = render.clone_in_with_semantic_ids(ast.allocator());
     if render.params.items.len() == 1 {
         append_arrow_parameter(ast, &mut render, ITEM_INDEX);
@@ -1164,7 +1214,12 @@ impl<'a> Visit<'a> for ItemParameterCollector<'a, '_> {
             && let [argument] = call.arguments.as_slice()
             && let Some(Expression::ArrowFunctionExpression(render)) = argument.as_expression()
             && (1..=2).contains(&render.params.items.len())
-            && key_expression(render).is_some()
+            && render.body.as_expression().is_some_and(|expression| {
+                matches!(
+                    expression.without_parentheses(),
+                    Expression::JSXElement(_) | Expression::JSXFragment(_)
+                )
+            })
         {
             for (index, parameter) in render.params.items.iter().take(2).enumerate() {
                 let BindingPattern::BindingIdentifier(identifier) = &parameter.pattern else {
@@ -1298,6 +1353,7 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>, program: &Program<'a>) -> Statement<
         ("createCompiledScope", CREATE_SCOPE),
         ("createCompiledState", CREATE_STATE),
         ("dispatch", DISPATCH),
+        ("indexed", INDEXED),
         ("keyed", KEYED),
         ("source", SOURCE),
         ("when", WHEN),

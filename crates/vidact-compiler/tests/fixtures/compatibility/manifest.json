@@ -12,6 +12,11 @@
       "components": ["Early"]
     },
     {
+      "path": "accepted/iterative-jsx-arrays.tsx",
+      "expectation": "accepted",
+      "components": ["IterativeJsxArrays"]
+    },
+    {
       "path": "accepted/multiple-components.tsx",
       "expectation": "accepted",
       "components": ["Child", "Parent"]

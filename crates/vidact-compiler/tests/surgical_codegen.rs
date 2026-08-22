@@ -169,6 +169,100 @@ fn compiles_keyed_item_and_parent_reads_into_separate_static_domains() {
 }
 
 #[test]
+fn compiles_unkeyed_jsx_maps_into_explicit_indexed_owners() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "IndexedItems.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function IndexedItems(): Node {
+                const [items, setItems] = useState([{ label: 'one' }]);
+                return <ul>{items.map((item, index) => (
+                    <li data-index={index}>{item.label}</li>
+                ))}</ul>;
+            }
+        "#,
+    })
+    .expect("unkeyed JSX maps should compile with explicit index identity");
+
+    assert!(output.contains("indexed as __vidactIndexed"), "{output}");
+    assert!(!output.contains("keyed as __vidactKeyed"), "{output}");
+    assert!(
+        output.contains("(item, index, __vidactItemScope)"),
+        "{output}"
+    );
+    assert!(output.contains("item.get().label"), "{output}");
+    assert!(output.contains("index.get()"), "{output}");
+}
+
+#[test]
+fn compiles_for_of_jsx_accumulators_into_record_owners() {
+    let keyed = compile_surgical_module(ModuleInput {
+        filename: "KeyedLoop.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function KeyedLoop(): Node {
+                const [items, setItems] = useState([{ id: 'one', label: 'One' }]);
+                const rows = [];
+                for (const item of items) {
+                    rows.push(<li key={item.id}>{item.label}</li>);
+                }
+                return <ul>{rows}</ul>;
+            }
+        "#,
+    })
+    .expect("a keyed for-of JSX accumulator should become a keyed record factory");
+
+    assert!(keyed.contains("keyed as __vidactKeyed"), "{keyed}");
+    assert!(keyed.contains("() => items.get()"), "{keyed}");
+    assert!(
+        keyed.contains("(item, __vidactItemIndex) => item.id"),
+        "{keyed}"
+    );
+    assert!(!keyed.contains("rows.push"), "{keyed}");
+
+    let indexed = compile_surgical_module(ModuleInput {
+        filename: "IndexedLoop.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function IndexedLoop(): Node {
+                const [items, setItems] = useState([{ label: 'One' }]);
+                const rows = [];
+                for (const item of items) {
+                    rows.push(<li>{item.label}</li>);
+                }
+                return <ul>{rows}</ul>;
+            }
+        "#,
+    })
+    .expect("an unkeyed for-of JSX accumulator should become an indexed record factory");
+
+    assert!(indexed.contains("indexed as __vidactIndexed"), "{indexed}");
+    assert!(!indexed.contains("rows.push"), "{indexed}");
+}
+
+#[test]
+fn rejects_unstable_for_of_jsx_keys() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "InvalidLoopKey.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function InvalidLoopKey(): Node {
+                const [items, setItems] = useState([{ id: 'one' }]);
+                const rows = [];
+                for (const item of items) {
+                    rows.push(<li key={Math.random()}>{item.id}</li>);
+                }
+                return <ul>{rows}</ul>;
+            }
+        "#,
+    })
+    .expect_err("an unstable explicit key must not silently select index mode");
+
+    assert_eq!(diagnostics[0].code, DiagnosticCode::UnsupportedSyntax);
+    assert!(diagnostics[0].message.contains("iterative JSX keys"));
+}
+
+#[test]
 fn rejects_keyed_maps_the_analysis_ir_cannot_represent() {
     for key in ["prefix + item.id", "item[idField]", "index"] {
         let source = format!(

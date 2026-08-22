@@ -44,7 +44,7 @@ Owned blocks carry their update ownership from their producer. Passing one into 
 
 ## Consequences
 
-Immutable updates to list records are now surgical for supported keyed callbacks, and compiled arrays can be composed through prop boundaries. Each mounted keyed record pays for a small scope and two state slots, and mixed bindings register in two scopes. Destructured callback parameters, nested keyed collections derived from an outer item, unkeyed reconciliation, and arbitrary external JSX arrays remain unsupported and should fail or remain outside the public contract until separately designed.
+Immutable updates to list records are surgical for supported keyed callbacks, and compiled arrays can be composed through prop boundaries. Explicit unkeyed maps and direct `for...of` accumulators now use the same record engine with position keys; see [Compiler-owned iterative JSX](compiler-owned-iterative-jsx.md). Each mounted record pays for a small scope and two state slots, and mixed bindings register in two scopes. Destructured callback parameters, nested collections derived from an outer item, broader imperative accumulator grammars, and arbitrary external JSX arrays remain unsupported and should fail or remain outside the public contract until separately designed.
 
 ## Verification
 

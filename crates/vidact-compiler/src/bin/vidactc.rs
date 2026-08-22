@@ -135,6 +135,7 @@ fn updater_kind(kind: &UpdaterKind) -> &'static str {
         UpdaterKind::Property { .. } => "property",
         UpdaterKind::Branch => "branch",
         UpdaterKind::KeyedList { .. } => "keyed-list",
+        UpdaterKind::IndexedList => "indexed-list",
         UpdaterKind::Effect => "effect",
     }
 }

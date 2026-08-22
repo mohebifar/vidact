@@ -311,11 +311,23 @@ impl<'a> Visit<'a> for RenderUpdaterCollector<'_> {
         let Some(expression) = container.expression.as_expression() else {
             return;
         };
-        if let Some((collection, key)) = keyed_map(expression, self.scoping) {
-            self.push(
-                UpdaterKind::KeyedList { key },
-                semantic_reads(collection, self.scoping, self.source_symbols),
-            );
+        if let Some((collection, identity)) = jsx_map(expression, self.scoping) {
+            match identity {
+                ListIdentity::Keyed(key) => self.push(
+                    UpdaterKind::KeyedList { key },
+                    semantic_reads(collection, self.scoping, self.source_symbols),
+                ),
+                ListIdentity::Indexed => self.push(
+                    UpdaterKind::IndexedList,
+                    semantic_reads(collection, self.scoping, self.source_symbols),
+                ),
+                ListIdentity::InvalidKey => {
+                    self.diagnostic = Some(
+                        "keyed maps require key={item} or key={item.property}; other key expressions are unsupported"
+                            .to_string(),
+                    );
+                }
+            }
             return;
         }
         if is_jsx_rendering_map(expression) {
@@ -368,10 +380,16 @@ impl<'a> Visit<'a> for JsxFinder {
     }
 }
 
-fn keyed_map<'a>(
+enum ListIdentity {
+    Keyed(KeyPath),
+    Indexed,
+    InvalidKey,
+}
+
+fn jsx_map<'a>(
     expression: &'a Expression<'a>,
     scoping: &Scoping,
-) -> Option<(&'a Expression<'a>, KeyPath)> {
+) -> Option<(&'a Expression<'a>, ListIdentity)> {
     let Expression::CallExpression(call) = expression.without_parentheses() else {
         return None;
     };
@@ -394,10 +412,12 @@ fn keyed_map<'a>(
         return None;
     };
     let item_symbol = item.symbol_id.get()?;
-    let Expression::JSXElement(element) = render.body.as_expression()?.without_parentheses() else {
-        return None;
+    let rendered = render.body.as_expression()?.without_parentheses();
+    let Expression::JSXElement(element) = rendered else {
+        return matches!(rendered, Expression::JSXFragment(_))
+            .then_some((&member.object, ListIdentity::Indexed));
     };
-    let key = element
+    let key_attribute = element
         .opening_element
         .attributes
         .iter()
@@ -411,30 +431,39 @@ fn keyed_map<'a>(
             if name.name != "key" {
                 return None;
             }
-            let Some(JSXAttributeValue::ExpressionContainer(container)) = &attribute.value else {
-                return None;
-            };
-            let expression = container.expression.as_expression()?.without_parentheses();
-            match expression {
-                Expression::Identifier(identifier)
-                    if reference_symbol(identifier, scoping) == Some(item_symbol) =>
-                {
-                    Some(KeyPath::Identity)
-                }
-                Expression::StaticMemberExpression(key)
-                    if key
-                        .object
-                        .without_parentheses()
-                        .get_identifier_reference()
-                        .and_then(|identifier| reference_symbol(identifier, scoping))
-                        == Some(item_symbol) =>
-                {
-                    Some(KeyPath::Property(key.property.name.to_string()))
-                }
-                _ => None,
-            }
-        })?;
-    Some((&member.object, key))
+            Some(attribute)
+        });
+    let Some(key_attribute) = key_attribute else {
+        return Some((&member.object, ListIdentity::Indexed));
+    };
+    let Some(JSXAttributeValue::ExpressionContainer(container)) = &key_attribute.value else {
+        return Some((&member.object, ListIdentity::InvalidKey));
+    };
+    let Some(expression) = container.expression.as_expression() else {
+        return Some((&member.object, ListIdentity::InvalidKey));
+    };
+    let key = match expression.without_parentheses() {
+        Expression::Identifier(identifier)
+            if reference_symbol(identifier, scoping) == Some(item_symbol) =>
+        {
+            Some(KeyPath::Identity)
+        }
+        Expression::StaticMemberExpression(key)
+            if key
+                .object
+                .without_parentheses()
+                .get_identifier_reference()
+                .and_then(|identifier| reference_symbol(identifier, scoping))
+                == Some(item_symbol) =>
+        {
+            Some(KeyPath::Property(key.property.name.to_string()))
+        }
+        _ => None,
+    };
+    Some((
+        &member.object,
+        key.map_or(ListIdentity::InvalidKey, ListIdentity::Keyed),
+    ))
 }
 
 fn semantic_reads(

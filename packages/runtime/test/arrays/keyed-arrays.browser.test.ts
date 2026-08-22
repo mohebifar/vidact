@@ -77,6 +77,22 @@ describe('keyed array corpus', () => {
     expect(host.textContent).toBe(beforeDuplicate)
   })
 
+  it('rejects non-primitive keys before creating or updating records', () => {
+    const host = document.createElement('div')
+    const rendered: string[] = []
+    const list = createKeyedList<Todo, unknown>(host, {
+      key: (todo) => (todo.id === 1 ? todo : Symbol('invalid')),
+      render: (todo) => {
+        rendered.push(todo.label)
+        return document.createTextNode(todo.label)
+      },
+    })
+
+    expect(() => list.update([{ id: 1, label: 'one' }])).toThrow(/invalid key/i)
+    expect(rendered).toEqual([])
+    expect(host.textContent).toBe('')
+  })
+
   it('does not move DOM records when key order is unchanged', async () => {
     const host = document.createElement('div')
     const list = createKeyedList<Todo, number>(host, {

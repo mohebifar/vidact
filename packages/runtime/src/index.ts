@@ -8,6 +8,7 @@ export {
   type KeyedListOptions,
   type KeyedRenderResult,
 } from './keyed-list.ts'
+export { createIndexedList, type IndexedList, type IndexedListOptions } from './indexed-list.ts'
 export {
   Fragment,
   h,
@@ -28,6 +29,7 @@ export {
   createCompiledScope,
   createCompiledState,
   dispatch,
+  indexed,
   keyed,
   mountCompiled,
   when,

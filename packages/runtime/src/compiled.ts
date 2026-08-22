@@ -1,3 +1,4 @@
+import { createIndexedList } from './indexed-list.ts'
 import { createKeyedList } from './keyed-list.ts'
 import {
   intersectsSources,
@@ -480,6 +481,65 @@ export function keyed<T, K>(
       parent,
       {
         key,
+        render(value, index) {
+          const owner = createOwner()
+          const itemScope = createCompiledScope()
+          const valueSlot = createCompiledState(itemScope, itemSource, value)
+          const indexSlot = createCompiledState(itemScope, indexSource, index)
+          try {
+            const nodes = withOwner(owner, () => {
+              onCleanup(itemScope.dispose)
+              return materialize(render(valueSlot, indexSlot, itemScope))
+            })
+            return {
+              nodes,
+              update(nextValue: T, nextIndex: number) {
+                itemScope.batch(() => {
+                  valueSlot.set(nextValue)
+                  indexSlot.set(nextIndex)
+                })
+              },
+              dispose: () => disposeOwner(owner),
+            }
+          } catch (error) {
+            disposeOwner(owner)
+            itemScope.dispose()
+            throw error
+          }
+        },
+      },
+      before,
+    )
+    const update = (): void => {
+      try {
+        for (const node of list.update(values())) commitPendingRefs(node)
+      } catch (error) {
+        const currentParent = list.parent()
+        if (currentParent !== null) commitPendingRefs(currentParent)
+        throw error
+      }
+    }
+    update()
+    const removeUpdater = scope.add({ reads, run: update })
+    onCleanup(() => {
+      removeUpdater()
+      list.dispose()
+    })
+  })
+}
+
+export function indexed<T>(
+  scope: CompiledScope,
+  reads: SourceMask,
+  values: () => readonly T[],
+  render: (value: StateSlot<T>, index: StateSlot<number>, itemScope: CompiledScope) => RenderValue,
+): StructuralBinding {
+  return structural((parent, before) => {
+    const itemSource = source(0)
+    const indexSource = source(1)
+    const list = createIndexedList<T>(
+      parent,
+      {
         render(value, index) {
           const owner = createOwner()
           const itemScope = createCompiledScope()

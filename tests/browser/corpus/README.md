@@ -26,7 +26,8 @@ infrastructure coverage, but it is not an app-corpus entry.
   same-key row identity across branch changes
 - `apps/synchronous-flow`: native `switch` fallthrough, labeled `break`,
   `continue`, `for`, `for...of`, `for...in`, `while`, and `do...while` preserved
-  inside compiler-ordered updater closures
+  inside compiler-ordered updater closures, plus keyed `for...of` JSX factories,
+  explicit unkeyed index identity, and focus-preserving record moves
 
 ## Supporting runtime coverage
 
@@ -34,7 +35,7 @@ The remaining tests are organized by semantic surface:
 
 - `reactivity`: static dependency masks, derived propagation, batching, and
   wide components
-- `arrays`: keyed structural reconciliation and DOM identity
+- `arrays`: keyed and explicit indexed structural reconciliation and DOM identity
 - `lifecycle`: disposal and invalidation boundaries
 - `@vidact/test-support`: shared MutationObserver assertions and their own
   browser coverage

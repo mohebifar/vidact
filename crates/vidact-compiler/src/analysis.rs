@@ -71,6 +71,7 @@ pub enum UpdaterKind {
     Property { name: String },
     Branch,
     KeyedList { key: KeyPath },
+    IndexedList,
     Effect,
 }
 

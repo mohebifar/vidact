@@ -45,6 +45,7 @@ export function createKeyedList<T, K>(
     }
 
     const keys = values.map(options.key)
+    assertValidKeys(keys)
     assertUniqueKeys(keys)
 
     const previousByKey = new Map<K, RecordState<T, K>>()
@@ -75,13 +76,41 @@ export function createKeyedList<T, K>(
 
     const cleanup = disposeRecords(currentParent, previousByKey.values())
 
+    const activeElement =
+      document.activeElement instanceof HTMLElement &&
+      currentParent.contains(document.activeElement)
+        ? document.activeElement
+        : null
+    const selectionControl =
+      activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement
+        ? activeElement
+        : null
+    const selection =
+      selectionControl === null
+        ? null
+        : { start: selectionControl.selectionStart, end: selectionControl.selectionEnd }
     let cursor: Node = end
     for (let recordIndex = nextRecords.length - 1; recordIndex >= 0; recordIndex -= 1) {
       const record = nextRecords[recordIndex] as RecordState<T, K>
       for (let nodeIndex = record.nodes.length - 1; nodeIndex >= 0; nodeIndex -= 1) {
         const node = record.nodes[nodeIndex] as Node
-        if (node.nextSibling !== cursor) currentParent.insertBefore(node, cursor)
+        if (node.nextSibling !== cursor) moveBefore(currentParent, node, cursor)
         cursor = node
+      }
+    }
+    if (
+      activeElement !== null &&
+      document.activeElement !== activeElement &&
+      currentParent.contains(activeElement)
+    ) {
+      activeElement.focus({ preventScroll: true })
+      if (
+        selectionControl !== null &&
+        selection !== null &&
+        selection.start !== null &&
+        selection.end !== null
+      ) {
+        selectionControl.setSelectionRange(selection.start, selection.end)
       }
     }
 
@@ -105,6 +134,25 @@ export function createKeyedList<T, K>(
   }
 
   return { dispose, parent: () => end.parentNode, update }
+}
+
+function moveBefore(parent: Node, node: Node, before: Node): void {
+  const statePreservingParent = parent as Node & {
+    moveBefore?: (node: Node, before: Node | null) => void
+  }
+  if (statePreservingParent.moveBefore !== undefined && node.parentNode === parent) {
+    statePreservingParent.moveBefore(node, before)
+  } else {
+    parent.insertBefore(node, before)
+  }
+}
+
+function assertValidKeys<K>(keys: readonly K[]): void {
+  for (const key of keys) {
+    if (typeof key !== 'string' && typeof key !== 'number' && typeof key !== 'bigint') {
+      throw new Error(`invalid key in keyed list: ${String(key)}`)
+    }
+  }
 }
 
 function assertUniqueKeys<K>(keys: readonly K[]): void {

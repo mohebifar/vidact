@@ -60,7 +60,7 @@ components because a supported component function executes once.
 
 This is a Vidact compiled-value ABI, not arbitrary React element
 reconciliation. Owned structural blocks still mount once. External
-`ReactElement[]`, unkeyed reconciliation, reactive ref identity changes,
+`ReactElement[]`, reactive ref identity changes,
 imperative handles, effects, portals, Suspense, and SSR/hydration remain outside
 the accepted contract.
 
