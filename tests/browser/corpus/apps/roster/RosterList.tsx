@@ -1,8 +1,8 @@
-import type { ReactNode } from 'react'
+import type { VidactNode } from '@vidact/react-types'
 
 interface RosterListProps {
   readonly count: number
-  readonly rows: ReactNode
+  readonly rows: VidactNode
 }
 
 export function RosterList({ count, rows }: RosterListProps): JSX.Element {

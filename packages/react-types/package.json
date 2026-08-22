@@ -1,0 +1,30 @@
+{
+  "name": "@vidact/react-types",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts"
+    },
+    "./jsx-runtime": {
+      "types": "./jsx-runtime.d.ts",
+      "default": "./jsx-runtime.js"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@vidact/runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "typescript": "7.0.2"
+  },
+  "peerDependencies": {
+    "@types/react": "^19.2.18"
+  }
+}

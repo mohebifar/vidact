@@ -34,6 +34,23 @@ describe('direct DOM construction', () => {
     expect(calls).toBe(1)
   })
 
+  it('registers React capture handlers in the native capture phase', () => {
+    const calls: string[] = []
+    const child = h(
+      'button',
+      {
+        onClick: () => calls.push('child'),
+      },
+      'Child',
+    )
+    const parent = h('div', { onClickCapture: () => calls.push('parent') }, child)
+
+    child.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(parent.contains(child)).toBe(true)
+    expect(calls).toEqual(['parent', 'child'])
+  })
+
   it('constructs root fragments without a compatibility mount', () => {
     const fragment = h(Fragment, null, h('span', null, 'one'), h('span', null, 'two'))
 

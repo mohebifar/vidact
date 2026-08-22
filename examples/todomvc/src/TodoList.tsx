@@ -1,7 +1,7 @@
-import type { DirectChild } from '@vidact/runtime'
+import type { VidactNode } from '@vidact/react-types'
 
 interface TodoListProps {
-  readonly rows: DirectChild
+  readonly rows: VidactNode
   readonly visibleCount: number
 }
 

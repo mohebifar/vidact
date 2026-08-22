@@ -102,10 +102,15 @@ function attachEventProp(element: HTMLElement, name: string, value: unknown): ()
     throw new TypeError(`event prop ${name} must be a function, null, or undefined`)
   }
   const reactEventName = name.slice(2)
-  const eventName = reactEventName === 'DoubleClick' ? 'dblclick' : reactEventName.toLowerCase()
+  const capture = reactEventName.endsWith('Capture')
+  const eventNameWithoutPhase = capture
+    ? reactEventName.slice(0, -'Capture'.length)
+    : reactEventName
+  const eventName =
+    eventNameWithoutPhase === 'DoubleClick' ? 'dblclick' : eventNameWithoutPhase.toLowerCase()
   const listener = value as EventListener
-  element.addEventListener(eventName, listener)
-  return () => element.removeEventListener(eventName, listener)
+  element.addEventListener(eventName, listener, capture)
+  return () => element.removeEventListener(eventName, listener, capture)
 }
 
 function applyProp(element: HTMLElement, name: string, value: unknown): void {

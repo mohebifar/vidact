@@ -13,6 +13,8 @@
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@vidact/react-types": "workspace:*",
     "@vidact/test-support": "workspace:*",
     "@vidact/vite": "workspace:*",
     "@vitest/browser-playwright": "4.1.11",
