@@ -211,6 +211,25 @@ fn lower_snapshot(
     })?;
     let def_use = CompilerDefUse::new(analysis);
     validate_destructive_render_writes(&control_flow, &syntax, component_name, component_span)?;
+    let phi_declarations = control_flow
+        .blocks
+        .iter()
+        .flat_map(|block| &block.phis)
+        .map(|phi| phi.target.declaration_id.get())
+        .collect::<BTreeSet<_>>();
+    let mut phi_candidate_names = BTreeSet::new();
+    for (name, source) in &syntax.locals {
+        if def_use
+            .declaration_id(source.declaration_start)
+            .is_some_and(|declaration| phi_declarations.contains(&declaration))
+        {
+            phi_candidate_names.insert(name.clone());
+            syntax
+                .candidates
+                .entry(name.clone())
+                .or_insert_with(|| source.clone());
+        }
+    }
 
     let provisional = syntax
         .sources
@@ -244,6 +263,7 @@ fn lower_snapshot(
     let mut reachable = syntax
         .sources
         .keys()
+        .chain(phi_candidate_names.iter())
         .filter_map(|name| provisional.get(name.as_str()).copied())
         .collect::<BTreeSet<_>>();
     let dependents = candidate_reads
@@ -257,7 +277,7 @@ fn lower_snapshot(
             },
         );
     let mut pending = reachable.iter().copied().collect::<VecDeque<_>>();
-    let mut derived_names = BTreeSet::new();
+    let mut derived_names = phi_candidate_names;
     while let Some(read) = pending.pop_front() {
         let Some(names) = dependents.get(&read) else {
             continue;

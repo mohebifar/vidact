@@ -369,6 +369,75 @@ fn compiles_terminal_switches_into_owned_choices() {
 }
 
 #[test]
+fn compiles_phi_derived_values_into_ordered_static_updaters() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "BranchDerived.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function BranchDerived({ first, second }) {
+                const [alternate, setAlternate] = useState(false);
+                let selected;
+                if (alternate) {
+                    selected = first;
+                } else {
+                    selected = second;
+                }
+                return <button title={selected} onClick={() => setAlternate(value => !value)}>{selected}</button>;
+            }
+        "#,
+    })
+    .expect("a React Compiler phi must lower to one derived updater");
+
+    assert!(output.contains("let selected"), "{output}");
+    assert!(
+        output.contains("selected = alternate.get() ? first.get() : second.get()"),
+        "{output}"
+    );
+    assert!(output.contains("writes:"), "{output}");
+    assert!(
+        output.contains(
+            "reads: __vidactCombineSources(__vidactSource(0), __vidactSource(1), __vidactSource(2))"
+        ),
+        "{output}"
+    );
+    assert!(output.contains("() => selected"), "{output}");
+    assert!(
+        !output.contains("alternate.get() ? selected : selected"),
+        "{output}"
+    );
+}
+
+#[test]
+fn compiles_nested_phi_regions_and_dispatches_the_derived_component_type() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "DerivedType.tsx",
+        source: r#"
+            import { useState } from 'react';
+            function First() { return <p>first</p>; }
+            function Second() { return <p>second</p>; }
+            export function DerivedType() {
+                const [alternate, setAlternate] = useState(false);
+                let Type;
+                if (alternate) {
+                    Type = Second;
+                } else {
+                    Type = First;
+                }
+                return <Type />;
+            }
+        "#,
+    })
+    .expect("a phi-derived JSX callee must use the narrow identity dispatcher");
+
+    assert!(output.contains("dispatch as __vidactDispatch"), "{output}");
+    assert!(
+        output.contains("Type = alternate.get() ? Second : First"),
+        "{output}"
+    );
+    assert!(output.contains("() => Type"), "{output}");
+}
+
+#[test]
 fn rejects_branch_varying_refs_at_the_component_site() {
     let diagnostics = compile_surgical_module(ModuleInput {
         filename: "Refs.tsx",

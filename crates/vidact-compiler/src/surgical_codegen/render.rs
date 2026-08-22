@@ -4,7 +4,7 @@ use oxc_allocator::{Allocator, CloneIn, GetAllocator};
 use oxc_ast::{ast::*, builder::AstBuilder};
 use oxc_ast_visit::{Visit, walk::walk_expression};
 use oxc_semantic::Scoping;
-use oxc_span::{GetSpan, SPAN};
+use oxc_span::{ContentEq, GetSpan, SPAN};
 use oxc_syntax::{operator::BinaryOperator, symbol::SymbolId};
 
 use crate::{
@@ -382,6 +382,9 @@ impl<'a> RenderLowerer<'a, '_> {
                 .map(|index| &alternate.attributes[*index]);
             let left_value = self.attribute_expression(left)?;
             let right_value = self.attribute_expression(right)?;
+            if left_value.content_eq(&right_value) {
+                continue;
+            }
             let conditional = Expression::new_conditional_expression(
                 SPAN,
                 test.clone_in_with_semantic_ids(self.ast.allocator()),
@@ -481,6 +484,9 @@ impl<'a> RenderLowerer<'a, '_> {
             (consequent, alternate) => {
                 let left = self.child_expression(consequent)?;
                 let right = self.child_expression(alternate)?;
+                if left.content_eq(&right) {
+                    return Ok(());
+                }
                 let conditional = Expression::new_conditional_expression(
                     SPAN,
                     test.clone_in_with_semantic_ids(self.ast.allocator()),

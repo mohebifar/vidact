@@ -2,6 +2,11 @@
   "contract": "vidact-react-subset-v1",
   "fixtures": [
     {
+      "path": "accepted/branch-derived-values.tsx",
+      "expectation": "accepted",
+      "components": ["BranchDerived"]
+    },
+    {
       "path": "accepted/early-return.tsx",
       "expectation": "accepted",
       "components": ["Early"]

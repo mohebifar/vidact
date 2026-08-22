@@ -28,6 +28,7 @@ use crate::{
 };
 
 mod ast;
+mod derived;
 mod render;
 
 use ast::*;
@@ -280,14 +281,34 @@ fn transform_component<'a>(
             .iter()
             .find(|source| source.id == *write)
             .ok_or_else(|| unsupported("derived updater writes an unknown source"))?;
-        let expression = derivations.get(source.name.as_str()).ok_or_else(|| {
-            unsupported(format!("missing derived expression for {}", source.name))
-        })?;
+        let expression = if let Some(expression) = derivations.get(source.name.as_str()) {
+            expression.clone_in_with_semantic_ids(allocator)
+        } else {
+            let symbol = source_symbols
+                .iter()
+                .find_map(|(symbol, id)| (*id == source.id).then_some(*symbol))
+                .ok_or_else(|| {
+                    unsupported(format!("missing derived binding for {}", source.name))
+                })?;
+            derived::branch_expression(&ast, body, scoping, ir, source.id, symbol)?.ok_or_else(
+                || unsupported(format!("missing derived expression for {}", source.name)),
+            )?
+        };
+        let expression_reads =
+            dependencies(&expression, scoping, &source_symbols, &item_source_symbols);
+        if !expression_reads.item.is_empty() {
+            return Err(unsupported(
+                "component phi-derived values cannot depend on keyed item slots",
+            ));
+        }
+        let mut reads = updater.reads.iter().copied().collect::<BTreeSet<_>>();
+        reads.extend(expression_reads.parent);
+        let reads = reads.into_iter().collect::<Vec<_>>();
         updater_statements.push(register_derived(
             &ast,
             source.name.as_str(),
-            expression.clone_in_with_semantic_ids(allocator),
-            &updater.reads,
+            expression,
+            &reads,
             &updater.writes,
         ));
     }

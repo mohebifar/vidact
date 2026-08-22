@@ -25,6 +25,7 @@ pub(super) struct SourceSyntax {
 pub(super) struct ComponentSyntax<'a> {
     pub(super) sources: BTreeMap<String, SourceSyntax>,
     pub(super) candidates: BTreeMap<String, SourceSyntax>,
+    pub(super) locals: BTreeMap<String, SourceSyntax>,
     pub(super) return_expressions: Vec<&'a Expression<'a>>,
     pub(super) render_flow: RenderFlowGraph,
     pub(super) body_span: SourceSpan,
@@ -95,6 +96,7 @@ pub(super) fn classify_component<'a>(
     }
 
     let mut candidates = BTreeMap::new();
+    let mut locals = BTreeMap::new();
     for statement in &body.statements {
         let Statement::VariableDeclaration(declaration) = statement else {
             continue;
@@ -104,9 +106,6 @@ pub(super) fn classify_component<'a>(
                 sources.insert(name, state);
                 continue;
             }
-            if declaration.kind != VariableDeclarationKind::Const || declarator.init.is_none() {
-                continue;
-            }
             let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
                 continue;
             };
@@ -114,14 +113,15 @@ pub(super) fn classify_component<'a>(
                 continue;
             };
             let name = identifier.name.to_string();
-            candidates.insert(
-                name,
-                SourceSyntax {
-                    kind: SourceKind::Derived,
-                    symbol,
-                    declaration_start: identifier.span.start,
-                },
-            );
+            let source = SourceSyntax {
+                kind: SourceKind::Derived,
+                symbol,
+                declaration_start: identifier.span.start,
+            };
+            locals.insert(name.clone(), source.clone());
+            if declaration.kind == VariableDeclarationKind::Const && declarator.init.is_some() {
+                candidates.insert(name, source);
+            }
         }
     }
 
@@ -135,6 +135,7 @@ pub(super) fn classify_component<'a>(
     Ok(ComponentSyntax {
         sources,
         candidates,
+        locals,
         return_expressions,
         render_flow,
         body_span: SourceSpan::new(body.span.start, body.span.end),

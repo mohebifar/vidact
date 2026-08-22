@@ -21,6 +21,9 @@ infrastructure coverage, but it is not an app-corpus entry.
 - `apps/control-flow`: early returns, aligned alternatives, JavaScript logical
   values, terminal switches, dynamic keys, event replacement, focus and nested
   keyed identity, disposed branches, and no-op mutation envelopes
+- `apps/derived-control-flow`: React Compiler SSA/phi-derived objects and arrays,
+  inactive-input zero-mutation behavior, active text/attribute updates, and
+  same-key row identity across branch changes
 
 ## Supporting runtime coverage
 
