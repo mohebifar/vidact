@@ -14,14 +14,13 @@ import {
   source,
   when,
 } from '@vidact/runtime'
-import { describe, expect, it } from 'vitest'
-
 import {
   assertMutationEnvelope,
   captureMutations,
   requireSingleDirectText,
   startMutationCapture,
-} from '../support/mutations.ts'
+} from '@vidact/test-support'
+import { describe, expect, it } from 'vitest'
 
 interface Item {
   readonly id: number

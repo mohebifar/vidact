@@ -6,7 +6,7 @@ import {
   describeMutations,
   requireSingleDirectText,
   startMutationCapture,
-} from './mutations.ts'
+} from '../mutations.ts'
 
 describe('DOM mutation test helpers', () => {
   it('captures subtree mutations and preserves the action result', async () => {

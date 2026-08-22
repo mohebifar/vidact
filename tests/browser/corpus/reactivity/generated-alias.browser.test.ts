@@ -1,11 +1,11 @@
-import { describe, expect, it } from 'vitest'
-
-import { mountAliasCounter } from '../../generated/alias-counter.ts'
 import {
   assertMutationEnvelope,
   captureMutations,
   requireSingleDirectText,
-} from '../support/mutations.ts'
+} from '@vidact/test-support'
+import { describe, expect, it } from 'vitest'
+
+import { mountAliasCounter } from '../../generated/alias-counter.ts'
 
 describe('Rust-generated alias reactivity corpus', () => {
   it('propagates state through aliases into stable DOM bindings', async () => {

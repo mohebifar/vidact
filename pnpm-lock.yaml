@@ -49,6 +49,15 @@ importers:
         specifier: 7.0.2
         version: 7.0.2
 
+  packages/test-support:
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.13.3)(@vitest/browser-playwright@4.1.11)(vite@8.2.2(@types/node@24.13.3))
+
   packages/vite-plugin:
     devDependencies:
       '@types/node':
@@ -73,6 +82,12 @@ importers:
       '@types/node':
         specifier: ^24.13.3
         version: 24.13.3
+      '@vidact/test-support':
+        specifier: workspace:*
+        version: link:../../packages/test-support
+      '@vidact/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite-plugin
       '@vitest/browser-playwright':
         specifier: 4.1.11
         version: 4.1.11(playwright@1.62.1)(vite@8.2.2(@types/node@24.13.3))(vitest@4.1.11)

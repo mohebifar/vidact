@@ -1,18 +1,38 @@
 # Browser corpus
 
-These tests run in a real Chromium instance through Vitest Browser and
-Playwright. They are organized by semantic surface rather than implementation
-module:
+The app corpus contains small React-shaped applications that pass through the
+same production-facing pipeline as user code:
+
+```text
+app.tsx -> @vidact/vite -> Rust compiler -> @vidact/runtime -> Chromium
+```
+
+Tests import the application's `.tsx` entry point, mount the compiled component,
+drive it through browser events, and assert both visible behavior and surgical
+DOM updates. A fixture that constructs runtime primitives directly is useful
+infrastructure coverage, but it is not an app-corpus entry.
+
+## Compiled mini apps
+
+- `apps/counter`: scalar and derived state, attributes, events, and a
+  conditional range
+- `apps/roster`: keyed arrays, same-key record updates, reordering, appending,
+  and a JSX array passed through component props
+
+## Supporting runtime coverage
+
+The remaining tests are organized by semantic surface:
 
 - `reactivity`: static dependency masks, derived propagation, batching, and
   wide components
 - `arrays`: keyed structural reconciliation and DOM identity
 - `lifecycle`: disposal and invalidation boundaries
+- `@vidact/test-support`: shared MutationObserver assertions and their own
+  browser coverage
 
-The corpus is the executable compatibility contract for generated Vidact output.
-As the compiler comes online, each accepted React fixture should compile to a
-module that is imported by the appropriate browser corpus. Rejected fixtures
-belong in compiler diagnostic tests, not browser tests.
+The compiled mini apps are the executable end-to-end compatibility contract for
+Vidact's supported React surface. Rejected syntax belongs in compiler diagnostic
+tests; accepted syntax must be exercised through a compiled app here.
 
 Every regression fixture should state the observable browser result. Avoid
 snapshots of generated JavaScript when DOM behavior is the actual contract;

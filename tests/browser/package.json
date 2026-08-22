@@ -14,6 +14,8 @@
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
+    "@vidact/test-support": "workspace:*",
+    "@vidact/vite": "workspace:*",
     "@vitest/browser-playwright": "4.1.11",
     "playwright": "1.62.1",
     "typescript": "7.0.2",

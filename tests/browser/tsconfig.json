@@ -1,8 +1,16 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "jsx": "preserve",
     "lib": ["ES2024", "ESNext.Disposable", "DOM", "DOM.Iterable"],
     "types": ["node", "vitest/globals"]
   },
-  "include": ["corpus/**/*.ts", "generated/**/*.ts", "vitest.config.ts"]
+  "include": [
+    "corpus/**/*.ts",
+    "corpus/**/*.tsx",
+    "generated/**/*.ts",
+    "vidact.d.ts",
+    "../../packages/test-support/src/tests/mutations.browser.test.ts",
+    "vitest.config.ts"
+  ]
 }
