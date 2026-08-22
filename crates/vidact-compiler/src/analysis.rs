@@ -1,4 +1,4 @@
-use crate::{Diagnostic, SourceSpan};
+use crate::{Diagnostic, SourceSpan, render_flow::RenderFlowGraph};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SourceId(u32);
@@ -305,6 +305,7 @@ pub struct ComponentFacts {
     pub name: String,
     pub span: Option<SourceSpan>,
     pub control_flow: ControlFlowFacts,
+    pub render_flow: RenderFlowGraph,
     pub sources: Vec<SourceFact>,
     pub updaters: Vec<UpdaterFact>,
 }
@@ -320,6 +321,7 @@ impl ComponentFacts {
             name: name.into(),
             span: None,
             control_flow: ControlFlowFacts::default(),
+            render_flow: RenderFlowGraph::default(),
             sources,
             updaters,
         }
@@ -334,6 +336,12 @@ impl ComponentFacts {
     #[must_use]
     pub fn with_control_flow(mut self, control_flow: ControlFlowFacts) -> Self {
         self.control_flow = control_flow;
+        self
+    }
+
+    #[must_use]
+    pub fn with_render_flow(mut self, render_flow: RenderFlowGraph) -> Self {
+        self.render_flow = render_flow;
         self
     }
 }

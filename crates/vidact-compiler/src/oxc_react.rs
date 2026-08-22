@@ -164,10 +164,10 @@ fn lower_react_diagnostic(diagnostic: &OxcDiagnostic) -> Diagnostic {
         || diagnostic.message.to_string(),
         |help| format!("{}: {help}", diagnostic.message),
     );
-    let span = diagnostic.labels.first().and_then(|label| {
-        let start = u32::try_from(label.offset()).ok()?;
-        let length = u32::try_from(label.len()).ok()?;
-        Some(SourceSpan::new(start, start.saturating_add(length)))
+    let span = diagnostic.labels.first().map(|label| {
+        let start = label.offset();
+        let length = label.len();
+        SourceSpan::new(start, start.saturating_add(length))
     });
 
     Diagnostic::new(code, message).with_fallback_span(span)
@@ -194,18 +194,21 @@ fn lower_snapshot(
         .or_else(|| component_name_for_span(program, component_span))
         .unwrap_or("AnonymousComponent");
     let control_flow = lower_control_flow(&analysis.control_flow, &analysis.render_writes);
-    validate_supported_control_flow(&control_flow, component_name, component_span)?;
-    let mut syntax =
-        classify_component(program, semantic.scoping(), component_name, component_span).map_err(
-            |message| {
-                let code = if message.contains("not a supported named function declaration") {
-                    DiagnosticCode::UnsupportedComponentForm
-                } else {
-                    DiagnosticCode::AnalysisFailed
-                };
-                Diagnostic::new(code, message).with_span(component_span)
-            },
-        )?;
+    let mut syntax = classify_component(
+        program,
+        semantic.scoping(),
+        component_name,
+        component_span,
+        &control_flow,
+    )
+    .map_err(|message| {
+        let code = if message.contains("not a supported named function declaration") {
+            DiagnosticCode::UnsupportedComponentForm
+        } else {
+            DiagnosticCode::AnalysisFailed
+        };
+        Diagnostic::new(code, message).with_span(component_span)
+    })?;
     let def_use = CompilerDefUse::new(analysis);
     validate_destructive_render_writes(&control_flow, &syntax, component_name, component_span)?;
 
@@ -330,18 +333,26 @@ fn lower_snapshot(
     }
 
     updaters.extend(
-        render_updaters(
-            syntax.return_expression,
-            semantic.scoping(),
-            &source_symbols,
-            updaters.len(),
-        )
-        .map_err(|message| analysis_error(message).with_span(component_span))?,
+        syntax
+            .return_expressions
+            .iter()
+            .try_fold(Vec::new(), |mut collected, expression| {
+                let next = render_updaters(
+                    expression,
+                    semantic.scoping(),
+                    &source_symbols,
+                    updaters.len() + collected.len(),
+                )?;
+                collected.extend(next);
+                Ok::<_, String>(collected)
+            })
+            .map_err(|message| analysis_error(message).with_span(component_span))?,
     );
 
     Ok(ComponentFacts::new(component_name, source_facts, updaters)
         .with_span(component_span)
-        .with_control_flow(control_flow))
+        .with_control_flow(control_flow)
+        .with_render_flow(syntax.render_flow))
 }
 
 fn lower_control_flow(
@@ -576,37 +587,6 @@ fn lower_control_flow_value(value: &ValueAnalysis) -> ControlFlowValueFact {
         name: value.name.clone(),
         span: value.span.map(|(start, end)| SourceSpan::new(start, end)),
     }
-}
-
-fn validate_supported_control_flow(
-    control_flow: &ControlFlowFacts,
-    component_name: &str,
-    component_span: SourceSpan,
-) -> Result<(), Diagnostic> {
-    let explicit_returns = control_flow
-        .blocks
-        .iter()
-        .filter(|block| {
-            block.terminal.kind
-                == ControlFlowTerminalKind::Return(ControlFlowReturnVariant::Explicit)
-        })
-        .collect::<Vec<_>>();
-    if explicit_returns.len() <= 1 {
-        return Ok(());
-    }
-
-    let span = explicit_returns
-        .iter()
-        .filter_map(|block| block.terminal.span)
-        .min_by_key(|span| span.start)
-        .unwrap_or(component_span);
-    Err(Diagnostic::new(
-        DiagnosticCode::UnsupportedControlFlow,
-        format!(
-            "component {component_name} has multiple render returns; typed multi-return lowering is not implemented"
-        ),
-    )
-    .with_span(span))
 }
 
 fn push_updater(

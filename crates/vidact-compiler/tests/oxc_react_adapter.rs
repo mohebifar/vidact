@@ -355,7 +355,7 @@ fn ignores_return_and_jsx_lookalikes_outside_the_render_ast() {
 }
 
 #[test]
-fn reports_multiple_render_returns_at_the_exact_cfg_return_site() {
+fn lowers_multiple_render_returns_from_exact_cfg_return_sites() {
     let source = r#"
         import { useState } from "react";
         export function Early() {
@@ -364,20 +364,24 @@ fn reports_multiple_render_returns_at_the_exact_cfg_return_site() {
             return <p>Ready</p>;
         }
     "#;
-    let diagnostics = OxcReactAnalysisAdapter
+    let facts = OxcReactAnalysisAdapter
         .analyze(ModuleInput {
             filename: "early-return.tsx",
             source,
         })
-        .expect_err("multi-return render flow must fail closed until it is lowered");
+        .expect("multi-return render flow belongs to the stable Vidact facts");
 
-    assert_eq!(diagnostics[0].code, DiagnosticCode::UnsupportedControlFlow);
-    let span = diagnostics[0]
-        .span
-        .expect("React Compiler return terminals retain original spans");
-    assert!(
-        source[span.start as usize..span.end as usize].contains("return <button>Load</button>")
-    );
+    let facts = &facts[0];
+    assert_eq!(facts.render_flow.nodes.len(), 3);
+    let entry = facts
+        .render_flow
+        .entry
+        .expect("render flow has one normalized entry");
+    let entry = &facts.render_flow.nodes[entry.get()];
+    let vidact_compiler::render_flow::RenderFlowNodeKind::Decision { test, .. } = entry.kind else {
+        panic!("early return must normalize to a render decision")
+    };
+    assert_eq!(&source[test.start as usize..test.end as usize], "!ready");
 }
 
 #[test]

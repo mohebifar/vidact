@@ -5,6 +5,7 @@ use crate::{
     analysis::{
         ComponentFacts, ControlFlowFacts, SourceId, SourceKind, UpdaterFact, UpdaterId, UpdaterKind,
     },
+    render_flow::RenderFlowGraph,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -27,6 +28,7 @@ pub struct ComponentIr {
     pub name: String,
     pub span: Option<SourceSpan>,
     pub control_flow: ControlFlowFacts,
+    pub render_flow: RenderFlowGraph,
     pub sources: Vec<IrSource>,
     /// Compiler execution order. The runtime must not rediscover this graph.
     pub updaters: Vec<IrUpdater>,
@@ -79,6 +81,7 @@ pub fn lower_component(facts: ComponentFacts) -> Result<ComponentIr, Diagnostic>
         name: facts.name,
         span: facts.span,
         control_flow: facts.control_flow,
+        render_flow: facts.render_flow,
         sources: facts
             .sources
             .into_iter()

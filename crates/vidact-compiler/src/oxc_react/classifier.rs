@@ -7,9 +7,12 @@ use oxc_syntax::symbol::SymbolId;
 
 use crate::{
     SourceSpan,
-    analysis::{KeyPath, SourceId, SourceKind, UpdaterFact, UpdaterId, UpdaterKind},
+    analysis::{
+        ControlFlowFacts, KeyPath, SourceId, SourceKind, UpdaterFact, UpdaterId, UpdaterKind,
+    },
     ast_utils::{component_function, is_event_attribute},
     react_bindings::{ReactBindings, reference_symbol},
+    render_flow::{RenderFlowGraph, lower_render_flow},
 };
 
 #[derive(Clone)]
@@ -22,7 +25,8 @@ pub(super) struct SourceSyntax {
 pub(super) struct ComponentSyntax<'a> {
     pub(super) sources: BTreeMap<String, SourceSyntax>,
     pub(super) candidates: BTreeMap<String, SourceSyntax>,
-    pub(super) return_expression: &'a Expression<'a>,
+    pub(super) return_expressions: Vec<&'a Expression<'a>>,
+    pub(super) render_flow: RenderFlowGraph,
     pub(super) body_span: SourceSpan,
 }
 
@@ -31,6 +35,7 @@ pub(super) fn classify_component<'a>(
     scoping: &Scoping,
     component_name: &str,
     component_span: SourceSpan,
+    control_flow: &ControlFlowFacts,
 ) -> Result<ComponentSyntax<'a>, String> {
     let function =
         component_function(program, component_name, Some(component_span)).ok_or_else(|| {
@@ -120,28 +125,84 @@ pub(super) fn classify_component<'a>(
         }
     }
 
-    let returns = body
-        .statements
-        .iter()
-        .filter_map(|statement| {
-            let Statement::ReturnStatement(statement) = statement else {
-                return None;
-            };
-            statement.argument.as_ref()
-        })
-        .collect::<Vec<_>>();
-    let [return_expression] = returns.as_slice() else {
-        return Err(format!(
-            "component {component_name} must have exactly one top-level return"
-        ));
-    };
+    let mut return_expressions = vec![];
+    collect_component_return_expressions(&body.statements, &mut return_expressions);
+    if return_expressions.is_empty() {
+        return Err(format!("component {component_name} has no render return"));
+    }
+    let render_flow = lower_render_flow(body, control_flow)?;
 
     Ok(ComponentSyntax {
         sources,
         candidates,
-        return_expression,
+        return_expressions,
+        render_flow,
         body_span: SourceSpan::new(body.span.start, body.span.end),
     })
+}
+
+fn collect_component_return_expressions<'a>(
+    statements: &'a [Statement<'a>],
+    expressions: &mut Vec<&'a Expression<'a>>,
+) {
+    for statement in statements {
+        match statement {
+            Statement::ReturnStatement(statement) => {
+                if let Some(expression) = &statement.argument {
+                    expressions.push(expression);
+                }
+            }
+            Statement::BlockStatement(block) => {
+                collect_component_return_expressions(&block.body, expressions);
+            }
+            Statement::IfStatement(statement) => {
+                collect_statement_return_expressions(&statement.consequent, expressions);
+                if let Some(alternate) = &statement.alternate {
+                    collect_statement_return_expressions(alternate, expressions);
+                }
+            }
+            Statement::SwitchStatement(statement) => {
+                for case in &statement.cases {
+                    collect_component_return_expressions(&case.consequent, expressions);
+                }
+            }
+            Statement::ForStatement(statement) => {
+                collect_statement_return_expressions(&statement.body, expressions);
+            }
+            Statement::ForInStatement(statement) => {
+                collect_statement_return_expressions(&statement.body, expressions);
+            }
+            Statement::ForOfStatement(statement) => {
+                collect_statement_return_expressions(&statement.body, expressions);
+            }
+            Statement::WhileStatement(statement) => {
+                collect_statement_return_expressions(&statement.body, expressions);
+            }
+            Statement::DoWhileStatement(statement) => {
+                collect_statement_return_expressions(&statement.body, expressions);
+            }
+            Statement::LabeledStatement(statement) => {
+                collect_statement_return_expressions(&statement.body, expressions);
+            }
+            Statement::TryStatement(statement) => {
+                collect_component_return_expressions(&statement.block.body, expressions);
+                if let Some(handler) = &statement.handler {
+                    collect_component_return_expressions(&handler.body.body, expressions);
+                }
+                if let Some(finalizer) = &statement.finalizer {
+                    collect_component_return_expressions(&finalizer.body, expressions);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_statement_return_expressions<'a>(
+    statement: &'a Statement<'a>,
+    expressions: &mut Vec<&'a Expression<'a>>,
+) {
+    collect_component_return_expressions(std::slice::from_ref(statement), expressions);
 }
 
 pub(super) fn render_updaters(

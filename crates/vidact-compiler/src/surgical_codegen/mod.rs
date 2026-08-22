@@ -161,7 +161,7 @@ fn transform_component<'a>(
         .body
         .as_deref_mut()
         .ok_or_else(|| unsupported("compiled component has no body"))?;
-    validate_component_returns(body)?;
+    validate_component_returns(body, ir)?;
     let mut source_symbols = BTreeMap::<SymbolId, SourceId>::new();
     let mut state_symbols = BTreeMap::<SymbolId, StateReference<'a>>::new();
     let (item_source_symbols, item_state_symbols) = item_parameters(body, &ast);
@@ -672,7 +672,7 @@ fn prop_binding_symbols<'a>(
     Ok(bindings)
 }
 
-fn validate_component_returns(body: &FunctionBody<'_>) -> Result<(), Diagnostic> {
+fn validate_component_returns(body: &FunctionBody<'_>, ir: &ComponentIr) -> Result<(), Diagnostic> {
     let direct_returns = body
         .statements
         .iter()
@@ -685,9 +685,26 @@ fn validate_component_returns(body: &FunctionBody<'_>) -> Result<(), Diagnostic>
         }
     }
     if direct_returns != 1 || nested.found {
-        return Err(unsupported(
-            "compiled components currently require exactly one top-level return statement",
-        ));
+        let span = ir
+            .control_flow
+            .blocks
+            .iter()
+            .filter_map(|block| {
+                matches!(
+                    block.terminal.kind,
+                    crate::analysis::ControlFlowTerminalKind::Return(
+                        crate::analysis::ControlFlowReturnVariant::Explicit
+                    )
+                )
+                .then_some(block.terminal.span)
+                .flatten()
+            })
+            .min_by_key(|span| span.start);
+        return Err(Diagnostic::new(
+            DiagnosticCode::UnsupportedControlFlow,
+            "render flow is normalized, but aligned component-range code generation is not implemented",
+        )
+        .with_fallback_span(span));
     }
     Ok(())
 }

@@ -11,6 +11,7 @@ mod diagnostic;
 pub mod ir;
 mod oxc_react;
 mod react_bindings;
+pub mod render_flow;
 mod surgical_codegen;
 
 pub use browser_codegen::compile_spike_browser_module;

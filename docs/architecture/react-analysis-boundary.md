@@ -120,10 +120,12 @@ semantic scope graph:
 - JSX-producing `.map` calls enter the keyed-list IR only for `key={item}` or
   `key={item.property}`. Parent-dependent, computed, and index keys fail closed
   instead of falling through to a text updater or being reinterpreted by codegen.
-- multiple explicit component returns fail with `UnsupportedControlFlow` at the
-  first exact return-terminal span. Returns and branches inside nested callbacks,
-  plus source-text lookalikes, are absent from the outer component CFG and do
-  not trigger this rejection.
+- multiple explicit component returns enter the Vidact-owned render-flow DAG
+  only after their AST sites match React Compiler's exact return-terminal spans.
+  Surgical codegen still fails closed with `UnsupportedControlFlow` at the first
+  return until aligned range emission lands. Returns and branches inside nested
+  callbacks, plus source-text lookalikes, are absent from the outer component
+  CFG and do not enter the graph.
 
 The accepted component form remains named function declarations, but a module
 may contain several of them. Each owned React Compiler snapshot carries its
@@ -141,10 +143,12 @@ both executable emitters use OXC AST and semantic identities; generated output
 is printed with `oxc_codegen`. A versioned compatibility manifest gates
 accepted, rejected, and intentionally different fixtures.
 
-The next analysis work is lowering supported return/branch graphs into owned DOM
-ranges, selectively carrying instruction operands into that render IR, composing
-original-TSX source maps, and adding golden per-pass fixtures that detect
-upstream analysis drift.
+Vidact now normalizes supported return/branch graphs and static type/key/position
+identity as described in
+[Render-flow normalization and identity](render-flow-normalization-and-identity.md).
+The next executable step is aligned DOM-range and narrow dispatcher emission;
+original-TSX source maps and additional per-pass drift fixtures remain follow-up
+work.
 
 ## Verification
 
