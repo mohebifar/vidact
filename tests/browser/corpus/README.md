@@ -24,6 +24,9 @@ infrastructure coverage, but it is not an app-corpus entry.
 - `apps/derived-control-flow`: React Compiler SSA/phi-derived objects and arrays,
   inactive-input zero-mutation behavior, active text/attribute updates, and
   same-key row identity across branch changes
+- `apps/synchronous-flow`: native `switch` fallthrough, labeled `break`,
+  `continue`, `for`, `for...of`, `for...in`, `while`, and `do...while` preserved
+  inside compiler-ordered updater closures
 
 ## Supporting runtime coverage
 

@@ -183,3 +183,45 @@ fn captures_render_writes_before_dead_code_elimination() {
     let span = write.span.expect("the write retains its source span");
     assert!(source[span.0 as usize..span.1 as usize].contains("label"));
 }
+
+#[test]
+fn captures_structured_switch_loop_and_label_terminals() {
+    let analysis = analyze_component(
+        r#"
+            export function Regions({ mode, values }) {
+                let result = '';
+                switch (mode) {
+                    case 'a': result += 'a';
+                    default: result += 'd';
+                }
+                outer: for (const value of values) {
+                    if (value < 0) continue;
+                    if (value > 10) break outer;
+                    result += value;
+                }
+                do { result += '!'; } while (result.length < 2);
+                return <p>{result}</p>;
+            }
+        "#,
+        "Regions",
+    );
+    let kinds = analysis
+        .control_flow
+        .blocks
+        .iter()
+        .map(|block| block.terminal.kind)
+        .collect::<Vec<_>>();
+
+    assert!(kinds.contains(&TerminalKindAnalysis::Switch));
+    assert!(kinds.contains(&TerminalKindAnalysis::ForOf));
+    assert!(kinds.contains(&TerminalKindAnalysis::DoWhile));
+    assert!(kinds.iter().any(|kind| {
+        matches!(
+            kind,
+            TerminalKindAnalysis::Goto(
+                oxc_react_compiler::GotoVariantAnalysis::Break
+                    | oxc_react_compiler::GotoVariantAnalysis::Continue
+            )
+        )
+    }));
+}

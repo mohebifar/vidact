@@ -1,9 +1,17 @@
 use oxc_allocator::{CloneIn, GetAllocator};
 use oxc_ast::{ast::*, builder::AstBuilder};
+use oxc_ast_visit::{Visit, walk::walk_statement};
 use oxc_semantic::Scoping;
 use oxc_syntax::{operator::AssignmentOperator, symbol::SymbolId};
 
-use crate::{Diagnostic, analysis::SourceId, ir::ComponentIr};
+use crate::{Diagnostic, analysis::SourceId, ir::ComponentIr, reactive_flow::StructuredRegionKind};
+
+use super::{assignment_statement, ident};
+
+pub(super) enum DerivedComputation<'a> {
+    Expression(Expression<'a>),
+    Statements(Vec<Statement<'a>>),
+}
 
 pub(super) fn branch_expression<'a>(
     ast: &AstBuilder<'a>,
@@ -22,20 +30,128 @@ pub(super) fn branch_expression<'a>(
         return Ok(None);
     }
 
-    body.statements
+    Ok(body
+        .statements
         .iter()
         .find_map(|statement| match statement {
             Statement::IfStatement(statement) => {
                 conditional_assignment(ast, statement, scoping, symbol)
             }
             _ => None,
+        }))
+}
+
+pub(super) fn computation<'a>(
+    ast: &AstBuilder<'a>,
+    body: &FunctionBody<'a>,
+    scoping: &Scoping,
+    ir: &ComponentIr,
+    source: SourceId,
+    symbol: SymbolId,
+    name: &str,
+) -> Result<Option<DerivedComputation<'a>>, Diagnostic> {
+    if let Some(expression) = branch_expression(ast, body, scoping, ir, source, symbol)? {
+        return Ok(Some(DerivedComputation::Expression(expression)));
+    }
+    if !ir.reactive_flow.blocks.iter().any(|block| {
+        block
+            .phis
+            .iter()
+            .any(|phi| phi.target.source == Some(source))
+    }) {
+        return Ok(None);
+    }
+
+    let region = body.statements.iter().find(|statement| {
+        structured_region_kind(statement).is_some_and(|kind| {
+            ir.reactive_flow.structured_regions.contains(&kind)
+                && statement_references_symbol(statement, scoping, symbol)
         })
-        .map(Some)
-        .ok_or_else(|| {
-            super::unsupported(
-                "SSA branch-derived values currently require a side-effect-free if/else assignment region",
-            )
+    });
+    let Some(region) = region else {
+        return Err(super::unsupported(
+            "SSA derived values currently require an if/else or one structured switch/loop region",
+        ));
+    };
+    let initial = body
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::VariableDeclaration(declaration) => Some(declaration),
+            _ => None,
         })
+        .flat_map(|declaration| &declaration.declarations)
+        .find_map(|declarator| {
+            let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+                return None;
+            };
+            (identifier.symbol_id.get() == Some(symbol))
+                .then_some(declarator.init.as_ref())
+                .flatten()
+        })
+        .map_or_else(
+            || ident(ast, "undefined"),
+            |expression| expression.clone_in_with_semantic_ids(ast.allocator()),
+        );
+    Ok(Some(DerivedComputation::Statements(vec![
+        assignment_statement(ast, name, initial),
+        region.clone_in_with_semantic_ids(ast.allocator()),
+    ])))
+}
+
+fn structured_region_kind(statement: &Statement<'_>) -> Option<StructuredRegionKind> {
+    match statement {
+        Statement::SwitchStatement(_) => Some(StructuredRegionKind::Switch),
+        Statement::ForStatement(_) => Some(StructuredRegionKind::For),
+        Statement::ForOfStatement(_) => Some(StructuredRegionKind::ForOf),
+        Statement::ForInStatement(_) => Some(StructuredRegionKind::ForIn),
+        Statement::WhileStatement(_) => Some(StructuredRegionKind::While),
+        Statement::DoWhileStatement(_) => Some(StructuredRegionKind::DoWhile),
+        Statement::LabeledStatement(statement) => {
+            structured_region_kind(&statement.body).or(Some(StructuredRegionKind::Label))
+        }
+        _ => None,
+    }
+}
+
+fn statement_references_symbol(
+    statement: &Statement<'_>,
+    scoping: &Scoping,
+    symbol: SymbolId,
+) -> bool {
+    let mut finder = SymbolReferenceFinder {
+        scoping,
+        symbol,
+        found: false,
+    };
+    finder.visit_statement(statement);
+    finder.found
+}
+
+struct SymbolReferenceFinder<'s> {
+    scoping: &'s Scoping,
+    symbol: SymbolId,
+    found: bool,
+}
+
+impl<'a> Visit<'a> for SymbolReferenceFinder<'_> {
+    fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
+        self.found |= identifier
+            .reference_id
+            .get()
+            .and_then(|reference| self.scoping.get_reference(reference).symbol_id())
+            == Some(self.symbol);
+    }
+
+    fn visit_statement(&mut self, statement: &Statement<'a>) {
+        if !self.found {
+            walk_statement(self, statement);
+        }
+    }
+
+    fn visit_function(&mut self, _function: &Function<'a>, _flags: oxc_semantic::ScopeFlags) {}
+
+    fn visit_arrow_function_expression(&mut self, _function: &ArrowFunctionExpression<'a>) {}
 }
 
 fn conditional_assignment<'a>(

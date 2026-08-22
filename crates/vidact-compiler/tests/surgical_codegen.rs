@@ -438,6 +438,45 @@ fn compiles_nested_phi_regions_and_dispatches_the_derived_component_type() {
 }
 
 #[test]
+fn preserves_switch_fallthrough_and_loop_syntax_inside_derived_updaters() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "SynchronousRegions.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function Fallthrough() {
+                const [mode, setMode] = useState('a');
+                let label = '';
+                switch (mode) {
+                    case 'a': label += 'a';
+                    case 'b': label += 'b'; break;
+                    default: label = 'other';
+                }
+                return <button onClick={() => setMode('b')}>{label}</button>;
+            }
+            export function Sum({ values }) {
+                let total = 0;
+                for (const value of values) {
+                    if (value < 0) continue;
+                    total += value;
+                }
+                return <output>{total}</output>;
+            }
+        "#,
+    })
+    .expect("structured synchronous regions must remain JavaScript in updater closures");
+
+    assert!(output.contains("switch (mode.get())"), "{output}");
+    assert!(output.contains("case \"a\":"), "{output}");
+    assert!(output.contains("label += \"a\""), "{output}");
+    assert!(
+        output.contains("for (const value of values.get())"),
+        "{output}"
+    );
+    assert!(output.contains("continue;"), "{output}");
+    assert!(output.contains("total = 0"), "{output}");
+}
+
+#[test]
 fn rejects_branch_varying_refs_at_the_component_site() {
     let diagnostics = compile_surgical_module(ModuleInput {
         filename: "Refs.tsx",

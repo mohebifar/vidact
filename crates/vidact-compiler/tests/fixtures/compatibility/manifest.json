@@ -28,6 +28,11 @@
       "components": ["Ternary", "Logical", "Nullish", "TerminalSwitch"]
     },
     {
+      "path": "accepted/synchronous-control-flow.tsx",
+      "expectation": "accepted",
+      "components": ["SynchronousControlFlow"]
+    },
+    {
       "path": "rejected/reactive-spread.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",

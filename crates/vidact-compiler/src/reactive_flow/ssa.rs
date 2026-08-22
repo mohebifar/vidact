@@ -7,9 +7,12 @@ use crate::{
     },
 };
 
+use super::{StructuredRegionKind, regions::lower_structured_regions};
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ReactiveFlowGraph {
     pub blocks: Vec<ReactiveFlowBlock>,
+    pub structured_regions: Vec<StructuredRegionKind>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -113,7 +116,10 @@ pub fn lower_reactive_flow(
         });
     }
 
-    Ok(ReactiveFlowGraph { blocks })
+    Ok(ReactiveFlowGraph {
+        blocks,
+        structured_regions: lower_structured_regions(control_flow),
+    })
 }
 
 fn lower_value(value: &ControlFlowValueFact) -> ReactiveFlowValue {

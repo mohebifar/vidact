@@ -281,21 +281,49 @@ fn transform_component<'a>(
             .iter()
             .find(|source| source.id == *write)
             .ok_or_else(|| unsupported("derived updater writes an unknown source"))?;
-        let expression = if let Some(expression) = derivations.get(source.name.as_str()) {
-            expression.clone_in_with_semantic_ids(allocator)
-        } else {
+        let has_phi = ir.reactive_flow.blocks.iter().any(|block| {
+            block
+                .phis
+                .iter()
+                .any(|phi| phi.target.source == Some(source.id))
+        });
+        let computation = if has_phi {
             let symbol = source_symbols
                 .iter()
                 .find_map(|(symbol, id)| (*id == source.id).then_some(*symbol))
                 .ok_or_else(|| {
                     unsupported(format!("missing derived binding for {}", source.name))
                 })?;
-            derived::branch_expression(&ast, body, scoping, ir, source.id, symbol)?.ok_or_else(
-                || unsupported(format!("missing derived expression for {}", source.name)),
+            derived::computation(
+                &ast,
+                body,
+                scoping,
+                ir,
+                source.id,
+                symbol,
+                source.name.as_str(),
             )?
+            .ok_or_else(|| {
+                unsupported(format!("missing derived computation for {}", source.name))
+            })?
+        } else if let Some(expression) = derivations.get(source.name.as_str()) {
+            derived::DerivedComputation::Expression(
+                expression.clone_in_with_semantic_ids(allocator),
+            )
+        } else {
+            return Err(unsupported(format!(
+                "missing derived expression for {}",
+                source.name
+            )));
         };
-        let expression_reads =
-            dependencies(&expression, scoping, &source_symbols, &item_source_symbols);
+        let expression_reads = match &computation {
+            derived::DerivedComputation::Expression(expression) => {
+                dependencies(expression, scoping, &source_symbols, &item_source_symbols)
+            }
+            derived::DerivedComputation::Statements(statements) => {
+                statement_dependencies(statements, scoping, &source_symbols, &item_source_symbols)
+            }
+        };
         if !expression_reads.item.is_empty() {
             return Err(unsupported(
                 "component phi-derived values cannot depend on keyed item slots",
@@ -303,14 +331,22 @@ fn transform_component<'a>(
         }
         let mut reads = updater.reads.iter().copied().collect::<BTreeSet<_>>();
         reads.extend(expression_reads.parent);
+        for write in &updater.writes {
+            reads.remove(write);
+        }
         let reads = reads.into_iter().collect::<Vec<_>>();
-        updater_statements.push(register_derived(
-            &ast,
-            source.name.as_str(),
-            expression,
-            &reads,
-            &updater.writes,
-        ));
+        updater_statements.push(match computation {
+            derived::DerivedComputation::Expression(expression) => register_derived(
+                &ast,
+                source.name.as_str(),
+                expression,
+                &reads,
+                &updater.writes,
+            ),
+            derived::DerivedComputation::Statements(statements) => {
+                register_derived_statements(&ast, statements, &reads, &updater.writes)
+            }
+        });
     }
     let updater_count = updater_statements.len();
     for (offset, statement) in updater_statements.into_iter().enumerate() {
@@ -1046,6 +1082,24 @@ fn dependencies(
     finder.reads
 }
 
+fn statement_dependencies(
+    statements: &[Statement<'_>],
+    scoping: &Scoping,
+    source_symbols: &BTreeMap<SymbolId, SourceId>,
+    item_source_symbols: &BTreeMap<SymbolId, SourceId>,
+) -> DependencyReads {
+    let mut finder = ImmediateDependencyFinder {
+        scoping,
+        source_symbols,
+        item_source_symbols,
+        reads: DependencyReads::default(),
+    };
+    for statement in statements {
+        finder.visit_statement(statement);
+    }
+    finder.reads
+}
+
 fn immediate_dependencies(
     expression: &Expression<'_>,
     scoping: &Scoping,
@@ -1194,6 +1248,27 @@ fn register_derived<'a>(
             ("reads", mask(ast, reads)),
             ("writes", mask(ast, writes)),
             ("run", run),
+        ],
+    );
+    Statement::new_expression_statement(
+        SPAN,
+        call_member(ast, ident(ast, SCOPE), "add", [updater]),
+        ast,
+    )
+}
+
+fn register_derived_statements<'a>(
+    ast: &AstBuilder<'a>,
+    statements: impl IntoIterator<Item = Statement<'a>>,
+    reads: &[SourceId],
+    writes: &[SourceId],
+) -> Statement<'a> {
+    let updater = object(
+        ast,
+        [
+            ("reads", mask(ast, reads)),
+            ("writes", mask(ast, writes)),
+            ("run", arrow_block(ast, [], statements)),
         ],
     );
     Statement::new_expression_statement(

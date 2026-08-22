@@ -78,6 +78,7 @@ impl Builder {
         statement: &Statement<'_>,
         continuation: RenderFlowNodeId,
     ) -> Result<RenderFlowNodeId, String> {
+        let contains_return = contains_component_return(statement);
         match statement {
             Statement::ReturnStatement(statement) => match &statement.argument {
                 Some(expression) => self.lower_expression(expression),
@@ -89,7 +90,7 @@ impl Builder {
             Statement::BlockStatement(block) => {
                 self.lower_statements(&block.body, continuation)
             }
-            Statement::IfStatement(statement) => {
+            Statement::IfStatement(statement) if contains_return => {
                 let consequent = self.lower_statement(&statement.consequent, continuation)?;
                 let alternate = statement.alternate.as_ref().map_or(Ok(continuation), |alternate| {
                     self.lower_statement(alternate, continuation)
@@ -101,7 +102,7 @@ impl Builder {
                     alternate,
                 }))
             }
-            Statement::SwitchStatement(statement) => {
+            Statement::SwitchStatement(statement) if contains_return => {
                 self.lower_switch(statement, continuation)
             }
             Statement::ForStatement(_)

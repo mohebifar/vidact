@@ -349,7 +349,8 @@ fn lower_snapshot(
         let Some(declaration) = def_use.declaration_id(source.declaration_start) else {
             continue;
         };
-        let reads = def_use.reads_for(declaration, &final_declarations);
+        let mut reads = def_use.reads_for(declaration, &final_declarations);
+        reads.retain(|read| *read != write);
         push_updater(&mut updaters, UpdaterKind::Derived, reads, vec![write]);
     }
 
