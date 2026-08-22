@@ -4,7 +4,7 @@ use oxc_allocator::Allocator;
 use oxc_parser::Parser;
 use oxc_react_compiler::{
     CompileResult, FunctionAnalysis, InstructionKindAnalysis, PluginOptions, ReturnVariantAnalysis,
-    TerminalKindAnalysis, compile,
+    TerminalKindAnalysis, WriteKindAnalysis, compile,
 };
 use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
@@ -162,4 +162,24 @@ fn expression_branches_do_not_create_false_early_returns() {
             .iter()
             .any(|(start, end)| source[*start as usize..*end as usize].contains("<p>{label}</p>"))
     );
+}
+
+#[test]
+fn captures_render_writes_before_dead_code_elimination() {
+    let source = r#"
+        export function Mutate({ label }) {
+            label = "changed";
+            return <p>{label}</p>;
+        }
+    "#;
+    let analysis = analyze_component(source, "Mutate");
+    let write = analysis
+        .render_writes
+        .iter()
+        .find(|write| write.kind == WriteKindAnalysis::Local)
+        .expect("the prop assignment must survive as an owned write fact");
+
+    assert_eq!(write.targets.len(), 1);
+    let span = write.span.expect("the write retains its source span");
+    assert!(source[span.0 as usize..span.1 as usize].contains("label"));
 }

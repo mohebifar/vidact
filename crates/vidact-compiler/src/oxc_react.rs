@@ -5,10 +5,13 @@ use std::{
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::Program;
+use oxc_diagnostics::{Diagnostics, OxcDiagnostic};
 use oxc_parser::Parser;
 use oxc_react_compiler::{
-    BlockKindAnalysis, CompileResult, ControlFlowAnalysis, FunctionAnalysis, GotoVariantAnalysis,
-    PluginOptions, ReturnVariantAnalysis, TerminalKindAnalysis, compile,
+    BlockKindAnalysis, CompileResult, ControlFlowAnalysis, ControlFlowInstructionAnalysis,
+    FunctionAnalysis, GotoVariantAnalysis, InstructionKindAnalysis, PluginOptions,
+    ReturnVariantAnalysis, TerminalKindAnalysis, ValueAnalysis, WriteAnalysis, WriteKindAnalysis,
+    compile,
 };
 use oxc_semantic::{Semantic, SemanticBuilder};
 use oxc_span::SourceType;
@@ -18,9 +21,11 @@ use crate::{
     Diagnostic, DiagnosticCode, SourceSpan,
     analysis::{
         ComponentFacts, ControlFlowBlockFact, ControlFlowBlockId, ControlFlowBlockKind,
-        ControlFlowFacts, ControlFlowGotoVariant, ControlFlowReturnVariant,
-        ControlFlowTerminalFact, ControlFlowTerminalKind, ModuleInput, ReactAnalysisAdapter,
-        SourceFact, SourceId, UpdaterFact, UpdaterId, UpdaterKind,
+        ControlFlowFacts, ControlFlowGotoVariant, ControlFlowInstructionFact,
+        ControlFlowInstructionId, ControlFlowInstructionKind, ControlFlowReturnVariant,
+        ControlFlowTerminalFact, ControlFlowTerminalKind, ControlFlowValueFact, ControlFlowValueId,
+        ControlFlowWriteFact, ControlFlowWriteKind, ModuleInput, ReactAnalysisAdapter, SourceFact,
+        SourceId, UpdaterFact, UpdaterId, UpdaterKind,
     },
 };
 
@@ -111,24 +116,61 @@ fn run_react_analysis(
             if diagnostics.is_empty() {
                 Ok(output.analyses().to_vec())
             } else {
-                Err(vec![analysis_error(format!(
-                    "React Compiler rejected {}: {diagnostics:?}",
-                    input.filename
-                ))])
+                Err(lower_react_diagnostics(
+                    &diagnostics,
+                    format!("React Compiler rejected {}", input.filename),
+                ))
             }
         }
         CompileResult::Success {
             output: None,
             diagnostics,
-        } => Err(vec![analysis_error(format!(
-            "React Compiler produced no component analysis for {}: {diagnostics:?}",
-            input.filename
-        ))]),
-        CompileResult::Fatal { diagnostics } => Err(vec![analysis_error(format!(
-            "React Compiler aborted analysis for {}: {diagnostics:?}",
-            input.filename
-        ))]),
+        } => Err(lower_react_diagnostics(
+            &diagnostics,
+            format!(
+                "React Compiler produced no component analysis for {}",
+                input.filename
+            ),
+        )),
+        CompileResult::Fatal { diagnostics } => Err(lower_react_diagnostics(
+            &diagnostics,
+            format!("React Compiler aborted analysis for {}", input.filename),
+        )),
     }
+}
+
+fn lower_react_diagnostics(diagnostics: &Diagnostics, fallback: String) -> Vec<Diagnostic> {
+    if diagnostics.is_empty() {
+        return vec![analysis_error(fallback)];
+    }
+
+    diagnostics.iter().map(lower_react_diagnostic).collect()
+}
+
+fn lower_react_diagnostic(diagnostic: &OxcDiagnostic) -> Diagnostic {
+    let destructive = diagnostic.message.contains("[ReactCompiler] Immutability:")
+        || diagnostic
+            .message
+            .contains("[ReactCompiler] Globals: Cannot reassign")
+        || diagnostic
+            .message
+            .contains("Support UpdateExpression where argument is a global");
+    let code = if destructive {
+        DiagnosticCode::DestructiveRenderMutation
+    } else {
+        DiagnosticCode::AnalysisFailed
+    };
+    let message = diagnostic.help.as_ref().map_or_else(
+        || diagnostic.message.to_string(),
+        |help| format!("{}: {help}", diagnostic.message),
+    );
+    let span = diagnostic.labels.first().and_then(|label| {
+        let start = u32::try_from(label.offset()).ok()?;
+        let length = u32::try_from(label.len()).ok()?;
+        Some(SourceSpan::new(start, start.saturating_add(length)))
+    });
+
+    Diagnostic::new(code, message).with_fallback_span(span)
 }
 
 fn analysis_error(message: impl Into<String>) -> Diagnostic {
@@ -151,7 +193,7 @@ fn lower_snapshot(
         .as_deref()
         .or_else(|| component_name_for_span(program, component_span))
         .unwrap_or("AnonymousComponent");
-    let control_flow = lower_control_flow(&analysis.control_flow);
+    let control_flow = lower_control_flow(&analysis.control_flow, &analysis.render_writes);
     validate_supported_control_flow(&control_flow, component_name, component_span)?;
     let mut syntax =
         classify_component(program, semantic.scoping(), component_name, component_span).map_err(
@@ -165,6 +207,7 @@ fn lower_snapshot(
             },
         )?;
     let def_use = CompilerDefUse::new(analysis);
+    validate_destructive_render_writes(&control_flow, &syntax, component_name, component_span)?;
 
     let provisional = syntax
         .sources
@@ -301,7 +344,10 @@ fn lower_snapshot(
         .with_control_flow(control_flow))
 }
 
-fn lower_control_flow(control_flow: &ControlFlowAnalysis) -> ControlFlowFacts {
+fn lower_control_flow(
+    control_flow: &ControlFlowAnalysis,
+    render_writes: &[WriteAnalysis],
+) -> ControlFlowFacts {
     ControlFlowFacts {
         entry: Some(ControlFlowBlockId::new(control_flow.entry)),
         blocks: control_flow
@@ -316,6 +362,11 @@ fn lower_control_flow(control_flow: &ControlFlowAnalysis) -> ControlFlowFacts {
                     BlockKindAnalysis::Sequence => ControlFlowBlockKind::Sequence,
                     BlockKindAnalysis::Catch => ControlFlowBlockKind::Catch,
                 },
+                instructions: block
+                    .instructions
+                    .iter()
+                    .map(lower_control_flow_instruction)
+                    .collect(),
                 terminal: ControlFlowTerminalFact {
                     order: block.terminal.id,
                     kind: match block.terminal.kind {
@@ -361,6 +412,12 @@ fn lower_control_flow(control_flow: &ControlFlowAnalysis) -> ControlFlowFacts {
                         .terminal
                         .span
                         .map(|(start, end)| SourceSpan::new(start, end)),
+                    operands: block
+                        .terminal
+                        .operands
+                        .iter()
+                        .map(lower_control_flow_value)
+                        .collect(),
                     successors: block
                         .terminal
                         .successors
@@ -371,6 +428,153 @@ fn lower_control_flow(control_flow: &ControlFlowAnalysis) -> ControlFlowFacts {
                 },
             })
             .collect(),
+        render_writes: render_writes
+            .iter()
+            .map(|write| ControlFlowWriteFact {
+                kind: match write.kind {
+                    WriteKindAnalysis::Local => ControlFlowWriteKind::Local,
+                    WriteKindAnalysis::Context => ControlFlowWriteKind::Context,
+                    WriteKindAnalysis::Global => ControlFlowWriteKind::Global,
+                    WriteKindAnalysis::Destructure => ControlFlowWriteKind::Destructure,
+                    WriteKindAnalysis::Property => ControlFlowWriteKind::Property,
+                    WriteKindAnalysis::ComputedProperty => ControlFlowWriteKind::ComputedProperty,
+                    WriteKindAnalysis::DeleteProperty => ControlFlowWriteKind::DeleteProperty,
+                    WriteKindAnalysis::DeleteComputedProperty => {
+                        ControlFlowWriteKind::DeleteComputedProperty
+                    }
+                    WriteKindAnalysis::PrefixUpdate => ControlFlowWriteKind::PrefixUpdate,
+                    WriteKindAnalysis::PostfixUpdate => ControlFlowWriteKind::PostfixUpdate,
+                },
+                span: write.span.map(|(start, end)| SourceSpan::new(start, end)),
+                targets: write.targets.iter().map(lower_control_flow_value).collect(),
+            })
+            .collect(),
+    }
+}
+
+fn validate_destructive_render_writes(
+    control_flow: &ControlFlowFacts,
+    syntax: &classifier::ComponentSyntax<'_>,
+    component_name: &str,
+    component_span: SourceSpan,
+) -> Result<(), Diagnostic> {
+    let prop_declarations = syntax
+        .sources
+        .iter()
+        .filter(|(_, source)| source.kind == crate::analysis::SourceKind::Prop)
+        .map(|(name, source)| (source.declaration_start, name.as_str()))
+        .collect::<BTreeMap<_, _>>();
+
+    for write in &control_flow.render_writes {
+        if write.kind == ControlFlowWriteKind::Destructure {
+            continue;
+        }
+        if write
+            .span
+            .is_some_and(|span| span.start < syntax.body_span.start)
+        {
+            continue;
+        }
+        let Some((target, prop_name)) = write.targets.iter().find_map(|target| {
+            let declaration_start = target.span?.start;
+            prop_declarations
+                .get(&declaration_start)
+                .map(|name| (target, *name))
+        }) else {
+            continue;
+        };
+        let span = write.span.or(target.span).unwrap_or(component_span);
+        return Err(Diagnostic::new(
+            DiagnosticCode::DestructiveRenderMutation,
+            format!("component {component_name} mutates prop {prop_name} during render"),
+        )
+        .with_span(span));
+    }
+
+    Ok(())
+}
+
+fn lower_control_flow_instruction(
+    instruction: &ControlFlowInstructionAnalysis,
+) -> ControlFlowInstructionFact {
+    ControlFlowInstructionFact {
+        id: ControlFlowInstructionId::new(instruction.id),
+        kind: match instruction.kind {
+            InstructionKindAnalysis::LoadLocal => ControlFlowInstructionKind::LoadLocal,
+            InstructionKindAnalysis::LoadContext => ControlFlowInstructionKind::LoadContext,
+            InstructionKindAnalysis::DeclareLocal => ControlFlowInstructionKind::DeclareLocal,
+            InstructionKindAnalysis::DeclareContext => ControlFlowInstructionKind::DeclareContext,
+            InstructionKindAnalysis::StoreLocal => ControlFlowInstructionKind::StoreLocal,
+            InstructionKindAnalysis::StoreContext => ControlFlowInstructionKind::StoreContext,
+            InstructionKindAnalysis::Destructure => ControlFlowInstructionKind::Destructure,
+            InstructionKindAnalysis::Primitive => ControlFlowInstructionKind::Primitive,
+            InstructionKindAnalysis::JsxText => ControlFlowInstructionKind::JsxText,
+            InstructionKindAnalysis::BinaryExpression => {
+                ControlFlowInstructionKind::BinaryExpression
+            }
+            InstructionKindAnalysis::NewExpression => ControlFlowInstructionKind::NewExpression,
+            InstructionKindAnalysis::CallExpression => ControlFlowInstructionKind::CallExpression,
+            InstructionKindAnalysis::MethodCall => ControlFlowInstructionKind::MethodCall,
+            InstructionKindAnalysis::UnaryExpression => ControlFlowInstructionKind::UnaryExpression,
+            InstructionKindAnalysis::TypeCastExpression => {
+                ControlFlowInstructionKind::TypeCastExpression
+            }
+            InstructionKindAnalysis::JsxExpression => ControlFlowInstructionKind::JsxExpression,
+            InstructionKindAnalysis::ObjectExpression => {
+                ControlFlowInstructionKind::ObjectExpression
+            }
+            InstructionKindAnalysis::ObjectMethod => ControlFlowInstructionKind::ObjectMethod,
+            InstructionKindAnalysis::ArrayExpression => ControlFlowInstructionKind::ArrayExpression,
+            InstructionKindAnalysis::JsxFragment => ControlFlowInstructionKind::JsxFragment,
+            InstructionKindAnalysis::RegExpLiteral => ControlFlowInstructionKind::RegExpLiteral,
+            InstructionKindAnalysis::MetaProperty => ControlFlowInstructionKind::MetaProperty,
+            InstructionKindAnalysis::PropertyStore => ControlFlowInstructionKind::PropertyStore,
+            InstructionKindAnalysis::PropertyLoad => ControlFlowInstructionKind::PropertyLoad,
+            InstructionKindAnalysis::PropertyDelete => ControlFlowInstructionKind::PropertyDelete,
+            InstructionKindAnalysis::ComputedStore => ControlFlowInstructionKind::ComputedStore,
+            InstructionKindAnalysis::ComputedLoad => ControlFlowInstructionKind::ComputedLoad,
+            InstructionKindAnalysis::ComputedDelete => ControlFlowInstructionKind::ComputedDelete,
+            InstructionKindAnalysis::LoadGlobal => ControlFlowInstructionKind::LoadGlobal,
+            InstructionKindAnalysis::StoreGlobal => ControlFlowInstructionKind::StoreGlobal,
+            InstructionKindAnalysis::FunctionExpression => {
+                ControlFlowInstructionKind::FunctionExpression
+            }
+            InstructionKindAnalysis::TaggedTemplateExpression => {
+                ControlFlowInstructionKind::TaggedTemplateExpression
+            }
+            InstructionKindAnalysis::TemplateLiteral => ControlFlowInstructionKind::TemplateLiteral,
+            InstructionKindAnalysis::Await => ControlFlowInstructionKind::Await,
+            InstructionKindAnalysis::GetIterator => ControlFlowInstructionKind::GetIterator,
+            InstructionKindAnalysis::IteratorNext => ControlFlowInstructionKind::IteratorNext,
+            InstructionKindAnalysis::NextPropertyOf => ControlFlowInstructionKind::NextPropertyOf,
+            InstructionKindAnalysis::PrefixUpdate => ControlFlowInstructionKind::PrefixUpdate,
+            InstructionKindAnalysis::PostfixUpdate => ControlFlowInstructionKind::PostfixUpdate,
+            InstructionKindAnalysis::Debugger => ControlFlowInstructionKind::Debugger,
+            InstructionKindAnalysis::StartMemoize => ControlFlowInstructionKind::StartMemoize,
+            InstructionKindAnalysis::FinishMemoize => ControlFlowInstructionKind::FinishMemoize,
+        },
+        span: instruction
+            .span
+            .map(|(start, end)| SourceSpan::new(start, end)),
+        lvalues: instruction
+            .lvalues
+            .iter()
+            .map(lower_control_flow_value)
+            .collect(),
+        dependencies: instruction
+            .dependencies
+            .iter()
+            .map(lower_control_flow_value)
+            .collect(),
+    }
+}
+
+fn lower_control_flow_value(value: &ValueAnalysis) -> ControlFlowValueFact {
+    ControlFlowValueFact {
+        id: ControlFlowValueId::new(value.id),
+        declaration_id: ControlFlowValueId::new(value.declaration_id),
+        name: value.name.clone(),
+        span: value.span.map(|(start, end)| SourceSpan::new(start, end)),
     }
 }
 

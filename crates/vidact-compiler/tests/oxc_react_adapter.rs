@@ -1,8 +1,8 @@
 use vidact_compiler::{
     DiagnosticCode, OxcReactAnalysisAdapter,
     analysis::{
-        ControlFlowReturnVariant, ControlFlowTerminalKind, KeyPath, ModuleInput,
-        ReactAnalysisAdapter, SourceKind, UpdaterKind,
+        ControlFlowInstructionKind, ControlFlowReturnVariant, ControlFlowTerminalKind, KeyPath,
+        ModuleInput, ReactAnalysisAdapter, SourceKind, UpdaterKind,
     },
 };
 
@@ -381,6 +381,131 @@ fn reports_multiple_render_returns_at_the_exact_cfg_return_site() {
 }
 
 #[test]
+fn translates_react_compiler_prop_mutations_into_stable_errors() {
+    let source = r#"
+        export function Mutate({ user }) {
+            user.name = "changed";
+            return <p>{user.name}</p>;
+        }
+    "#;
+    let diagnostics = OxcReactAnalysisAdapter
+        .analyze(ModuleInput {
+            filename: "mutate-prop.tsx",
+            source,
+        })
+        .expect_err("mutating an object received through props is destructive render work");
+
+    assert_eq!(
+        diagnostics[0].code,
+        DiagnosticCode::DestructiveRenderMutation
+    );
+    let span = diagnostics[0]
+        .span
+        .expect("React Compiler's mutation label must remain source-located");
+    assert_eq!(&source[span.start as usize..span.end as usize], "user");
+}
+
+#[test]
+fn translates_non_local_updates_without_rejecting_local_mutation() {
+    let destructive_source = r#"
+        let shared = 0;
+        export function Mutate() {
+            shared++;
+            return <p>{shared}</p>;
+        }
+    "#;
+    let diagnostics = OxcReactAnalysisAdapter
+        .analyze(ModuleInput {
+            filename: "mutate-external.tsx",
+            source: destructive_source,
+        })
+        .expect_err("mutating non-local render state must fail compilation");
+    assert_eq!(
+        diagnostics[0].code,
+        DiagnosticCode::DestructiveRenderMutation
+    );
+    let span = diagnostics[0]
+        .span
+        .expect("the non-local update must retain the compiler label");
+    assert!(destructive_source[span.start as usize..span.end as usize].contains("shared++"));
+
+    let local = analyze(
+        "local-mutation.tsx",
+        r#"
+            export function Local() {
+                const local = { value: 0 };
+                local.value = 1;
+                return <p>{local.value}</p>;
+            }
+        "#,
+    );
+    assert_eq!(local.name, "Local");
+}
+
+#[test]
+fn rejects_assignment_to_a_destructured_prop_without_rejecting_local_assignment() {
+    let source = r#"
+        export function Mutate({ label }) {
+            label = "changed";
+            return <p>{label}</p>;
+        }
+    "#;
+    let diagnostics = OxcReactAnalysisAdapter
+        .analyze(ModuleInput {
+            filename: "assign-prop.tsx",
+            source,
+        })
+        .expect_err("a destructured prop remains read-only during render");
+
+    assert_eq!(
+        diagnostics[0].code,
+        DiagnosticCode::DestructiveRenderMutation
+    );
+    let span = diagnostics[0]
+        .span
+        .expect("the assigned prop must retain its source location");
+    assert!(source[span.start as usize..span.end as usize].contains("label"));
+
+    let facts = analyze(
+        "assign-local.tsx",
+        r#"
+            export function Local() {
+                let value = 0;
+                value = 1;
+                return <p>{value}</p>;
+            }
+        "#,
+    );
+    assert_eq!(facts.name, "Local");
+}
+
+#[test]
+fn translates_react_compiler_global_assignments_into_stable_errors() {
+    let source = r#"
+        let shared = 0;
+        export function Mutate() {
+            shared = 1;
+            return <p>{shared}</p>;
+        }
+    "#;
+    let diagnostics = OxcReactAnalysisAdapter
+        .analyze(ModuleInput {
+            filename: "assign-global.tsx",
+            source,
+        })
+        .expect_err("a global assignment is destructive render work");
+
+    assert_eq!(
+        diagnostics[0].code,
+        DiagnosticCode::DestructiveRenderMutation
+    );
+    let span = diagnostics[0]
+        .span
+        .expect("React Compiler's global-assignment label remains source-located");
+    assert!(source[span.start as usize..span.end as usize].contains("shared"));
+}
+
+#[test]
 fn nested_callback_returns_do_not_trigger_component_control_flow_rejection() {
     let facts = analyze(
         "callback-return.tsx",
@@ -430,6 +555,12 @@ fn expression_control_flow_is_retained_without_becoming_an_early_return() {
             ControlFlowTerminalKind::Ternary | ControlFlowTerminalKind::Branch
         )
     }));
+    assert!(facts.control_flow.blocks.iter().any(|block| {
+        matches!(
+            block.terminal.kind,
+            ControlFlowTerminalKind::Ternary | ControlFlowTerminalKind::Branch
+        ) && !block.terminal.operands.is_empty()
+    }));
     let block_ids = facts
         .control_flow
         .blocks
@@ -446,6 +577,50 @@ fn expression_control_flow_is_retained_without_becoming_an_early_return() {
     let ir = vidact_compiler::lower_component(facts.clone())
         .expect("typed control flow must cross the stable IR boundary");
     assert_eq!(ir.control_flow, facts.control_flow);
+}
+
+#[test]
+fn lowers_return_operands_and_their_instruction_producers() {
+    let source = r#"
+        export function Greeting({ name }) {
+            return <p title={name}>{name}</p>;
+        }
+    "#;
+    let facts = analyze("return-operands.tsx", source);
+    let return_block = facts
+        .control_flow
+        .blocks
+        .iter()
+        .find(|block| {
+            block.terminal.kind
+                == ControlFlowTerminalKind::Return(ControlFlowReturnVariant::Explicit)
+        })
+        .expect("component return remains in stable control-flow facts");
+    let returned = return_block
+        .terminal
+        .operands
+        .first()
+        .expect("an explicit value return has one operand");
+    let producer = facts
+        .control_flow
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .find(|instruction| {
+            instruction
+                .lvalues
+                .iter()
+                .any(|value| value.id == returned.id)
+        })
+        .expect("the return operand producer remains available");
+
+    assert_eq!(producer.kind, ControlFlowInstructionKind::JsxExpression);
+    let span = producer.span.expect("producer retains its original span");
+    assert!(source[span.start as usize..span.end as usize].contains("<p title={name}>"));
+    assert!(producer.dependencies.iter().all(|value| {
+        let span = value.span.expect("dependency retains its original span");
+        &source[span.start as usize..span.end as usize] == "name"
+    }));
 }
 
 #[test]

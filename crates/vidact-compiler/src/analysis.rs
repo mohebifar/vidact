@@ -145,11 +145,126 @@ pub enum ControlFlowTerminalKind {
     PrunedScope,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ControlFlowValueId(usize);
+
+impl ControlFlowValueId {
+    #[must_use]
+    pub const fn new(value: usize) -> Self {
+        Self(value)
+    }
+
+    #[must_use]
+    pub const fn get(self) -> usize {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ControlFlowInstructionId(usize);
+
+impl ControlFlowInstructionId {
+    #[must_use]
+    pub const fn new(value: usize) -> Self {
+        Self(value)
+    }
+
+    #[must_use]
+    pub const fn get(self) -> usize {
+        self.0
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ControlFlowValueFact {
+    pub id: ControlFlowValueId,
+    pub declaration_id: ControlFlowValueId,
+    pub name: Option<String>,
+    pub span: Option<SourceSpan>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ControlFlowInstructionKind {
+    LoadLocal,
+    LoadContext,
+    DeclareLocal,
+    DeclareContext,
+    StoreLocal,
+    StoreContext,
+    Destructure,
+    Primitive,
+    JsxText,
+    BinaryExpression,
+    NewExpression,
+    CallExpression,
+    MethodCall,
+    UnaryExpression,
+    TypeCastExpression,
+    JsxExpression,
+    ObjectExpression,
+    ObjectMethod,
+    ArrayExpression,
+    JsxFragment,
+    RegExpLiteral,
+    MetaProperty,
+    PropertyStore,
+    PropertyLoad,
+    PropertyDelete,
+    ComputedStore,
+    ComputedLoad,
+    ComputedDelete,
+    LoadGlobal,
+    StoreGlobal,
+    FunctionExpression,
+    TaggedTemplateExpression,
+    TemplateLiteral,
+    Await,
+    GetIterator,
+    IteratorNext,
+    NextPropertyOf,
+    PrefixUpdate,
+    PostfixUpdate,
+    Debugger,
+    StartMemoize,
+    FinishMemoize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ControlFlowInstructionFact {
+    pub id: ControlFlowInstructionId,
+    pub kind: ControlFlowInstructionKind,
+    pub span: Option<SourceSpan>,
+    pub lvalues: Vec<ControlFlowValueFact>,
+    pub dependencies: Vec<ControlFlowValueFact>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ControlFlowWriteKind {
+    Local,
+    Context,
+    Global,
+    Destructure,
+    Property,
+    ComputedProperty,
+    DeleteProperty,
+    DeleteComputedProperty,
+    PrefixUpdate,
+    PostfixUpdate,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ControlFlowWriteFact {
+    pub kind: ControlFlowWriteKind,
+    pub span: Option<SourceSpan>,
+    pub targets: Vec<ControlFlowValueFact>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ControlFlowTerminalFact {
     pub order: usize,
     pub kind: ControlFlowTerminalKind,
     pub span: Option<SourceSpan>,
+    pub operands: Vec<ControlFlowValueFact>,
     pub successors: Vec<ControlFlowBlockId>,
 }
 
@@ -157,6 +272,7 @@ pub struct ControlFlowTerminalFact {
 pub struct ControlFlowBlockFact {
     pub id: ControlFlowBlockId,
     pub kind: ControlFlowBlockKind,
+    pub instructions: Vec<ControlFlowInstructionFact>,
     pub terminal: ControlFlowTerminalFact,
 }
 
@@ -164,6 +280,7 @@ pub struct ControlFlowBlockFact {
 pub struct ControlFlowFacts {
     pub entry: Option<ControlFlowBlockId>,
     pub blocks: Vec<ControlFlowBlockFact>,
+    pub render_writes: Vec<ControlFlowWriteFact>,
 }
 
 impl UpdaterFact {

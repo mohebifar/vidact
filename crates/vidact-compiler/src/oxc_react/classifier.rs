@@ -23,6 +23,7 @@ pub(super) struct ComponentSyntax<'a> {
     pub(super) sources: BTreeMap<String, SourceSyntax>,
     pub(super) candidates: BTreeMap<String, SourceSyntax>,
     pub(super) return_expression: &'a Expression<'a>,
+    pub(super) body_span: SourceSpan,
 }
 
 pub(super) fn classify_component<'a>(
@@ -139,6 +140,7 @@ pub(super) fn classify_component<'a>(
         sources,
         candidates,
         return_expression,
+        body_span: SourceSpan::new(body.span.start, body.span.end),
     })
 }
 

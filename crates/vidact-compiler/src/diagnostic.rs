@@ -2,6 +2,7 @@
 pub enum DiagnosticCode {
     AnalysisFailed,
     CyclicUpdaterGraph,
+    DestructiveRenderMutation,
     DuplicateSource,
     DuplicateUpdater,
     EmptyComponentName,
