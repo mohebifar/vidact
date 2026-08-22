@@ -4,10 +4,10 @@
   "type": "module",
   "scripts": {
     "build:examples": "pnpm --filter @vidact/example-todomvc build",
-    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test",
+    "check": "pnpm lint && pnpm format && pnpm typecheck && pnpm test",
     "dev:todomvc": "pnpm --filter @vidact/example-todomvc dev",
-    "format": "oxfmt \"**/*.{js,jsx,ts,tsx,json,jsonc,css}\" --write",
-    "format:check": "oxfmt \"**/*.{js,jsx,ts,tsx,json,jsonc,css}\" --check",
+    "format": "oxfmt \"**/*.{js,jsx,ts,tsx,json,jsonc,css}\" --check",
+    "format:fix": "oxfmt \"**/*.{js,jsx,ts,tsx,json,jsonc,css}\" --write",
     "format:rust": "cargo fmt -p vidact-compiler --check",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",

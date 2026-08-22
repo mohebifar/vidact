@@ -186,16 +186,16 @@ export function createCompiledScope(): CompiledScope {
 
 export function createCompiledState<T>(
   scope: CompiledScope,
-  source: SourceMask,
+  sourceMask: SourceMask,
   initialValue: T | (() => T),
 ): StateSlot<T> {
   const value = typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue
-  return createStateSlot(scope, source, value)
+  return createStateSlot(scope, sourceMask, value)
 }
 
 export function createCompiledProp<T>(
   scope: CompiledScope,
-  source: SourceMask,
+  sourceMask: SourceMask,
   input: T | CompiledBinding<T>,
   fallback?: () => T,
 ): StateSlot<T> {
@@ -204,7 +204,7 @@ export function createCompiledProp<T>(
     const value = upstream === undefined ? (input as T) : upstream.evaluate()
     return value === undefined && fallback !== undefined ? fallback() : value
   }
-  const slot = createStateSlot<T>(scope, source, read())
+  const slot = createStateSlot<T>(scope, sourceMask, read())
   if (upstream !== undefined) {
     const remove = subscribe(upstream, () => slot.set(read()))
     const owner = scopeOwners.get(scope)
@@ -380,6 +380,7 @@ export function constructCompiledComponent(component: () => Node): Node {
   try {
     return component()
   } catch (error) {
+    // oxlint-disable-next-line unicorn/no-array-reverse - scopes is already copied to avoid mutation during iteration
     for (const scope of [...scopes].reverse()) {
       try {
         scope.dispose()
