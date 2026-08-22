@@ -257,7 +257,7 @@ fn rejects_defaulted_prop_derivations_missing_from_data_flow_analysis() {
 }
 
 #[test]
-fn rejects_component_returns_that_bypass_the_compiled_root() {
+fn compiles_early_returns_into_one_owned_choice() {
     let source = r#"
         import { useState } from 'react';
         export function Early(): Node {
@@ -266,23 +266,128 @@ fn rejects_component_returns_that_bypass_the_compiled_root() {
             return <p>ready</p>;
         }
     "#;
-    let diagnostics = compile_surgical_module(ModuleInput {
+    let output = compile_surgical_module(ModuleInput {
         filename: "Early.tsx",
         source,
     })
-    .expect_err("every accepted return path must pass through compiledRoot");
+    .expect("every render path now exits through one compiled component range");
 
-    let diagnostic = diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == DiagnosticCode::UnsupportedControlFlow)
-        .expect("React Compiler CFG must identify the unsupported render return");
-    let span = diagnostic
-        .span
-        .expect("unsupported render control flow must retain its source span");
+    assert!(output.contains("return __vidactCompiledRoot"));
+    assert!(output.contains("__vidactChoose(__vidactScope, __vidactSource(0)"));
+    assert!(!output.contains("if (!ready"));
+    assert_eq!(output.matches("return ").count(), 1);
+}
+
+#[test]
+fn aligns_equal_host_and_component_alternatives_before_codegen() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "Aligned.tsx",
+        source: r#"
+            import { useState } from 'react';
+            function Child({ label }) {
+                const [count, setCount] = useState(0);
+                return <button data-label={label}>{label}:{count}</button>;
+            }
+            export function Aligned() {
+                const [first, setFirst] = useState(true);
+                return first
+                    ? <section data-mode="first"><Child label="first" /></section>
+                    : <section data-mode="second"><Child label="second" /></section>;
+            }
+        "#,
+    })
+    .expect("equal type/key positions must compile as retained nodes");
+
+    assert_eq!(output.matches("<section").count(), 1);
+    assert_eq!(output.matches("<Child").count(), 1);
+    assert!(output.contains("first.get() ? \"first\" : \"second\""));
+    assert!(!output.contains("__vidactChoose(__vidactScope"));
+    assert!(!output.contains("choose as __vidactChoose"));
+}
+
+#[test]
+fn dispatches_dynamic_component_keys_without_remounting_stable_identity() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "DynamicKey.tsx",
+        source: r#"
+            import { useState } from 'react';
+            function Child() { return <p>child</p>; }
+            export function DynamicKey() {
+                const [key, setKey] = useState('a');
+                return <Child key={key} />;
+            }
+        "#,
+    })
+    .expect("a reactive key must be represented by an identity dispatcher");
+
+    assert!(output.contains("dispatch as __vidactDispatch"), "{output}");
     assert!(
-        source[span.start as usize..span.end as usize]
-            .contains("return <button onClick={() => setReady(true)}>load</button>")
+        output.contains("__vidactDispatch(__vidactScope, __vidactSource(0)"),
+        "{output}"
     );
+    assert!(output.contains("() => key.get()"), "{output}");
+}
+
+#[test]
+fn rejects_slot_valued_component_types_until_call_site_lowering_exists() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "PropType.tsx",
+        source: r#"
+            export function PropType({ Type }) {
+                return <Type />;
+            }
+        "#,
+    })
+    .expect_err("a slot-valued JSX callee cannot be emitted as a plain identifier");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.message.contains("callable slot lowering")
+    }));
+}
+
+#[test]
+fn compiles_terminal_switches_into_owned_choices() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "Switch.tsx",
+        source: r#"
+            export function Switch({ mode }) {
+                switch (mode) {
+                    case 'a': return <p>A</p>;
+                    case 'b': return <output>B</output>;
+                    default: return null;
+                }
+            }
+        "#,
+    })
+    .expect("terminal literal switches belong to structural render flow");
+
+    assert!(output.contains("mode.get() === \"a\""));
+    assert!(output.contains("mode.get() === \"b\""));
+    assert_eq!(output.matches("return ").count(), 1);
+    assert!(output.contains("choose as __vidactChoose"));
+}
+
+#[test]
+fn rejects_branch_varying_refs_at_the_component_site() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "Refs.tsx",
+        source: r#"
+            import { useRef, useState } from 'react';
+            export function Refs() {
+                const first = useRef(null);
+                const second = useRef(null);
+                const [ready, setReady] = useState(false);
+                return ready ? <input ref={first} /> : <input ref={second} />;
+            }
+        "#,
+    })
+    .expect_err("reactive ref identity needs a dedicated lifecycle");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.message.contains("branch-varying ref identity")
+    }));
 }
 
 #[test]

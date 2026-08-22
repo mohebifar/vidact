@@ -2,6 +2,11 @@
   "contract": "vidact-react-subset-v1",
   "fixtures": [
     {
+      "path": "accepted/early-return.tsx",
+      "expectation": "accepted",
+      "components": ["Early"]
+    },
+    {
       "path": "accepted/multiple-components.tsx",
       "expectation": "accepted",
       "components": ["Child", "Parent"]
@@ -13,10 +18,9 @@
       "spanContains": "() =>"
     },
     {
-      "path": "rejected/early-return.tsx",
-      "expectation": "rejected",
-      "code": "UnsupportedControlFlow",
-      "spanContains": "return <button"
+      "path": "accepted/structural-control-flow.tsx",
+      "expectation": "accepted",
+      "components": ["Ternary", "Logical", "Nullish", "TerminalSwitch"]
     },
     {
       "path": "rejected/reactive-spread.tsx",

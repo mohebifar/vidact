@@ -1,0 +1,95 @@
+# Aligned render slots and identity dispatch
+
+- Decision state: Accepted
+- Decided: 2026-08-22
+
+## Context
+
+Normalized render flow identifies alternatives, but the runtime still needs to
+distinguish an update to one logical position from replacement of that
+position. Remounting every branch would discard component state, focus, refs,
+and keyed descendants. A general element-tree reconciler would preserve more
+cases, but would recreate the runtime representation and diffing cost that
+Vidact deliberately avoids.
+
+React Compiler supplies control-flow and dependency facts. It does not define
+DOM property reset behavior, event-listener ownership, component ranges, or
+React's type/key/position identity policy, so these remain Vidact contracts.
+
+## Decision
+
+The compiler recursively merges alternatives whose logical position, static
+type, and static key match. It emits one host or component construction and
+turns branch-varying props into ordinary compiled bindings. Prop absence is an
+`undefined` value, allowing the direct DOM target or child prop slot to apply
+its reset/default behavior. Reactive event props use the same binding shape,
+but applying a new value owns a cleanup that detaches the previous listener
+before the old branch can act again.
+
+Alternatives that do not align compile to an owned `choose` range. A JSX
+position with a reactive key compiles to the narrower `dispatch` range. The
+dispatcher subscribes only to the statically supplied identity dependencies,
+retains the mounted owner while `Object.is(type, previousType)` and
+`Object.is(key, previousKey)` both hold, and stages exactly one replacement
+when either changes. The render closure is a mount factory for that position,
+not a component-body replay or a runtime element descriptor.
+
+Replacement is failure-atomic at the range boundary: new nodes and refs are
+staged under a fresh owner, published before the old owner is disposed, and
+discarded if staging or ref attachment fails. The previously committed range
+then remains live. Selector/identity updaters are registered before bindings
+owned by the selected branch, so a branch that is leaving cannot receive a DOM
+write during the same flush.
+
+Reactive ref identity remains a compile-time error. Slot-valued JSX component
+callees also remain deferred until codegen can lower both the identity read and
+the callable JSX site; emitting `<Type>` while `Type` is a state/prop slot would
+be unsound.
+
+## Invariants
+
+- Equal position/type/key retains the exact host and component-owned nodes.
+- A key or type change creates one new owner and disposes one previous owner.
+- A retained branch updates through static bindings; the dispatcher does not
+  rerun its render factory for ordinary prop or child changes.
+- Event replacement and removal leave at most one active listener, and owner
+  disposal detaches static and reactive listeners.
+- Failed replacement does not detach the previous handler or refs and does not
+  leak the staged owner.
+- `choose` and `dispatch` are named ESM capabilities imported only when emitted.
+- No runtime Virtual DOM, element tree, dependency discovery, or component-body
+  replay is introduced.
+
+## Alternatives considered
+
+- **Always remount alternatives:** small compiler, but observably loses state,
+  focus, refs, and descendant identity when React would retain them.
+- **General runtime reconciliation:** broad dynamic support, but adds an element
+  representation, tree diffing, and bundle/runtime cost.
+- **Compile only static identity:** avoids a helper, but rejects ordinary
+  dynamic keys and cannot safely handle unresolved component identity.
+- **Mutate the old range before staging:** fewer temporary nodes, but a thrown
+  render or ref can corrupt the last committed result.
+
+## Consequences
+
+Common conditional prop and event changes are surgical and pay no child-list
+mutation. True identity changes pay for one small pair of range markers and one
+feature-level dispatcher. The compiler must keep expanding explicit DOM reset
+semantics and callable component-type lowering rather than treating arbitrary
+JSX objects as reconcilable values.
+
+## Verification
+
+- `crates/vidact-compiler/tests/surgical_codegen.rs` proves aligned emission,
+  helper tree shaking, dynamic-key dispatch, and precise ref/component-type
+  diagnostics.
+- `packages/runtime/test/reactivity/component-ranges.browser.test.ts` proves
+  retained dispatch identity, key replacement, event cleanup, and failed
+  replacement rollback.
+- `tests/browser/corpus/apps/control-flow/` proves repeated aligned and divergent
+  transitions, local component state, focus, nested keyed-row identity, dynamic
+  key remounting, terminal switch selection, disposed-listener inactivity, and
+  MutationObserver envelopes through the Vite compiler path.
+- Run `cargo test -p vidact-compiler`, `pnpm test:runtime`,
+  `pnpm test:browser`, and `pnpm typecheck`.

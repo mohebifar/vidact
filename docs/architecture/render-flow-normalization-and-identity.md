@@ -43,10 +43,11 @@ for comparing alternatives:
 - preserved component identity does not recursively claim ownership of its
   children prop.
 
-Analysis now accepts these render-flow facts, while surgical codegen continues
-to emit a source-located `UnsupportedControlFlow` error until the aligned range
-and dispatcher emission is implemented. Normalization is therefore an accepted
-compiler IR contract, not yet a claim that the syntax runs in browser builds.
+Surgical codegen now consumes these facts through one component-result exit.
+Aligned static identities become persistent host/component slots, divergent
+alternatives become owned choices, and dynamic keys become narrow identity
+dispatchers. The runtime and publication details are recorded in
+[Aligned render slots and identity dispatch](aligned-render-slots-and-identity-dispatch.md).
 
 ## Invariants
 
@@ -73,11 +74,11 @@ compiler IR contract, not yet a claim that the syntax runs in browser builds.
 
 ## Consequences
 
-The compiler can now inspect and test render selection independently of runtime
-publication. The graph and alignment rule provide the stable input for aligned
-prop/event emission and the type/key dispatcher. Until that next layer lands,
-the compatibility manifest correctly keeps executable early-return syntax in
-the rejected category.
+The compiler can inspect and test render selection independently of runtime
+publication while using the graph directly for executable control-flow
+codegen. Early returns and the supported structural operators are now accepted
+only where the compiled browser corpus proves their identity and mutation
+contracts. Fallthrough and synchronous regions remain deferred.
 
 ## Verification
 
@@ -86,7 +87,8 @@ the rejected category.
   keys, and terminal switches with fallthrough rejection.
 - `crates/vidact-compiler/tests/oxc_react_adapter.rs` proves multiple exact CFG
   return sites lower into stable render-flow facts.
-- `crates/vidact-compiler/tests/surgical_codegen.rs` and the compatibility
-  corpus prove executable codegen still fails closed at the exact return site.
+- `crates/vidact-compiler/tests/surgical_codegen.rs`, the compatibility corpus,
+  and `tests/browser/corpus/apps/control-flow/` prove executable control-flow
+  codegen and fail-closed boundaries.
 - Run `cargo test -p vidact-compiler` and
   `cargo clippy -p vidact-compiler --tests -- -D warnings`.

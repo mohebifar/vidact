@@ -277,14 +277,13 @@ export function when(
       }
 
       const nextOwner = createOwner()
-      const { fragment, nodes: staged } = stageValue(render(), nextOwner)
+      const { fragment, nodes: staged } = stageRender(render, nextOwner)
       currentParent.insertBefore(fragment, end)
       for (const node of staged) commitPendingRefs(node)
       branchOwner = nextOwner
       mounted = true
     }
 
-    update()
     const removeUpdater = subscribe(
       {
         scope,
@@ -296,10 +295,169 @@ export function when(
       },
       update,
     )
+    try {
+      update()
+    } catch (error) {
+      removeUpdater()
+      throw error
+    }
     onCleanup(() => {
       removeUpdater()
       try {
         disposeRange(branchOwner, start, end)
+      } finally {
+        start.remove()
+        end.remove()
+      }
+    })
+  })
+}
+
+export type ChoiceMode = 'truthy' | 'not-nullish'
+
+export function choose(
+  scope: CompiledScope,
+  reads: SourceMask,
+  mode: ChoiceMode,
+  select: () => unknown,
+  consequent: () => CompiledRenderValue,
+  alternate: () => CompiledRenderValue,
+  additionalScope?: CompiledScope,
+  additionalReads?: SourceMask,
+): StructuralBinding {
+  return structural((parent, before) => {
+    const start = document.createComment('vidact:choice')
+    const end = document.createComment('/vidact:choice')
+    parent.insertBefore(start, before)
+    parent.insertBefore(end, before)
+    let selected = -1
+    let branchOwner: Owner | null = null
+    let branchNodes: readonly Node[] = []
+
+    const update = (): void => {
+      const value = select()
+      const next =
+        mode === 'not-nullish' ? (value === null || value === undefined ? 1 : 0) : value ? 0 : 1
+      if (next === selected) return
+      const currentParent = rangeParent(start, end, 'choice block')
+      const nextOwner = createOwner()
+      const { fragment, nodes } = stageRender(next === 0 ? consequent : alternate, nextOwner)
+      currentParent.insertBefore(fragment, end)
+      try {
+        for (const node of nodes) commitPendingRefs(node)
+      } catch (error) {
+        disposePublished(nextOwner, nodes)
+        throw error
+      }
+
+      const previousOwner = branchOwner
+      const previousNodes = branchNodes
+      branchOwner = nextOwner
+      branchNodes = nodes
+      selected = next
+      disposePublished(previousOwner, previousNodes)
+    }
+
+    const removeUpdater = subscribe(
+      {
+        scope,
+        reads,
+        additional:
+          additionalScope === undefined || additionalReads === undefined
+            ? undefined
+            : { scope: additionalScope, reads: additionalReads },
+      },
+      update,
+    )
+    try {
+      update()
+    } catch (error) {
+      removeUpdater()
+      throw error
+    }
+    onCleanup(() => {
+      removeUpdater()
+      try {
+        disposePublished(branchOwner, branchNodes)
+      } finally {
+        start.remove()
+        end.remove()
+      }
+    })
+  })
+}
+
+export function dispatch(
+  scope: CompiledScope,
+  reads: SourceMask,
+  type: () => unknown,
+  key: () => unknown,
+  render: () => CompiledRenderValue,
+  additionalScope?: CompiledScope,
+  additionalReads?: SourceMask,
+): StructuralBinding {
+  return structural((parent, before) => {
+    const start = document.createComment('vidact:dispatch')
+    const end = document.createComment('/vidact:dispatch')
+    parent.insertBefore(start, before)
+    parent.insertBefore(end, before)
+    const unset = Symbol('Vidact.UnsetIdentity')
+    let currentType: unknown = unset
+    let currentKey: unknown = unset
+    let currentOwner: Owner | null = null
+    let currentNodes: readonly Node[] = []
+
+    const update = (): void => {
+      const nextType = type()
+      const nextKey = key()
+      if (
+        currentType !== unset &&
+        Object.is(nextType, currentType) &&
+        Object.is(nextKey, currentKey)
+      ) {
+        return
+      }
+      const currentParent = rangeParent(start, end, 'dispatch block')
+      const nextOwner = createOwner()
+      const { fragment, nodes } = stageRender(render, nextOwner)
+      currentParent.insertBefore(fragment, end)
+      try {
+        for (const node of nodes) commitPendingRefs(node)
+      } catch (error) {
+        disposePublished(nextOwner, nodes)
+        throw error
+      }
+
+      const previousOwner = currentOwner
+      const previousNodes = currentNodes
+      currentType = nextType
+      currentKey = nextKey
+      currentOwner = nextOwner
+      currentNodes = nodes
+      disposePublished(previousOwner, previousNodes)
+    }
+
+    const removeUpdater = subscribe(
+      {
+        scope,
+        reads,
+        additional:
+          additionalScope === undefined || additionalReads === undefined
+            ? undefined
+            : { scope: additionalScope, reads: additionalReads },
+      },
+      update,
+    )
+    try {
+      update()
+    } catch (error) {
+      removeUpdater()
+      throw error
+    }
+    onCleanup(() => {
+      removeUpdater()
+      try {
+        disposePublished(currentOwner, currentNodes)
       } finally {
         start.remove()
         end.remove()
@@ -459,6 +617,10 @@ export function queueElementRef(element: Element, value: unknown): void {
   pendingRefs.set(element, { owner: activeOwner, value })
 }
 
+export function registerCompiledCleanup(cleanup: () => void): void {
+  onCleanup(cleanup)
+}
+
 export function mountCompiled(
   component: () => CompiledComponentResult,
   host: ParentNode,
@@ -502,17 +664,22 @@ export function mountCompiledBinding(parent: Node, value: CompiledBinding<unknow
 
 export function mountCompiledProp(
   value: CompiledBinding<unknown>,
-  apply: (next: unknown) => void,
+  apply: (next: unknown) => void | (() => void),
 ): void {
   let current = value.evaluate()
-  apply(current)
+  let cleanup = apply(current)
   const removeUpdater = subscribe(value, () => {
     const next = value.evaluate()
     if (Object.is(next, current)) return
+    const nextCleanup = apply(next)
+    cleanup?.()
+    cleanup = nextCleanup
     current = next
-    apply(next)
   })
-  onCleanup(removeUpdater)
+  onCleanup(() => {
+    removeUpdater()
+    cleanup?.()
+  })
 }
 
 function structural(mount: StructuralBinding['mount']): StructuralBinding {
@@ -670,6 +837,22 @@ function stageValue(
   return { fragment, nodes: [...fragment.childNodes] }
 }
 
+function stageRender(
+  render: () => CompiledRenderValue,
+  owner: Owner,
+): { readonly fragment: DocumentFragment; readonly nodes: readonly Node[] } {
+  try {
+    return stageValue(withOwner(owner, render), owner)
+  } catch (error) {
+    try {
+      disposeOwner(owner)
+    } catch {
+      // Preserve the render or staging error after every registered cleanup ran.
+    }
+    throw error
+  }
+}
+
 function insertValue(
   parent: Node,
   value: RenderValue,
@@ -745,6 +928,14 @@ function disposeRange(owner: Owner | null, start: Node, end: Node): void {
     if (owner !== null) disposeOwner(owner)
   } finally {
     removeBetween(start, end)
+  }
+}
+
+function disposePublished(owner: Owner | null, nodes: readonly Node[]): void {
+  try {
+    if (owner !== null) disposeOwner(owner)
+  } finally {
+    for (const node of nodes) node.parentNode?.removeChild(node)
   }
 }
 

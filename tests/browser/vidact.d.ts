@@ -1,6 +1,10 @@
 declare namespace JSX {
   type Element = import('@vidact/runtime').CompiledComponentResult
 
+  interface IntrinsicAttributes {
+    key?: string | number
+  }
+
   interface IntrinsicElements {
     [name: string]: Record<string, unknown>
   }

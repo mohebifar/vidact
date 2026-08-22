@@ -6,6 +6,7 @@ import {
   mountCompiledBinding,
   mountCompiledProp,
   queueElementRef,
+  registerCompiledCleanup,
   type CompiledBinding,
   type StructuralBinding,
 } from './compiled.ts'
@@ -196,11 +197,31 @@ function applyProps(element: HTMLElement, props: DirectProps): void {
       continue
     }
     if (isCompiledBinding(value)) {
+      if (isEventProp(name)) {
+        mountCompiledProp(value, (next) => attachEventProp(element, name, next))
+        continue
+      }
       mountCompiledProp(value, (next) => applyProp(element, name, next))
+      continue
+    }
+    if (isEventProp(name) && typeof value === 'function') {
+      registerCompiledCleanup(attachEventProp(element, name, value))
       continue
     }
     applyProp(element, name, value)
   }
+}
+
+function attachEventProp(element: HTMLElement, name: string, value: unknown): () => void {
+  if (value === null || value === undefined) return () => {}
+  if (typeof value !== 'function') {
+    throw new TypeError(`event prop ${name} must be a function, null, or undefined`)
+  }
+  const reactEventName = name.slice(2)
+  const eventName = reactEventName === 'DoubleClick' ? 'dblclick' : reactEventName.toLowerCase()
+  const listener = value as EventListener
+  element.addEventListener(eventName, listener)
+  return () => element.removeEventListener(eventName, listener)
 }
 
 function applyProp(element: HTMLElement, name: string, value: unknown): void {
@@ -220,13 +241,6 @@ function applyProp(element: HTMLElement, name: string, value: unknown): void {
     Object.assign(element.style, value)
     return
   }
-  if (isEventProp(name) && typeof value === 'function') {
-    const reactEventName = name.slice(2)
-    const eventName = reactEventName === 'DoubleClick' ? 'dblclick' : reactEventName.toLowerCase()
-    element.addEventListener(eventName, value as EventListener)
-    return
-  }
-
   if (property in element && !name.startsWith('data-') && !name.startsWith('aria-')) {
     Reflect.set(element, property, value)
   } else if (value === true) {

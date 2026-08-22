@@ -28,6 +28,7 @@ use crate::{
 };
 
 mod ast;
+mod render;
 
 use ast::*;
 
@@ -36,9 +37,11 @@ const BINDING: &str = "__vidactBinding";
 const COMBINE_SOURCES: &str = "__vidactCombineSources";
 const COMPILED_EVENT: &str = "__vidactEvent";
 const COMPILED_ROOT: &str = "__vidactCompiledRoot";
+const CHOOSE: &str = "__vidactChoose";
 const CREATE_PROP: &str = "__vidactCreateProp";
 const CREATE_SCOPE: &str = "__vidactCreateScope";
 const CREATE_STATE: &str = "__vidactCreateState";
+const DISPATCH: &str = "__vidactDispatch";
 const KEYED: &str = "__vidactKeyed";
 const ITEM_INDEX: &str = "__vidactItemIndex";
 const ITEM_SCOPE: &str = "__vidactItemScope";
@@ -109,9 +112,11 @@ fn transform_program<'a>(
         COMBINE_SOURCES,
         COMPILED_EVENT,
         COMPILED_ROOT,
+        CHOOSE,
         CREATE_PROP,
         CREATE_SCOPE,
         CREATE_STATE,
+        DISPATCH,
         KEYED,
         ITEM_INDEX,
         ITEM_SCOPE,
@@ -131,7 +136,8 @@ fn transform_program<'a>(
         transform_component(allocator, scoping, component, program)
             .map_err(|diagnostic| diagnostic.with_fallback_span(component.span))?;
     }
-    program.body.insert(0, runtime_import(&ast));
+    let import = runtime_import(&ast, program);
+    program.body.insert(0, import);
     Ok(())
 }
 
@@ -161,7 +167,7 @@ fn transform_component<'a>(
         .body
         .as_deref_mut()
         .ok_or_else(|| unsupported("compiled component has no body"))?;
-    validate_component_returns(body, ir)?;
+    let render_start = render_suffix_start(body, ir)?;
     let mut source_symbols = BTreeMap::<SymbolId, SourceId>::new();
     let mut state_symbols = BTreeMap::<SymbolId, StateReference<'a>>::new();
     let (item_source_symbols, item_state_symbols) = item_parameters(body, &ast);
@@ -208,6 +214,15 @@ fn transform_component<'a>(
     }
 
     reject_untracked_derived_bindings(body, scoping, &source_symbols, &item_source_symbols)?;
+    let render_expression = render::lower_component_render(
+        &ast,
+        allocator,
+        scoping,
+        ir,
+        body,
+        &source_symbols,
+        &item_source_symbols,
+    )?;
 
     for statement in &mut body.statements {
         let Statement::VariableDeclaration(declaration) = statement else {
@@ -251,11 +266,7 @@ fn transform_component<'a>(
     body.statements = inserted;
 
     let derivations = derived_expressions(body, ir, allocator);
-    let return_index = body
-        .statements
-        .iter()
-        .position(|statement| matches!(statement, Statement::ReturnStatement(_)))
-        .ok_or_else(|| unsupported("compiled component has no return statement"))?;
+    let render_start = render_start + 1 + prop_bindings.len();
     let mut updater_statements = oxc_allocator::Vec::new_in(&ast);
     for updater in &ir.updaters {
         if updater.kind != crate::analysis::UpdaterKind::Derived {
@@ -280,11 +291,24 @@ fn transform_component<'a>(
             &updater.writes,
         ));
     }
+    let updater_count = updater_statements.len();
     for (offset, statement) in updater_statements.into_iter().enumerate() {
-        body.statements.insert(return_index + offset, statement);
+        body.statements.insert(render_start + offset, statement);
     }
 
-    wrap_return(&ast, body)?;
+    body.statements.truncate(render_start + updater_count);
+    body.statements.push(Statement::new_return_statement(
+        SPAN,
+        Some(call_name(
+            &ast,
+            COMPILED_ROOT,
+            [
+                ident(&ast, SCOPE),
+                arrow_expression(&ast, [], render_expression),
+            ],
+        )),
+        &ast,
+    ));
     let mut jsx_transformer = JsxBindingTransformer {
         ast: &ast,
         scoping,
@@ -440,26 +464,6 @@ fn derived_expressions<'a>(
     expressions
 }
 
-fn wrap_return<'a>(ast: &AstBuilder<'a>, body: &mut FunctionBody<'a>) -> Result<(), Diagnostic> {
-    for statement in &mut body.statements {
-        let Statement::ReturnStatement(return_statement) = statement else {
-            continue;
-        };
-        let expression = return_statement
-            .argument
-            .as_ref()
-            .ok_or_else(|| unsupported("compiled component returns no value"))?
-            .clone_in_with_semantic_ids(ast.allocator());
-        return_statement.argument = Some(call_name(
-            ast,
-            COMPILED_ROOT,
-            [ident(ast, SCOPE), arrow_expression(ast, [], expression)],
-        ));
-        return Ok(());
-    }
-    Err(unsupported("compiled component has no return statement"))
-}
-
 struct JsxBindingTransformer<'a, 'b, 's> {
     ast: &'b AstBuilder<'a>,
     scoping: &'s Scoping,
@@ -489,10 +493,26 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             if let Some(JSXAttributeValue::ExpressionContainer(container)) = &mut attribute.value
                 && let Some(expression) = container.expression.as_expression_mut()
             {
+                let reads = dependencies(
+                    expression,
+                    self.scoping,
+                    self.source_symbols,
+                    self.item_source_symbols,
+                );
                 self.visit_expression(expression);
                 let handler = expression.clone_in_with_semantic_ids(self.ast.allocator());
-                *expression =
-                    call_name(self.ast, COMPILED_EVENT, [ident(self.ast, SCOPE), handler]);
+                let event = call_name(self.ast, COMPILED_EVENT, [ident(self.ast, SCOPE), handler]);
+                if reads.is_empty() {
+                    *expression = event;
+                } else {
+                    let mut arguments = vec![
+                        ident(self.ast, SCOPE),
+                        dependency_mask(self.ast, &reads.parent),
+                        arrow_expression(self.ast, [], event),
+                    ];
+                    append_item_dependency(self.ast, &mut arguments, &reads);
+                    *expression = call_name(self.ast, BINDING, arguments);
+                }
             }
             return;
         }
@@ -522,6 +542,7 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
 
         if let Expression::LogicalExpression(logical) = expression
             && logical.operator == LogicalOperator::And
+            && is_syntactically_boolean(&logical.left)
         {
             let reads = dependencies(
                 &logical.left,
@@ -529,6 +550,7 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
                 self.source_symbols,
                 self.item_source_symbols,
             );
+            self.visit_expression(&mut logical.left);
             self.visit_expression(&mut logical.right);
             if reads.is_empty() {
                 return;
@@ -547,6 +569,53 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             ];
             append_item_dependency(self.ast, &mut arguments, &reads);
             *expression = call_name(self.ast, WHEN, arguments);
+            return;
+        }
+
+        if let Expression::LogicalExpression(logical) = expression {
+            let reads = dependencies(
+                &logical.left,
+                self.scoping,
+                self.source_symbols,
+                self.item_source_symbols,
+            );
+            self.visit_expression(&mut logical.left);
+            self.visit_expression(&mut logical.right);
+            let select = logical
+                .left
+                .clone_in_with_semantic_ids(self.ast.allocator());
+            let left = logical
+                .left
+                .clone_in_with_semantic_ids(self.ast.allocator());
+            let right = logical
+                .right
+                .clone_in_with_semantic_ids(self.ast.allocator());
+            let left = if reads.is_empty() {
+                left
+            } else {
+                let mut arguments = vec![
+                    ident(self.ast, SCOPE),
+                    dependency_mask(self.ast, &reads.parent),
+                    arrow_expression(self.ast, [], left),
+                ];
+                append_item_dependency(self.ast, &mut arguments, &reads);
+                call_name(self.ast, BINDING, arguments)
+            };
+            let (mode, consequent, alternate) = match logical.operator {
+                LogicalOperator::And => ("truthy", right, left),
+                LogicalOperator::Or => ("truthy", left, right),
+                LogicalOperator::Coalesce => ("not-nullish", left, right),
+            };
+            let mut arguments = vec![
+                ident(self.ast, SCOPE),
+                dependency_mask(self.ast, &reads.parent),
+                Expression::new_string_literal(SPAN, mode, None, self.ast),
+                arrow_expression(self.ast, [], select),
+                arrow_expression(self.ast, [], consequent),
+                arrow_expression(self.ast, [], alternate),
+            ];
+            append_item_dependency(self.ast, &mut arguments, &reads);
+            *expression = call_name(self.ast, CHOOSE, arguments);
             return;
         }
 
@@ -603,6 +672,21 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
         ];
         append_item_dependency(self.ast, &mut arguments, &reads);
         *expression = call_name(self.ast, BINDING, arguments);
+    }
+}
+
+fn is_syntactically_boolean(expression: &Expression<'_>) -> bool {
+    match expression.without_parentheses() {
+        Expression::BooleanLiteral(_) | Expression::PrivateInExpression(_) => true,
+        Expression::BinaryExpression(binary) => {
+            binary.operator.is_equality()
+                || binary.operator.is_compare()
+                || binary.operator.is_relational()
+        }
+        Expression::UnaryExpression(unary) => {
+            unary.operator == oxc_syntax::operator::UnaryOperator::LogicalNot
+        }
+        _ => false,
     }
 }
 
@@ -672,19 +756,19 @@ fn prop_binding_symbols<'a>(
     Ok(bindings)
 }
 
-fn validate_component_returns(body: &FunctionBody<'_>, ir: &ComponentIr) -> Result<(), Diagnostic> {
-    let direct_returns = body
-        .statements
-        .iter()
-        .filter(|statement| matches!(statement, Statement::ReturnStatement(_)))
-        .count();
-    let mut nested = NestedReturnFinder::default();
-    for statement in &body.statements {
-        if !matches!(statement, Statement::ReturnStatement(_)) {
-            nested.visit_statement(statement);
-        }
-    }
-    if direct_returns != 1 || nested.found {
+fn render_suffix_start(body: &FunctionBody<'_>, ir: &ComponentIr) -> Result<usize, Diagnostic> {
+    let Some(start) = body.statements.iter().position(contains_component_return) else {
+        return Err(unsupported("compiled component has no return statement"));
+    };
+    if body.statements[start..].iter().any(|statement| {
+        !matches!(
+            statement,
+            Statement::ReturnStatement(_)
+                | Statement::IfStatement(_)
+                | Statement::SwitchStatement(_)
+                | Statement::EmptyStatement(_)
+        )
+    }) {
         let span = ir
             .control_flow
             .blocks
@@ -702,11 +786,20 @@ fn validate_component_returns(body: &FunctionBody<'_>, ir: &ComponentIr) -> Resu
             .min_by_key(|span| span.start);
         return Err(Diagnostic::new(
             DiagnosticCode::UnsupportedControlFlow,
-            "render flow is normalized, but aligned component-range code generation is not implemented",
+            "statements between render-selecting branches are deferred to synchronous-region lowering",
         )
         .with_fallback_span(span));
     }
-    Ok(())
+    Ok(start)
+}
+
+fn contains_component_return(statement: &Statement<'_>) -> bool {
+    if matches!(statement, Statement::ReturnStatement(_)) {
+        return true;
+    }
+    let mut nested = NestedReturnFinder::default();
+    nested.visit_statement(statement);
+    nested.found
 }
 
 fn reject_untracked_derived_bindings(
@@ -1098,29 +1191,36 @@ fn scope_statement<'a>(ast: &AstBuilder<'a>) -> Statement<'a> {
     )
 }
 
-fn runtime_import<'a>(ast: &AstBuilder<'a>) -> Statement<'a> {
+fn runtime_import<'a>(ast: &AstBuilder<'a>, program: &Program<'a>) -> Statement<'a> {
     let names = [
         ("binding", BINDING),
         ("combineSources", COMBINE_SOURCES),
         ("compiledEvent", COMPILED_EVENT),
         ("compiledRoot", COMPILED_ROOT),
+        ("choose", CHOOSE),
         ("createCompiledProp", CREATE_PROP),
         ("createCompiledScope", CREATE_SCOPE),
         ("createCompiledState", CREATE_STATE),
+        ("dispatch", DISPATCH),
         ("keyed", KEYED),
         ("source", SOURCE),
         ("when", WHEN),
     ];
+    let mut references = GeneratedReferenceFinder::default();
+    references.visit_program(program);
     let specifiers = oxc_allocator::Vec::from_iter_in(
-        names.into_iter().map(|(imported, local)| {
-            ImportDeclarationSpecifier::new_import_specifier(
-                SPAN,
-                ModuleExportName::new_identifier_name(SPAN, atom(ast, imported), ast),
-                BindingIdentifier::new(SPAN, atom(ast, local), ast),
-                ImportOrExportKind::Value,
-                ast,
-            )
-        }),
+        names
+            .into_iter()
+            .filter(|(_, local)| references.names.contains(*local))
+            .map(|(imported, local)| {
+                ImportDeclarationSpecifier::new_import_specifier(
+                    SPAN,
+                    ModuleExportName::new_identifier_name(SPAN, atom(ast, imported), ast),
+                    BindingIdentifier::new(SPAN, atom(ast, local), ast),
+                    ImportOrExportKind::Value,
+                    ast,
+                )
+            }),
         ast,
     );
     Statement::new_import_declaration(
@@ -1132,6 +1232,19 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>) -> Statement<'a> {
         ImportOrExportKind::Value,
         ast,
     )
+}
+
+#[derive(Default)]
+struct GeneratedReferenceFinder {
+    names: BTreeSet<String>,
+}
+
+impl<'a> Visit<'a> for GeneratedReferenceFinder {
+    fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
+        if identifier.name.starts_with("__vidact") {
+            self.names.insert(identifier.name.to_string());
+        }
+    }
 }
 
 fn component_function_mut<'p, 'a>(

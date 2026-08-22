@@ -21,11 +21,13 @@ export {
 } from './direct-dom.ts'
 export {
   binding,
+  choose,
   compiledEvent,
   compiledRoot,
   createCompiledProp,
   createCompiledScope,
   createCompiledState,
+  dispatch,
   keyed,
   mountCompiled,
   when,
@@ -34,6 +36,7 @@ export {
   type CompiledDependency,
   type CompiledRenderValue,
   type CompiledScope,
+  type ChoiceMode,
   type OwnedBlock,
   type StructuralBinding,
 } from './compiled.ts'

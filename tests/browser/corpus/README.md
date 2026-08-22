@@ -18,6 +18,9 @@ infrastructure coverage, but it is not an app-corpus entry.
   conditional range
 - `apps/roster`: keyed arrays, same-key record updates, reordering, appending,
   and a JSX array passed through component props
+- `apps/control-flow`: early returns, aligned alternatives, JavaScript logical
+  values, terminal switches, dynamic keys, event replacement, focus and nested
+  keyed identity, disposed branches, and no-op mutation envelopes
 
 ## Supporting runtime coverage
 
