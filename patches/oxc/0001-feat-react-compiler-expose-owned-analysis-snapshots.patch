@@ -4,20 +4,20 @@ Date: Sat, 22 Aug 2026 00:00:05 -0700
 Subject: [PATCH] feat(react-compiler): expose owned analysis snapshots
 
 ---
- crates/oxc_react_compiler/src/analysis.rs     | 566 ++++++++++++++++++
+ crates/oxc_react_compiler/src/analysis.rs     | 648 ++++++++++++++++++
  crates/oxc_react_compiler/src/lib.rs          |   7 +
  .../src/react_compiler/entrypoint/imports.rs  |   4 +
- .../src/react_compiler/entrypoint/pipeline.rs |   9 +
+ .../src/react_compiler/entrypoint/pipeline.rs |  16 +
  .../src/react_compiler/entrypoint/program.rs  |   7 +
- 5 files changed, 593 insertions(+)
+ 5 files changed, 682 insertions(+)
  create mode 100644 crates/oxc_react_compiler/src/analysis.rs
 
 diff --git a/crates/oxc_react_compiler/src/analysis.rs b/crates/oxc_react_compiler/src/analysis.rs
 new file mode 100644
-index 00000000000000..7db4c8763dd7fd
+index 00000000000000..6fb81263aade0c
 --- /dev/null
 +++ b/crates/oxc_react_compiler/src/analysis.rs
-@@ -0,0 +1,566 @@
+@@ -0,0 +1,648 @@
 +//! Owned, pre-codegen analysis snapshots for compiler integrations.
 +//!
 +//! These types intentionally do not expose the arena-backed React Compiler HIR.
@@ -43,6 +43,9 @@ index 00000000000000..7db4c8763dd7fd
 +    /// Owned snapshot of the analyzed HIR control-flow graph before it is
 +    /// converted into React Compiler's codegen-oriented reactive tree.
 +    pub control_flow: ControlFlowAnalysis,
++    /// Render-time writes captured before dead-code elimination can erase
++    /// semantically destructive assignments.
++    pub render_writes: Vec<WriteAnalysis>,
 +    pub scopes: Vec<ScopeAnalysis>,
 +    pub instructions: Vec<InstructionAnalysis>,
 +}
@@ -203,6 +206,27 @@ index 00000000000000..7db4c8763dd7fd
 +    pub span: Option<(u32, u32)>,
 +}
 +
++#[derive(Clone, Debug, Eq, PartialEq)]
++pub struct WriteAnalysis {
++    pub kind: WriteKindAnalysis,
++    pub span: Option<(u32, u32)>,
++    pub targets: Vec<ValueAnalysis>,
++}
++
++#[derive(Clone, Copy, Debug, Eq, PartialEq)]
++pub enum WriteKindAnalysis {
++    Local,
++    Context,
++    Global,
++    Destructure,
++    Property,
++    ComputedProperty,
++    DeleteProperty,
++    DeleteComputedProperty,
++    PrefixUpdate,
++    PostfixUpdate,
++}
++
 +pub(crate) fn capture_control_flow(
 +    function: &HirFunction<'_>,
 +    environment: &Environment<'_>,
@@ -254,11 +278,68 @@ index 00000000000000..7db4c8763dd7fd
 +    ControlFlowAnalysis { entry: function.body.entry.index(), blocks }
 +}
 +
++pub(crate) fn capture_render_writes(
++    function: &HirFunction<'_>,
++    environment: &Environment<'_>,
++) -> Vec<WriteAnalysis> {
++    let visitor = ScopeSnapshotVisitor { environment };
++    function
++        .body
++        .blocks
++        .iter()
++        .flat_map(|(_, block)| &block.instructions)
++        .filter_map(|instruction_id| {
++            let instruction = &function.instructions[instruction_id.index()];
++            let (kind, targets) = match &instruction.value {
++                InstructionValue::StoreLocal { lvalue, .. } => {
++                    (WriteKindAnalysis::Local, vec![lvalue.place])
++                }
++                InstructionValue::StoreContext { lvalue, .. } => {
++                    (WriteKindAnalysis::Context, vec![lvalue.place])
++                }
++                InstructionValue::StoreGlobal { .. } => (WriteKindAnalysis::Global, Vec::new()),
++                InstructionValue::Destructure { .. } => (
++                    WriteKindAnalysis::Destructure,
++                    each_instruction_value_lvalue(&instruction.value).into_vec(),
++                ),
++                InstructionValue::PropertyStore { object, .. } => {
++                    (WriteKindAnalysis::Property, vec![*object])
++                }
++                InstructionValue::ComputedStore { object, .. } => {
++                    (WriteKindAnalysis::ComputedProperty, vec![*object])
++                }
++                InstructionValue::PropertyDelete { object, .. } => {
++                    (WriteKindAnalysis::DeleteProperty, vec![*object])
++                }
++                InstructionValue::ComputedDelete { object, .. } => {
++                    (WriteKindAnalysis::DeleteComputedProperty, vec![*object])
++                }
++                InstructionValue::PrefixUpdate { lvalue, .. } => {
++                    (WriteKindAnalysis::PrefixUpdate, vec![*lvalue])
++                }
++                InstructionValue::PostfixUpdate { lvalue, .. } => {
++                    (WriteKindAnalysis::PostfixUpdate, vec![*lvalue])
++                }
++                _ => return None,
++            };
++            Some(WriteAnalysis {
++                kind,
++                span: instruction.span.map(|span| (span.start, span.end)),
++                targets: targets
++                    .into_iter()
++                    .map(|place| visitor.value_analysis(place.identifier))
++                    .collect(),
++            })
++        })
++        .collect()
++}
++
 +pub(crate) fn capture(
 +    function: &ReactiveFunction<'_>,
 +    environment: &Environment<'_>,
 +    instructions: Vec<InstructionAnalysis>,
 +    control_flow: ControlFlowAnalysis,
++    render_writes: Vec<WriteAnalysis>,
 +) -> FunctionAnalysis {
 +    let visitor = ScopeSnapshotVisitor { environment };
 +    let mut state = SnapshotState::default();
@@ -268,6 +349,7 @@ index 00000000000000..7db4c8763dd7fd
 +        name: function.id.or(function.name_hint).map(|name| name.as_str().to_owned()),
 +        span: function.span.map(|span| (span.start, span.end)),
 +        control_flow,
++        render_writes,
 +        scopes: state.scopes,
 +        instructions,
 +    }
@@ -585,7 +667,7 @@ index 00000000000000..7db4c8763dd7fd
 +    }
 +}
 diff --git a/crates/oxc_react_compiler/src/lib.rs b/crates/oxc_react_compiler/src/lib.rs
-index 8a70ae4793897a..34d3f6f18cae81 100644
+index 8a70ae4793897a..d28bf9a006be96 100644
 --- a/crates/oxc_react_compiler/src/lib.rs
 +++ b/crates/oxc_react_compiler/src/lib.rs
 @@ -1,5 +1,6 @@
@@ -603,7 +685,7 @@ index 8a70ae4793897a..34d3f6f18cae81 100644
 +    BlockAnalysis, BlockKindAnalysis, ControlFlowAnalysis, ControlFlowInstructionAnalysis,
 +    DependencyAnalysis, FunctionAnalysis, GotoVariantAnalysis, InstructionAnalysis,
 +    InstructionKindAnalysis, ReturnVariantAnalysis, ScopeAnalysis, TerminalAnalysis,
-+    TerminalKindAnalysis, ValueAnalysis,
++    TerminalKindAnalysis, ValueAnalysis, WriteAnalysis, WriteKindAnalysis,
 +};
  
  // Re-exported so integrations needn't depend on the upstream `react_compiler` crates.
@@ -638,10 +720,19 @@ index c0b785a355cbb4..7a4a18ad868bd3 100644
              instrument_gating_name: None,
              hook_guard_name: None,
 diff --git a/crates/oxc_react_compiler/src/react_compiler/entrypoint/pipeline.rs b/crates/oxc_react_compiler/src/react_compiler/entrypoint/pipeline.rs
-index 8308dcf8dabbce..1280dee30bd35e 100644
+index 8308dcf8dabbce..06616e9d1dca12 100644
 --- a/crates/oxc_react_compiler/src/react_compiler/entrypoint/pipeline.rs
 +++ b/crates/oxc_react_compiler/src/react_compiler/entrypoint/pipeline.rs
-@@ -300,6 +300,8 @@ fn run_pipeline<'a>(
+@@ -198,6 +198,8 @@ fn run_pipeline<'a>(
+ 
+     infer_mutation_aliasing_effects(&mut hir, &mut env, false)?;
+ 
++    let render_writes = crate::analysis::capture_render_writes(&hir, &env);
++
+     if env.output_mode == OutputMode::Ssr {
+         optimize_for_ssr(&mut hir, &env);
+     }
+@@ -300,6 +302,8 @@ fn run_pipeline<'a>(
  
      propagate_scope_dependencies_hir(&mut hir, &mut env);
  
@@ -650,7 +741,7 @@ index 8308dcf8dabbce..1280dee30bd35e 100644
      let mut reactive_fn = build_reactive_function(&hir, &env)?;
  
      assert_well_formed_break_targets(&reactive_fn, &env);
-@@ -320,6 +322,8 @@ fn run_pipeline<'a>(
+@@ -320,6 +324,8 @@ fn run_pipeline<'a>(
  
      propagate_early_returns(&mut reactive_fn, &mut env);
  
@@ -659,17 +750,22 @@ index 8308dcf8dabbce..1280dee30bd35e 100644
      prune_unused_lvalues(&mut reactive_fn, &env);
  
      promote_used_temporaries(&mut reactive_fn, &mut env);
-@@ -336,6 +340,9 @@ fn run_pipeline<'a>(
+@@ -336,6 +342,14 @@ fn run_pipeline<'a>(
  
      prune_hoisted_contexts(&mut reactive_fn, &env)?;
  
-+    let analysis =
-+        crate::analysis::capture(&reactive_fn, &env, analysis_instructions, control_flow);
++    let analysis = crate::analysis::capture(
++        &reactive_fn,
++        &env,
++        analysis_instructions,
++        control_flow,
++        render_writes,
++    );
 +
      if env.config.enable_preserve_existing_memoization_guarantees
          || env.config.validate_preserve_existing_memoization_guarantees
      {
-@@ -415,6 +422,8 @@ fn run_pipeline<'a>(
+@@ -415,6 +429,8 @@ fn run_pipeline<'a>(
          context.merge_uid_known_names(&uid_names);
      }
  
