@@ -84,6 +84,13 @@ interface NodePosition {
   readonly nextSibling: Node | null
 }
 
+interface PublicationOperation {
+  readonly commit: () => void
+  readonly rollback: () => void
+  readonly abort?: () => void
+  readonly finalize?: () => void
+}
+
 interface ComponentRange {
   readonly start: Comment
   readonly end: Comment
@@ -94,6 +101,7 @@ let activeOwner: Owner | null = null
 let activeScopeCollector: Set<CompiledScope> | null = null
 let transactionDepth = 0
 let drainingFlushes = false
+let activePublication: PublicationOperation[] | null = null
 const scheduledFlushes = new Set<() => void>()
 const scopeOwners = new WeakMap<CompiledScope, Owner>()
 const componentRanges = new WeakMap<CompiledComponentResult, ComponentRange>()
@@ -731,10 +739,34 @@ export function mountCompiledProp(
   const removeUpdater = subscribe(value, () => {
     const next = value.evaluate()
     if (Object.is(next, current)) return
-    const nextCleanup = apply(next)
-    cleanup?.()
-    cleanup = nextCleanup
-    current = next
+    const previous = current
+    let nextCleanup: void | (() => void)
+    let committedNext = false
+    stagePublication({
+      commit() {
+        try {
+          nextCleanup = apply(next)
+        } catch (error) {
+          try {
+            apply(previous)
+          } catch {
+            // Preserve the setter error that aborted publication.
+          }
+          throw error
+        }
+        committedNext = true
+        cleanup?.()
+        cleanup = nextCleanup
+        current = next
+      },
+      rollback() {
+        if (!committedNext) return
+        nextCleanup?.()
+        cleanup = apply(previous)
+        current = previous
+        committedNext = false
+      },
+    })
   })
   onCleanup(() => {
     removeUpdater()
@@ -830,8 +862,19 @@ function mountCompiledBindingBefore(
     if (isScalarRenderValue(next)) {
       const content = toText(next)
       if (text !== null) {
-        if (text.data !== content) text.data = content
-        current = next
+        const target = text
+        const previousContent = target.data
+        const previous = current
+        stagePublication({
+          commit() {
+            if (target.data !== content) target.data = content
+            current = next
+          },
+          rollback() {
+            if (target.data !== previousContent) target.data = previousContent
+            current = previous
+          },
+        })
         return
       }
       clear()
@@ -1075,7 +1118,10 @@ function scheduleFlush(flush: () => void): void {
 function drainFlushes(): void {
   if (drainingFlushes || transactionDepth > 0) return
   drainingFlushes = true
+  const publication: PublicationOperation[] = []
+  activePublication = publication
   const runs = new Map<() => void, number>()
+  let committing = false
   try {
     while (scheduledFlushes.size > 0) {
       const flush = scheduledFlushes.values().next().value
@@ -1089,7 +1135,61 @@ function drainFlushes(): void {
       runs.set(flush, runCount)
       flush()
     }
+    activePublication = null
+    committing = true
+    commitPublication(publication)
+  } catch (error) {
+    activePublication = null
+    if (!committing) abortPublication(publication)
+    throw error
   } finally {
+    activePublication = null
     drainingFlushes = false
+  }
+}
+
+function stagePublication(operation: PublicationOperation): void {
+  if (activePublication === null) {
+    operation.commit()
+    operation.finalize?.()
+    return
+  }
+  activePublication.push(operation)
+}
+
+function commitPublication(operations: readonly PublicationOperation[]): void {
+  const applied: PublicationOperation[] = []
+  try {
+    for (const operation of operations) {
+      applied.push(operation)
+      operation.commit()
+    }
+  } catch (error) {
+    for (let index = applied.length - 1; index >= 0; index -= 1) {
+      try {
+        applied[index]?.rollback()
+      } catch {
+        // Preserve the publication error while attempting every inverse.
+      }
+    }
+    for (const operation of operations.slice(applied.length)) {
+      try {
+        operation.abort?.()
+      } catch {
+        // Preserve the publication error while disposing every staged value.
+      }
+    }
+    throw error
+  }
+  for (const operation of operations) operation.finalize?.()
+}
+
+function abortPublication(operations: readonly PublicationOperation[]): void {
+  for (let index = operations.length - 1; index >= 0; index -= 1) {
+    try {
+      operations[index]?.abort?.()
+    } catch {
+      // Preserve the computation error while disposing every staged value.
+    }
   }
 }

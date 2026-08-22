@@ -1,5 +1,10 @@
 import { useState } from 'react'
 
+function readExceptionMode(mode: string): string {
+  if (mode === 'caught') throw new Error('caught')
+  return mode
+}
+
 export function SynchronousFlowApp(): JSX.Element {
   const [mode, setMode] = useState<'a' | 'b'>('a')
   const [values, setValues] = useState([1, -1, 2, 99, 10])
@@ -7,6 +12,7 @@ export function SynchronousFlowApp(): JSX.Element {
     { id: 'ada', label: 'Ada' },
     { id: 'grace', label: 'Grace' },
   ])
+  const [exceptionMode, setExceptionMode] = useState('normal')
 
   let label = ''
   switch (mode) {
@@ -56,6 +62,13 @@ export function SynchronousFlowApp(): JSX.Element {
     )
   }
 
+  let exceptionLabel = ''
+  try {
+    exceptionLabel = readExceptionMode(exceptionMode)
+  } catch (error) {
+    exceptionLabel = error instanceof Error ? error.message : 'unknown'
+  }
+
   return (
     <section data-synchronous-flow>
       <output data-switch>{label}</output>
@@ -64,6 +77,7 @@ export function SynchronousFlowApp(): JSX.Element {
       <output data-for-in>{keys}</output>
       <output data-while>{whileCount}</output>
       <output data-do-while>{doWhileCount}</output>
+      <output data-try-catch>{exceptionLabel}</output>
       <ul data-indexed-list>
         {rows.map((row, index) => (
           <li data-row-id={row.id} data-row-index={index}>
@@ -103,6 +117,9 @@ export function SynchronousFlowApp(): JSX.Element {
         }
       >
         update row
+      </button>
+      <button data-catch-error onClick={() => setExceptionMode('caught')}>
+        catch error
       </button>
     </section>
   )

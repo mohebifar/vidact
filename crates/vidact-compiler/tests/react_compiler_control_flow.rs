@@ -225,3 +225,33 @@ fn captures_structured_switch_loop_and_label_terminals() {
         )
     }));
 }
+
+#[test]
+fn captures_supported_try_catch_terminals() {
+    let analysis = analyze_component(
+        r#"
+            function readMode(mode) {
+                if (mode === 'caught') throw new Error('caught');
+                return mode;
+            }
+            export function TryFlow({ mode }) {
+                let label = '';
+                try {
+                    label = readMode(mode);
+                } catch (error) {
+                    label = error instanceof Error ? error.message : 'unknown';
+                }
+                return <p>{label}</p>;
+            }
+        "#,
+        "TryFlow",
+    );
+
+    assert!(
+        analysis
+            .control_flow
+            .blocks
+            .iter()
+            .any(|block| block.terminal.kind == TerminalKindAnalysis::Try)
+    );
+}

@@ -241,6 +241,12 @@ tests/browser/corpus/apps/
 
 ## Implementation Units
 
+> Execution note (2026-08-22): U1-U9 are complete. U10 has landed native
+> `try`/`catch` plus transactional scalar/prop publication, but remains open on
+> structural publication inverses and on two upstream Rust React Compiler
+> `BuildHIR` gaps: `finally` and explicit `throw` inside `try`. U11 and final
+> closure gates intentionally remain pending.
+
 | Unit | Title | Primary files | Depends on |
 | --- | --- | --- | --- |
 | U1 | Carry render-flow operands into stable facts | Oxc patch, compiler analysis adapter and IR | None |

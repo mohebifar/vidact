@@ -38,10 +38,27 @@
       "components": ["SynchronousControlFlow"]
     },
     {
+      "path": "accepted/synchronous-try.tsx",
+      "expectation": "accepted",
+      "components": ["SynchronousTry"]
+    },
+    {
       "path": "rejected/reactive-spread.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",
       "spanContains": "function ReactiveSpread"
+    },
+    {
+      "path": "rejected/synchronous-finally.tsx",
+      "expectation": "rejected",
+      "code": "AnalysisFailed",
+      "spanContains": "try"
+    },
+    {
+      "path": "rejected/try-explicit-throw.tsx",
+      "expectation": "rejected",
+      "code": "AnalysisFailed",
+      "spanContains": "throw"
     },
     {
       "path": "different/native-change-event.tsx",

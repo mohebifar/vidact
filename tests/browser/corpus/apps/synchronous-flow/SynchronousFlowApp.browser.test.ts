@@ -20,8 +20,15 @@ describe('compiled synchronous regions', () => {
 
     const root = host.querySelector<HTMLElement>('[data-synchronous-flow]')!
     const switchOutput = host.querySelector<HTMLOutputElement>('[data-switch]')!
-    const outputs = [...host.querySelectorAll<HTMLOutputElement>('output')]
-    expect(outputs.map((output) => output.textContent)).toEqual([
+    const flowOutputs = [
+      switchOutput,
+      host.querySelector<HTMLOutputElement>('[data-for-of]')!,
+      host.querySelector<HTMLOutputElement>('[data-for]')!,
+      host.querySelector<HTMLOutputElement>('[data-for-in]')!,
+      host.querySelector<HTMLOutputElement>('[data-while]')!,
+      host.querySelector<HTMLOutputElement>('[data-do-while]')!,
+    ]
+    expect(flowOutputs.map((output) => output.textContent)).toEqual([
       'ab',
       '3',
       '111',
@@ -47,12 +54,12 @@ describe('compiled synchronous regions', () => {
       host.querySelector<HTMLButtonElement>('[data-short-values]')!.click(),
     )
     expect(host.querySelector('[data-synchronous-flow]')).toBe(root)
-    expect(outputs.every((output) => host.contains(output))).toBe(true)
-    expect(outputs.map((output) => output.textContent)).toEqual(['b', '9', '9', '01', '2', '2'])
+    expect(flowOutputs.every((output) => host.contains(output))).toBe(true)
+    expect(flowOutputs.map((output) => output.textContent)).toEqual(['b', '9', '9', '01', '2', '2'])
     expect(() =>
       assertMutationEnvelope(
         valueCapture.records,
-        outputs.slice(1).map((output) => ({ type: 'characterData' as const, within: output })),
+        flowOutputs.slice(1).map((output) => ({ type: 'characterData' as const, within: output })),
         'loop region update',
       ),
     ).not.toThrow()
@@ -61,6 +68,26 @@ describe('compiled synchronous regions', () => {
       host.querySelector<HTMLButtonElement>('[data-noop]')!.click(),
     )
     expect(noop.records).toEqual([])
+  })
+
+  it('keeps try/catch native and publishes only the handled result', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    dispose = mountCompiled(SynchronousFlowApp, host).dispose
+
+    const output = host.querySelector<HTMLOutputElement>('[data-try-catch]')!
+    const mutation = await captureMutations(output, () =>
+      host.querySelector<HTMLButtonElement>('[data-catch-error]')!.click(),
+    )
+
+    expect(output.textContent).toBe('caught')
+    expect(() =>
+      assertMutationEnvelope(
+        mutation.records,
+        [{ type: 'characterData', within: output }],
+        'handled try/catch publication',
+      ),
+    ).not.toThrow()
   })
 
   it('makes unkeyed map identity explicitly positional', async () => {

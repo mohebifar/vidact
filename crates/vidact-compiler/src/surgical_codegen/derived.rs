@@ -110,6 +110,7 @@ fn structured_region_kind(statement: &Statement<'_>) -> Option<StructuredRegionK
         Statement::LabeledStatement(statement) => {
             structured_region_kind(&statement.body).or(Some(StructuredRegionKind::Label))
         }
+        Statement::TryStatement(_) => Some(StructuredRegionKind::Try),
         _ => None,
     }
 }

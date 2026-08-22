@@ -571,6 +571,34 @@ fn preserves_switch_fallthrough_and_loop_syntax_inside_derived_updaters() {
 }
 
 #[test]
+fn preserves_try_catch_inside_derived_updaters() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "TryFlow.tsx",
+        source: r#"
+            import { useState } from 'react';
+            function readMode(mode) {
+                if (mode === 'caught') throw new Error('caught');
+                return mode;
+            }
+            export function TryFlow(): Node {
+                const [mode, setMode] = useState('normal');
+                let label = '';
+                try {
+                    label = readMode(mode);
+                } catch (error) {
+                    label = error instanceof Error ? error.message : 'unknown';
+                }
+                return <p>{label}</p>;
+            }
+        "#,
+    })
+    .expect("try/catch should remain native JavaScript in a derived updater");
+
+    assert!(output.contains("try {"), "{output}");
+    assert!(output.contains("catch (error)"), "{output}");
+}
+
+#[test]
 fn rejects_branch_varying_refs_at_the_component_site() {
     let diagnostics = compile_surgical_module(ModuleInput {
         filename: "Refs.tsx",
