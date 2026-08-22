@@ -11,6 +11,7 @@ mod diagnostic;
 pub mod ir;
 mod oxc_react;
 mod react_bindings;
+pub mod reactive_flow;
 pub mod render_flow;
 mod surgical_codegen;
 

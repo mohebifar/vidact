@@ -101,7 +101,8 @@ semantic scope graph:
 
 - the analyzed HIR CFG is captured before conversion into React Compiler's
   codegen-oriented reactive tree as owned blocks, instruction kinds, typed
-  terminals, operands, successor IDs, and original spans;
+  terminals, operands, successor/predecessor IDs, live SSA phi operands, and
+  original spans;
 - Vidact immediately lowers the terminal graph into its own `ControlFlowFacts`,
   which is carried by `ComponentFacts` and `ComponentIr`; no arena-backed HIR
   type crosses the adapter;
@@ -122,8 +123,8 @@ semantic scope graph:
   instead of falling through to a text updater or being reinterpreted by codegen.
 - multiple explicit component returns enter the Vidact-owned render-flow DAG
   only after their AST sites match React Compiler's exact return-terminal spans.
-  Surgical codegen still fails closed with `UnsupportedControlFlow` at the first
-  return until aligned range emission lands. Returns and branches inside nested
+  Surgical codegen consumes that graph through aligned slots and owned range
+  choices. Returns and branches inside nested
   callbacks, plus source-text lookalikes, are absent from the outer component
   CFG and do not enter the graph.
 
@@ -146,9 +147,11 @@ accepted, rejected, and intentionally different fixtures.
 Vidact now normalizes supported return/branch graphs and static type/key/position
 identity as described in
 [Render-flow normalization and identity](render-flow-normalization-and-identity.md).
-The next executable step is aligned DOM-range and narrow dispatcher emission;
-original-TSX source maps and additional per-pass drift fixtures remain follow-up
-work.
+Aligned DOM-range and narrow dispatcher emission is now implemented. The
+patched seam also exposes optimized predecessor/phi facts as described in
+[React Compiler SSA join snapshot](react-compiler-ssa-join-snapshot.md); the
+next executable step is guarded branch-derived updater emission. Original-TSX
+source maps and additional per-pass drift fixtures remain follow-up work.
 
 ## Verification
 
@@ -164,4 +167,7 @@ work.
 - `crates/vidact-compiler/tests/react_compiler_control_flow.rs` proves exact
   multi-return and JSX instruction spans while guarding against callback,
   expression-branch, and source-lookalike false positives.
+- `crates/vidact-compiler/tests/react_compiler_data_flow.rs` proves owned SSA
+  predecessor/phi lowering, declaration identity, source annotation, and
+  sequential/shadowed false-positive boundaries.
 - Run `cargo test -p vidact-compiler`.

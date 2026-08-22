@@ -3,6 +3,7 @@
 These documents record accepted compiler/runtime contracts and their rationale. Plans describe intended work; architecture decisions describe boundaries the implementation must preserve.
 
 - [React analysis boundary](react-analysis-boundary.md) — React Compiler supplies an owned typed CFG plus def-use facts while Vidact classifies supported syntax through OXC AST and semantic identities before lowering to its stable IR.
+- [React Compiler SSA join snapshot](react-compiler-ssa-join-snapshot.md) — optimized predecessor and phi facts cross the patched Oxc seam as owned values and immediately lower into Vidact's validated reactive-flow graph.
 - [Patched Oxc submodule](patched-oxc-submodule.md) — the official Oxc repository stays pinned at a pristine upstream commit while Vidact's narrow React Compiler analysis seam is maintained as a deterministic patch series.
 - [Component spans and compatibility corpus](component-spans-and-compatibility-corpus.md) — exact source spans join each React Compiler snapshot to its component, while a versioned manifest defines accepted, rejected, and intentionally different fixtures.
 - [Keyed record updaters and owned blocks](keyed-record-updaters-and-owned-blocks.md) — stable keys retain row owners and nodes while static item/component updaters patch them; compiled array blocks can cross props with single-mount ownership.

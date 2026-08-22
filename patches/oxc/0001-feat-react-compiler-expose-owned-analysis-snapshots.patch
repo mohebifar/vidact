@@ -4,20 +4,20 @@ Date: Sat, 22 Aug 2026 00:00:05 -0700
 Subject: [PATCH] feat(react-compiler): expose owned analysis snapshots
 
 ---
- crates/oxc_react_compiler/src/analysis.rs     | 648 ++++++++++++++++++
+ crates/oxc_react_compiler/src/analysis.rs     | 681 ++++++++++++++++++
  crates/oxc_react_compiler/src/lib.rs          |   7 +
  .../src/react_compiler/entrypoint/imports.rs  |   4 +
  .../src/react_compiler/entrypoint/pipeline.rs |  16 +
  .../src/react_compiler/entrypoint/program.rs  |   7 +
- 5 files changed, 682 insertions(+)
+ 5 files changed, 715 insertions(+)
  create mode 100644 crates/oxc_react_compiler/src/analysis.rs
 
 diff --git a/crates/oxc_react_compiler/src/analysis.rs b/crates/oxc_react_compiler/src/analysis.rs
 new file mode 100644
-index 00000000000000..6fb81263aade0c
+index 00000000000000..9a6224c67078ac
 --- /dev/null
 +++ b/crates/oxc_react_compiler/src/analysis.rs
-@@ -0,0 +1,648 @@
+@@ -0,0 +1,681 @@
 +//! Owned, pre-codegen analysis snapshots for compiler integrations.
 +//!
 +//! These types intentionally do not expose the arena-backed React Compiler HIR.
@@ -60,8 +60,25 @@ index 00000000000000..6fb81263aade0c
 +pub struct BlockAnalysis {
 +    pub id: usize,
 +    pub kind: BlockKindAnalysis,
++    /// Direct predecessor block ids in the compiler's stable CFG order.
++    pub predecessors: Vec<usize>,
++    /// SSA joins that are live after redundant-phi elimination.
++    pub phis: Vec<PhiAnalysis>,
 +    pub instructions: Vec<ControlFlowInstructionAnalysis>,
 +    pub terminal: TerminalAnalysis,
++}
++
++#[derive(Clone, Debug, Eq, PartialEq)]
++pub struct PhiAnalysis {
++    pub target: ValueAnalysis,
++    /// One incoming value per predecessor that contributes to this join.
++    pub operands: Vec<PhiOperandAnalysis>,
++}
++
++#[derive(Clone, Debug, Eq, PartialEq)]
++pub struct PhiOperandAnalysis {
++    pub predecessor: usize,
++    pub value: ValueAnalysis,
 +}
 +
 +#[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -269,6 +286,22 @@ index 00000000000000..6fb81263aade0c
 +            BlockAnalysis {
 +                id: block.id.index(),
 +                kind: block_kind(block.kind),
++                predecessors: block.preds.iter().map(|block| block.index()).collect(),
++                phis: block
++                    .phis
++                    .iter()
++                    .map(|phi| PhiAnalysis {
++                        target: visitor.value_analysis(phi.place.identifier),
++                        operands: phi
++                            .operands
++                            .iter()
++                            .map(|(predecessor, place)| PhiOperandAnalysis {
++                                predecessor: predecessor.index(),
++                                value: visitor.value_analysis(place.identifier),
++                            })
++                            .collect(),
++                    })
++                    .collect(),
 +                instructions,
 +                terminal: terminal_analysis(&block.terminal, &visitor),
 +            }
@@ -667,7 +700,7 @@ index 00000000000000..6fb81263aade0c
 +    }
 +}
 diff --git a/crates/oxc_react_compiler/src/lib.rs b/crates/oxc_react_compiler/src/lib.rs
-index 8a70ae4793897a..d28bf9a006be96 100644
+index 8a70ae4793897a..9ac22f31b9f647 100644
 --- a/crates/oxc_react_compiler/src/lib.rs
 +++ b/crates/oxc_react_compiler/src/lib.rs
 @@ -1,5 +1,6 @@
@@ -684,8 +717,8 @@ index 8a70ae4793897a..d28bf9a006be96 100644
 +pub use analysis::{
 +    BlockAnalysis, BlockKindAnalysis, ControlFlowAnalysis, ControlFlowInstructionAnalysis,
 +    DependencyAnalysis, FunctionAnalysis, GotoVariantAnalysis, InstructionAnalysis,
-+    InstructionKindAnalysis, ReturnVariantAnalysis, ScopeAnalysis, TerminalAnalysis,
-+    TerminalKindAnalysis, ValueAnalysis, WriteAnalysis, WriteKindAnalysis,
++    InstructionKindAnalysis, PhiAnalysis, PhiOperandAnalysis, ReturnVariantAnalysis, ScopeAnalysis,
++    TerminalAnalysis, TerminalKindAnalysis, ValueAnalysis, WriteAnalysis, WriteKindAnalysis,
 +};
  
  // Re-exported so integrations needn't depend on the upstream `react_compiler` crates.

@@ -193,7 +193,7 @@ fn lower_snapshot(
         .as_deref()
         .or_else(|| component_name_for_span(program, component_span))
         .unwrap_or("AnonymousComponent");
-    let control_flow = lower_control_flow(&analysis.control_flow, &analysis.render_writes);
+    let mut control_flow = lower_control_flow(&analysis.control_flow, &analysis.render_writes);
     let mut syntax = classify_component(
         program,
         semantic.scoping(),
@@ -316,6 +316,7 @@ fn lower_snapshot(
                 .map(|declaration| (declaration, id))
         })
         .collect::<BTreeMap<_, _>>();
+    annotate_control_flow_sources(&mut control_flow, &final_declarations);
     let mut updaters = Vec::new();
 
     for name in ordered_derived_names {
@@ -373,6 +374,27 @@ fn lower_control_flow(
                     BlockKindAnalysis::Sequence => ControlFlowBlockKind::Sequence,
                     BlockKindAnalysis::Catch => ControlFlowBlockKind::Catch,
                 },
+                predecessors: block
+                    .predecessors
+                    .iter()
+                    .copied()
+                    .map(ControlFlowBlockId::new)
+                    .collect(),
+                phis: block
+                    .phis
+                    .iter()
+                    .map(|phi| crate::analysis::ControlFlowPhiFact {
+                        target: lower_control_flow_value(&phi.target),
+                        operands: phi
+                            .operands
+                            .iter()
+                            .map(|operand| crate::analysis::ControlFlowPhiOperandFact {
+                                predecessor: ControlFlowBlockId::new(operand.predecessor),
+                                value: lower_control_flow_value(&operand.value),
+                            })
+                            .collect(),
+                    })
+                    .collect(),
                 instructions: block
                     .instructions
                     .iter()
@@ -584,8 +606,43 @@ fn lower_control_flow_value(value: &ValueAnalysis) -> ControlFlowValueFact {
     ControlFlowValueFact {
         id: ControlFlowValueId::new(value.id),
         declaration_id: ControlFlowValueId::new(value.declaration_id),
+        source: None,
         name: value.name.clone(),
         span: value.span.map(|(start, end)| SourceSpan::new(start, end)),
+    }
+}
+
+fn annotate_control_flow_sources(
+    control_flow: &mut ControlFlowFacts,
+    declarations: &BTreeMap<usize, SourceId>,
+) {
+    fn annotate(value: &mut ControlFlowValueFact, declarations: &BTreeMap<usize, SourceId>) {
+        value.source = declarations.get(&value.declaration_id.get()).copied();
+    }
+
+    for block in &mut control_flow.blocks {
+        for phi in &mut block.phis {
+            annotate(&mut phi.target, declarations);
+            for operand in &mut phi.operands {
+                annotate(&mut operand.value, declarations);
+            }
+        }
+        for instruction in &mut block.instructions {
+            for value in &mut instruction.lvalues {
+                annotate(value, declarations);
+            }
+            for value in &mut instruction.dependencies {
+                annotate(value, declarations);
+            }
+        }
+        for value in &mut block.terminal.operands {
+            annotate(value, declarations);
+        }
+    }
+    for write in &mut control_flow.render_writes {
+        for value in &mut write.targets {
+            annotate(value, declarations);
+        }
     }
 }
 

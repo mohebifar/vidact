@@ -5,6 +5,7 @@ use crate::{
     analysis::{
         ComponentFacts, ControlFlowFacts, SourceId, SourceKind, UpdaterFact, UpdaterId, UpdaterKind,
     },
+    reactive_flow::{ReactiveFlowGraph, lower_reactive_flow},
     render_flow::RenderFlowGraph,
 };
 
@@ -28,6 +29,7 @@ pub struct ComponentIr {
     pub name: String,
     pub span: Option<SourceSpan>,
     pub control_flow: ControlFlowFacts,
+    pub reactive_flow: ReactiveFlowGraph,
     pub render_flow: RenderFlowGraph,
     pub sources: Vec<IrSource>,
     /// Compiler execution order. The runtime must not rediscover this graph.
@@ -76,11 +78,13 @@ pub fn lower_component(facts: ComponentFacts) -> Result<ComponentIr, Diagnostic>
     }
 
     let updater_order = topological_updater_order(&facts.updaters)?;
+    let reactive_flow = lower_reactive_flow(&facts.control_flow)?;
 
     Ok(ComponentIr {
         name: facts.name,
         span: facts.span,
         control_flow: facts.control_flow,
+        reactive_flow,
         render_flow: facts.render_flow,
         sources: facts
             .sources

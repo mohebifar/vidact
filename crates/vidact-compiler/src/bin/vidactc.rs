@@ -78,6 +78,17 @@ fn analysis_json(components: impl IntoIterator<Item = ComponentIr>) -> Value {
                 "start": span.start,
                 "end": span.end,
             })),
+            "reactiveFlow": component.reactive_flow.blocks.iter().map(|block| json!({
+                "id": block.id.get(),
+                "predecessors": block.predecessors.iter().map(|id| id.get()).collect::<Vec<_>>(),
+                "phis": block.phis.iter().map(|phi| json!({
+                    "target": reactive_value_json(&phi.target),
+                    "operands": phi.operands.iter().map(|operand| json!({
+                        "predecessor": operand.predecessor.get(),
+                        "value": reactive_value_json(&operand.value),
+                    })).collect::<Vec<_>>(),
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
             "sources": component.sources.into_iter().map(|source| json!({
                 "id": source.id.get(),
                 "name": source.name,
@@ -90,6 +101,19 @@ fn analysis_json(components: impl IntoIterator<Item = ComponentIr>) -> Value {
                 "writes": updater.writes.into_iter().map(|source| source.get()).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
+    })
+}
+
+fn reactive_value_json(value: &vidact_compiler::reactive_flow::ReactiveFlowValue) -> Value {
+    json!({
+        "id": value.id.get(),
+        "declarationId": value.declaration_id.get(),
+        "source": value.source.map(|source| source.get()),
+        "name": value.name,
+        "span": value.span.map(|span| json!({
+            "start": span.start,
+            "end": span.end,
+        })),
     })
 }
 

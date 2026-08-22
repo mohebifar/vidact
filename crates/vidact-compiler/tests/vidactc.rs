@@ -34,6 +34,8 @@ fn emits_versioned_analysis_json_for_supported_tsx() {
     assert!(json.contains(r#""name":"Todos""#));
     assert!(json.contains(r#""span":{"end":"#));
     assert!(json.contains(r#""kind":"keyed-list""#));
+    assert!(json.contains(r#""reactiveFlow""#));
+    assert!(json.contains(r#""predecessors""#));
 }
 
 #[test]

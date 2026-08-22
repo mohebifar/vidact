@@ -179,8 +179,22 @@ impl ControlFlowInstructionId {
 pub struct ControlFlowValueFact {
     pub id: ControlFlowValueId,
     pub declaration_id: ControlFlowValueId,
+    /// Public Vidact source represented by this SSA value, when applicable.
+    pub source: Option<SourceId>,
     pub name: Option<String>,
     pub span: Option<SourceSpan>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ControlFlowPhiOperandFact {
+    pub predecessor: ControlFlowBlockId,
+    pub value: ControlFlowValueFact,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ControlFlowPhiFact {
+    pub target: ControlFlowValueFact,
+    pub operands: Vec<ControlFlowPhiOperandFact>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -272,6 +286,8 @@ pub struct ControlFlowTerminalFact {
 pub struct ControlFlowBlockFact {
     pub id: ControlFlowBlockId,
     pub kind: ControlFlowBlockKind,
+    pub predecessors: Vec<ControlFlowBlockId>,
+    pub phis: Vec<ControlFlowPhiFact>,
     pub instructions: Vec<ControlFlowInstructionFact>,
     pub terminal: ControlFlowTerminalFact,
 }
