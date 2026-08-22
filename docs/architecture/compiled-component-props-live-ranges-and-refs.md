@@ -158,7 +158,7 @@ compatibility path rather than the target for new compiled hook semantics.
 - `crates/vidact-compiler/tests/surgical_codegen.rs` covers compiled prop slots,
   default factories, early-return rejection, reactive-spread rejection, and
   fail-closed untracked prop derivations.
-- `tests/browser/corpus/reactivity/compiled-dom.browser.test.ts` covers reactive
+- `packages/runtime/test/reactivity/compiled-dom.browser.test.ts` covers reactive
   parent-to-child props, branch disposal, recursive array/node/empty ranges,
   structural props moved out of fragments, defaulted and transaction-batched
   reactive props, failed-child disposal, node rollback, keyed cleanup errors,
@@ -166,5 +166,7 @@ compatibility path rather than the target for new compiled hook semantics.
 - `examples/todomvc/src/TodoApp.browser.test.ts` exercises a compiler-owned keyed
   array and reactive scalar prop through `TodoList`, plus `useRef`, while
   preserving keyed row DOM identity.
-- Run `cargo test --workspace`, `pnpm typecheck`, `pnpm test:browser`,
-  `pnpm test:examples`, and `pnpm build:examples`.
+- `tests/browser/corpus/apps/roster/RosterApp.browser.test.ts` verifies compiler-owned
+  JSX arrays crossing a component prop with surgical record updates.
+- Run `cargo test --workspace`, `pnpm typecheck`, `pnpm test:runtime`,
+  `pnpm test:browser`, `pnpm test:examples`, and `pnpm build:examples`.

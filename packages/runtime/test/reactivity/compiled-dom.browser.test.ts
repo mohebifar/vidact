@@ -1,4 +1,12 @@
 import {
+  assertMutationEnvelope,
+  captureMutations,
+  requireSingleDirectText,
+  startMutationCapture,
+} from '@vidact/test-support'
+import { describe, expect, it } from 'vitest'
+
+import {
   binding,
   combineSources,
   compiledEvent,
@@ -13,14 +21,7 @@ import {
   mountCompiled,
   source,
   when,
-} from '@vidact/runtime'
-import {
-  assertMutationEnvelope,
-  captureMutations,
-  requireSingleDirectText,
-  startMutationCapture,
-} from '@vidact/test-support'
-import { describe, expect, it } from 'vitest'
+} from '../../src/index.ts'
 
 interface Item {
   readonly id: number

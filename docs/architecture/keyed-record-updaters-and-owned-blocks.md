@@ -48,7 +48,8 @@ Immutable updates to list records are now surgical for supported keyed callbacks
 
 ## Verification
 
-- `tests/browser/corpus/reactivity/compiled-dom.browser.test.ts` covers same-key object replacement, reorder, index updates, mixed component/item bindings, prop transport, and the single-mount rule.
+- `packages/runtime/test/reactivity/compiled-dom.browser.test.ts` covers same-key object replacement, reorder, index updates, mixed component/item bindings, prop transport, and the single-mount rule.
+- `tests/browser/corpus/apps/roster/RosterApp.browser.test.ts` proves same-key updates, reorder, append, and JSX-array prop transport through compiled TSX.
 - `crates/vidact-compiler/tests/surgical_codegen.rs` checks separate item/component domains, slot reads, raw key selectors, and generated callback shape.
 - `examples/todomvc/src/TodoApp.browser.test.ts` verifies a changed todo retains its exact `li` while rows are passed through `TodoList` as a prop.
-- Run `cargo test --workspace`, `pnpm test:browser`, `pnpm test:examples`, and `pnpm typecheck`.
+- Run `cargo test --workspace`, `pnpm test:runtime`, `pnpm test:browser`, `pnpm test:examples`, and `pnpm typecheck`.

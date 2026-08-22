@@ -9,9 +9,13 @@
     "./jsx-runtime": "./src/jsx-runtime.ts"
   },
   "scripts": {
+    "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
-    "typescript": "7.0.2"
+    "@vidact/test-support": "workspace:*",
+    "@vitest/browser-playwright": "4.1.11",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
   }
 }

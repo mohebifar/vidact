@@ -1,6 +1,7 @@
-import { createKeyedList } from '@vidact/runtime'
 import { captureMutations, startMutationCapture } from '@vidact/test-support'
 import { describe, expect, it } from 'vitest'
+
+import { createKeyedList } from '../../src/index.ts'
 
 interface Todo {
   id: number

@@ -8,5 +8,5 @@
   "sortPackageJson": {
     "sortScripts": true
   },
-  "ignorePatterns": [".pnpm-store/**", "crates/**", "tests/browser/generated/**", "vendor/**"]
+  "ignorePatterns": [".pnpm-store/**", "crates/**", "vendor/**"]
 }

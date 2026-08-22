@@ -1,5 +1,6 @@
-import { createStateSlot, createUpdaterScope, source } from '@vidact/runtime'
 import { describe, expect, it } from 'vitest'
+
+import { createStateSlot, createUpdaterScope, source } from '../../src/index.ts'
 
 describe('lifecycle corpus', () => {
   it('stops updater execution after a component scope is disposed', () => {

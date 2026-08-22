@@ -11,9 +11,10 @@
     "format:rust": "cargo fmt -p vidact-compiler --check",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
-    "test": "pnpm test:rust && pnpm test:tools && pnpm test:browser && pnpm test:examples",
+    "test": "pnpm test:rust && pnpm test:runtime && pnpm test:tools && pnpm test:browser && pnpm test:examples",
     "test:browser": "pnpm --filter @vidact/browser-corpus test",
     "test:examples": "pnpm --filter @vidact/example-todomvc test",
+    "test:runtime": "pnpm --filter @vidact/runtime test",
     "test:rust": "cargo test --workspace",
     "test:tools": "pnpm --filter @vidact/vite test",
     "typecheck": "pnpm --recursive typecheck"
