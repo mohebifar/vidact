@@ -20,6 +20,7 @@ describe('Vidact TodoMVC', () => {
     expect(host.querySelector<HTMLInputElement>('.new-todo')?.value).toBe('')
     addTodo(host, 'Ship direct DOM')
     expect(labels(host)).toEqual(['Study React Compiler', 'Ship direct DOM'])
+    expect(host.querySelector('.todo-list')?.getAttribute('data-visible-count')).toBe('2')
     expect(host.querySelector('.todo-count')?.textContent).toContain('2 items left')
 
     const rootBeforeToggle = host.firstChild
@@ -37,8 +38,10 @@ describe('Vidact TodoMVC', () => {
 
     host.querySelector<HTMLButtonElement>('[data-filter="active"]')?.click()
     expect(labels(host)).toEqual(['Ship direct DOM'])
+    expect(host.querySelector('.todo-list')?.getAttribute('data-visible-count')).toBe('1')
     host.querySelector<HTMLButtonElement>('[data-filter="completed"]')?.click()
     expect(labels(host)).toEqual(['Study React Compiler'])
+    expect(host.querySelector('.todo-list')?.getAttribute('data-visible-count')).toBe('1')
 
     host.querySelector('.todo-list label')?.dispatchEvent(
       new MouseEvent('dblclick', { bubbles: true }),

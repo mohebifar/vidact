@@ -7,6 +7,7 @@ declare namespace JSX {
 }
 
 declare module 'react' {
+  export const useRef: typeof import('@vidact/runtime').useRef
   export const useState: typeof import('@vidact/runtime').useState
 }
 

@@ -4,6 +4,7 @@ import {
   combineSources,
   compiledEvent,
   compiledRoot,
+  createCompiledProp,
   createCompiledScope,
   createCompiledState,
   type DirectComponent,
@@ -207,6 +208,27 @@ describe('compiled DOM corpus', () => {
     mounted.dispose()
   })
 
+  it('fails loudly when updater feedback cycles across compiled scopes', () => {
+    const valueSource = source(0)
+    const firstScope = createCompiledScope()
+    const secondScope = createCompiledScope()
+    const first = createCompiledState(firstScope, valueSource, 0)
+    const second = createCompiledState(secondScope, valueSource, 0)
+    firstScope.add({
+      reads: valueSource,
+      run: () => second.set(second.get() + 1),
+    })
+    secondScope.add({
+      reads: valueSource,
+      run: () => first.set(first.get() + 1),
+    })
+
+    expect(() => first.set(1)).toThrow(/did not stabilize/i)
+
+    firstScope.dispose()
+    secondScope.dispose()
+  })
+
   it('updates same-key records through item slots without replacing their DOM', () => {
     const itemsSource = source(0)
     const prefixSource = source(1)
@@ -277,13 +299,18 @@ describe('compiled DOM corpus', () => {
   it('mounts a compiler-owned block through props exactly once', () => {
     const itemsSource = source(0)
     const itemSource = source(0)
+    const rowsSource = source(0)
     let setItems!: ReturnType<typeof createCompiledState<readonly Item[]>>['set']
     const host = document.createElement('div')
-    const List: DirectComponent = (props): Node => h(
-      'ul',
-      null,
-      props.rows as ReturnType<typeof keyed<Item, number>>,
-    )
+    const List: DirectComponent = (props): Node => {
+      const scope = createCompiledScope()
+      const rows = createCompiledProp(scope, rowsSource, props.rows)
+      return compiledRoot(scope, () => h(
+        'ul',
+        null,
+        binding(scope, rowsSource, rows.get),
+      ))
+    }
     const mounted = mountCompiled(() => {
       const scope = createCompiledScope()
       const items = createCompiledState<readonly Item[]>(scope, itemsSource, [
@@ -363,5 +390,290 @@ describe('compiled DOM corpus', () => {
     expect(removedUpdaterRuns).toBe(0)
     expect(host.textContent).toBe('two')
     mounted.dispose()
+  })
+
+  it('bridges parent bindings into owned child prop slots and disposes them with the branch', () => {
+    const labelSource = source(0)
+    const visibleSource = source(1)
+    const childLabelSource = source(0)
+    let setLabel!: ReturnType<typeof createCompiledState<string>>['set']
+    let setVisible!: ReturnType<typeof createCompiledState<boolean>>['set']
+    let childUpdates = 0
+    let childRefCleanups = 0
+    const host = document.createElement('div')
+    const Child: DirectComponent = (props): Node => {
+      const scope = createCompiledScope()
+      const label = createCompiledProp(scope, childLabelSource, props.label)
+      scope.add({
+        reads: childLabelSource,
+        run: () => { childUpdates += 1 },
+      })
+      return compiledRoot(scope, () => h(
+        'strong',
+        { ref: () => () => { childRefCleanups += 1 } },
+        binding(scope, childLabelSource, label.get),
+      ))
+    }
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const label = createCompiledState(scope, labelSource, 'one')
+      const visible = createCompiledState(scope, visibleSource, true)
+      setLabel = label.set
+      setVisible = visible.set
+      return compiledRoot(scope, () => h(
+        'section',
+        null,
+        when(scope, visibleSource, visible.get, () => h(Child, {
+          label: binding(scope, labelSource, label.get),
+        })),
+      ))
+    }, host)
+
+    setLabel('two')
+    expect(host.querySelector('strong')?.textContent).toBe('two')
+    expect(childUpdates).toBe(1)
+
+    setVisible(false)
+    setLabel('three')
+    expect(host.querySelector('strong')).toBeNull()
+    expect(childUpdates).toBe(1)
+    expect(childRefCleanups).toBe(1)
+
+    mounted.dispose()
+  })
+
+  it('applies destructuring-style defaults when a reactive prop becomes undefined', () => {
+    const parentSource = source(0)
+    const childSource = source(0)
+    let setLabel!: ReturnType<typeof createCompiledState<string | undefined>>['set']
+    const host = document.createElement('div')
+    const Child: DirectComponent = (props): Node => {
+      const scope = createCompiledScope()
+      const label = createCompiledProp(
+        scope,
+        childSource,
+        props.label as string | undefined,
+        () => 'fallback',
+      )
+      return compiledRoot(scope, () => h('p', null, binding(scope, childSource, label.get)))
+    }
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const label = createCompiledState<string | undefined>(scope, parentSource, undefined)
+      setLabel = label.set
+      return compiledRoot(scope, () => h(Child, {
+        label: binding(scope, parentSource, label.get),
+      }))
+    }, host)
+
+    expect(host.textContent).toBe('fallback')
+    setLabel('provided')
+    expect(host.textContent).toBe('provided')
+    setLabel(undefined)
+    expect(host.textContent).toBe('fallback')
+
+    mounted.dispose()
+  })
+
+  it('flushes multiple parent prop bridges as one child transaction', () => {
+    const firstParentSource = source(0)
+    const secondParentSource = source(1)
+    const firstChildSource = source(0)
+    const secondChildSource = source(1)
+    let setBoth!: (first: string, second: string) => void
+    const observed: string[] = []
+    const host = document.createElement('div')
+    const Child: DirectComponent = (props): Node => {
+      const scope = createCompiledScope()
+      const first = createCompiledProp(scope, firstChildSource, props.first)
+      const second = createCompiledProp(scope, secondChildSource, props.second)
+      scope.add({
+        reads: combineSources(firstChildSource, secondChildSource),
+        run: () => { observed.push(`${first.get()}:${second.get()}`) },
+      })
+      return compiledRoot(scope, () => h(
+        'p',
+        null,
+        binding(
+          scope,
+          combineSources(firstChildSource, secondChildSource),
+          () => `${first.get()}:${second.get()}`,
+        ),
+      ))
+    }
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const first = createCompiledState(scope, firstParentSource, 'one')
+      const second = createCompiledState(scope, secondParentSource, 'two')
+      setBoth = (nextFirst, nextSecond) => scope.batch(() => {
+        first.set(nextFirst)
+        second.set(nextSecond)
+      })
+      return compiledRoot(scope, () => h(Child, {
+        first: binding(scope, firstParentSource, first.get),
+        second: binding(scope, secondParentSource, second.get),
+      }))
+    }, host)
+
+    setBoth('ONE', 'TWO')
+
+    expect(observed).toEqual(['ONE:TWO'])
+    expect(host.textContent).toBe('ONE:TWO')
+    mounted.dispose()
+  })
+
+  it('disposes scopes created by a child that throws during construction', () => {
+    const labelSource = source(0)
+    const visibleSource = source(1)
+    const childLabelSource = source(0)
+    let setLabel!: ReturnType<typeof createCompiledState<string>>['set']
+    let setVisible!: ReturnType<typeof createCompiledState<boolean>>['set']
+    let leakedUpdates = 0
+    const host = document.createElement('div')
+    const BrokenChild: DirectComponent = (props): Node => {
+      const scope = createCompiledScope()
+      createCompiledProp(scope, childLabelSource, props.label)
+      scope.add({
+        reads: childLabelSource,
+        run: () => { leakedUpdates += 1 },
+      })
+      return compiledRoot(scope, () => { throw new Error('child failed') })
+    }
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const label = createCompiledState(scope, labelSource, 'one')
+      const visible = createCompiledState(scope, visibleSource, false)
+      setLabel = label.set
+      setVisible = visible.set
+      return compiledRoot(scope, () => h('section', null, when(
+        scope,
+        visibleSource,
+        visible.get,
+        () => h(BrokenChild, { label: binding(scope, labelSource, label.get) }),
+      )))
+    }, host)
+
+    expect(() => setVisible(true)).toThrow('child failed')
+    setLabel('two')
+
+    expect(leakedUpdates).toBe(0)
+    expect(host.querySelector('section')?.textContent).toBe('')
+    mounted.dispose()
+  })
+
+  it('updates reactive arrays, nodes, and empty values inside stable binding ranges', () => {
+    const valueSource = source(0)
+    let setValue!: ReturnType<typeof createCompiledState<unknown>>['set']
+    const host = document.createElement('div')
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const value = createCompiledState<unknown>(scope, valueSource, 0)
+      setValue = value.set
+      return compiledRoot(scope, () => h(
+        'div',
+        null,
+        h('i', null, 'before'),
+        binding(scope, valueSource, value.get),
+        h('i', null, 'after'),
+      ))
+    }, host)
+
+    setValue(['a', 0, null, false, ['b']])
+    expect(host.textContent).toBe('beforea0bafter')
+
+    const node = document.createElement('em')
+    node.textContent = 'node'
+    setValue(node)
+    expect(host.querySelector('em')).toBe(node)
+    expect(host.textContent).toBe('beforenodeafter')
+
+    expect(() => setValue([node, { type: 'foreign-element' }])).toThrow(
+      /unsupported compiled child/i,
+    )
+    expect(host.querySelector('em')).toBe(node)
+    expect(host.textContent).toBe('beforenodeafter')
+
+    setValue(null)
+    expect(host.textContent).toBe('beforeafter')
+
+    expect(() => setValue({ type: 'foreign-element' })).toThrow(/unsupported compiled child/i)
+    expect(host.textContent).toBe('beforeafter')
+    setValue(['recovered'])
+    expect(host.textContent).toBe('beforerecoveredafter')
+
+    mounted.dispose()
+  })
+
+  it('attaches refs on committed keyed records before propagating cleanup errors', () => {
+    const itemsSource = source(0)
+    let setItems!: ReturnType<typeof createCompiledState<readonly number[]>>['set']
+    let secondAttachments = 0
+    const host = document.createElement('div')
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const items = createCompiledState<readonly number[]>(scope, itemsSource, [1])
+      setItems = items.set
+      return compiledRoot(scope, () => h('div', null, keyed(
+        scope,
+        itemsSource,
+        items.get,
+        (item) => item,
+        (item) => h('button', {
+          'data-id': item.get(),
+          ref: item.get() === 1
+            ? () => () => { throw new Error('row cleanup failed') }
+            : (element: Element | null) => {
+                if (element !== null) secondAttachments += 1
+              },
+        }, item.get()),
+      )))
+    }, host)
+
+    expect(() => setItems([2])).toThrow('row cleanup failed')
+
+    expect(host.querySelector('[data-id="2"]')?.textContent).toBe('2')
+    expect(secondAttachments).toBe(1)
+    mounted.dispose()
+  })
+
+  it('attaches object and callback refs and cleans them with the compiled owner', () => {
+    const objectRef: { current: HTMLInputElement | null } = { current: null }
+    let attached: HTMLButtonElement | null = null
+    let callbackCleanups = 0
+    const host = document.createElement('div')
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      return compiledRoot(scope, () => h(
+        'section',
+        null,
+        h('input', { ref: objectRef }),
+        h('button', {
+          ref: (node: HTMLButtonElement) => {
+            attached = node
+            return () => { callbackCleanups += 1 }
+          },
+        }, 'action'),
+      ))
+    }, host)
+
+    expect(objectRef.current).toBe(host.querySelector('input'))
+    expect(attached).toBe(host.querySelector('button'))
+
+    mounted.dispose()
+    expect(objectRef.current).toBeNull()
+    expect(callbackCleanups).toBe(1)
+  })
+
+  it('removes the compiled root even when ref cleanup throws', () => {
+    const host = document.createElement('div')
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      return compiledRoot(scope, () => h('button', {
+        ref: () => () => { throw new Error('cleanup failed') },
+      }, 'action'))
+    }, host)
+
+    expect(() => mounted.dispose()).toThrow('cleanup failed')
+    expect(host.childNodes).toHaveLength(0)
   })
 })

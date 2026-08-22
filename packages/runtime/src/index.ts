@@ -25,15 +25,18 @@ export {
   Fragment,
   h,
   mount,
+  useRef,
   useState,
   type DirectChild,
   type DirectComponent,
   type DirectProps,
+  type MutableRef,
 } from './direct-dom.ts'
 export {
   binding,
   compiledEvent,
   compiledRoot,
+  createCompiledProp,
   createCompiledScope,
   createCompiledState,
   keyed,

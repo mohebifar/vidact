@@ -13,7 +13,8 @@ export interface KeyedListOptions<T, K> {
 
 export interface KeyedList<T> {
   readonly dispose: () => void
-  readonly update: (values: readonly T[]) => void
+  readonly parent: () => Node | null
+  readonly update: (values: readonly T[]) => readonly Node[]
 }
 
 interface RecordState<T, K> {
@@ -36,8 +37,12 @@ export function createKeyedList<T, K>(
   let disposed = false
   let records: readonly RecordState<T, K>[] = []
 
-  const update = (values: readonly T[]): void => {
+  const update = (values: readonly T[]): readonly Node[] => {
     if (disposed) throw new Error('cannot update a disposed keyed list')
+    const currentParent = end.parentNode
+    if (currentParent === null || start.parentNode !== currentParent) {
+      throw new Error('cannot update a detached keyed list')
+    }
 
     const keys = values.map(options.key)
     assertUniqueKeys(keys)
@@ -64,37 +69,41 @@ export function createKeyedList<T, K>(
       })
       for (const { record, value, index } of retained) record.update?.(value, index)
     } catch (error) {
-      disposeRecords(parent, created)
+      disposeRecords(currentParent, created)
       throw error
     }
 
-    const cleanup = disposeRecords(parent, previousByKey.values())
+    const cleanup = disposeRecords(currentParent, previousByKey.values())
 
     let cursor: Node = end
     for (let recordIndex = nextRecords.length - 1; recordIndex >= 0; recordIndex -= 1) {
       const record = nextRecords[recordIndex] as RecordState<T, K>
       for (let nodeIndex = record.nodes.length - 1; nodeIndex >= 0; nodeIndex -= 1) {
         const node = record.nodes[nodeIndex] as Node
-        if (node.nextSibling !== cursor) parent.insertBefore(node, cursor)
+        if (node.nextSibling !== cursor) currentParent.insertBefore(node, cursor)
         cursor = node
       }
     }
 
     records = nextRecords
     if (cleanup.failed) throw cleanup.error
+    return created.flatMap((record) => record.nodes)
   }
 
   const dispose = (): void => {
     if (disposed) return
     disposed = true
-    const cleanup = disposeRecords(parent, records)
+    const currentParent = end.parentNode
+    const cleanup = currentParent === null
+      ? { error: undefined, failed: false }
+      : disposeRecords(currentParent, records)
     records = []
     start.remove()
     end.remove()
     if (cleanup.failed) throw cleanup.error
   }
 
-  return { dispose, update }
+  return { dispose, parent: () => end.parentNode, update }
 }
 
 function assertUniqueKeys<K>(keys: readonly K[]): void {

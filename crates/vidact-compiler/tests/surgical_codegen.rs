@@ -98,3 +98,88 @@ fn compiles_keyed_item_and_parent_reads_into_separate_static_domains() {
         "{output}"
     );
 }
+
+#[test]
+fn compiles_static_component_props_into_local_updater_slots() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "Greeting.tsx",
+        source: r#"
+            export function Greeting({ name = 'world' }): Node {
+                return <p title={name}>Hello {name}</p>;
+            }
+        "#,
+    })
+    .expect("prop-only components need the compiled component ABI");
+
+    assert!(
+        output.contains("createCompiledProp as __vidactCreateProp"),
+        "{output}"
+    );
+    assert!(output.contains("name = __vidactCreateProp("), "{output}");
+    assert!(output.contains("() => \"world\""), "{output}");
+    assert!(output.contains("() => name.get()"), "{output}");
+    assert!(output.contains("__vidactCompiledRoot("), "{output}");
+    assert!(output.contains("__vidactBinding("), "{output}");
+}
+
+#[test]
+fn rejects_defaulted_prop_derivations_missing_from_data_flow_analysis() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "Greeting.tsx",
+        source: r#"
+            export function Greeting({ name = 'world' }): Node {
+                const upper = name.toUpperCase();
+                return <p>{upper}</p>;
+            }
+        "#,
+    })
+    .expect_err("untracked derived props would otherwise become mount-time snapshots");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic
+                .message
+                .contains("absent from compiler data-flow")
+    }));
+}
+
+#[test]
+fn rejects_component_returns_that_bypass_the_compiled_root() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "Early.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function Early(): Node {
+                const [ready, setReady] = useState(false);
+                if (!ready) return <button onClick={() => setReady(true)}>load</button>;
+                return <p>ready</p>;
+            }
+        "#,
+    })
+    .expect_err("every accepted return path must pass through compiledRoot");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.message.contains("one top-level return")
+    }));
+}
+
+#[test]
+fn rejects_reactive_jsx_spreads_instead_of_capturing_a_mount_snapshot() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "Spread.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function Spread(): Node {
+                const [attributes, setAttributes] = useState({ title: 'first' });
+                return <div {...attributes}>value</div>;
+            }
+        "#,
+    })
+    .expect_err("reactive spreads need deletion-aware updater semantics");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.message.contains("reactive JSX spreads")
+    }));
+}

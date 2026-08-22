@@ -197,6 +197,24 @@ pub(super) fn variable_statement<'a>(
     ))
 }
 
+pub(super) fn assignment_statement<'a>(
+    ast: &AstBuilder<'a>,
+    name: &str,
+    value: Expression<'a>,
+) -> Statement<'a> {
+    Statement::new_expression_statement(
+        SPAN,
+        Expression::new_assignment_expression(
+            SPAN,
+            oxc_syntax::operator::AssignmentOperator::Assign,
+            AssignmentTarget::new_assignment_target_identifier(SPAN, atom(ast, name), ast),
+            value,
+            ast,
+        ),
+        ast,
+    )
+}
+
 pub(super) fn atom<'a>(ast: &AstBuilder<'a>, value: &str) -> &'a str {
     ast.allocator().alloc_str(value)
 }

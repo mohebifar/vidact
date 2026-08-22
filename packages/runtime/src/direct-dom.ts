@@ -2,8 +2,11 @@ import type { StateUpdate } from './state-slot.ts'
 import {
   isCompiledBinding,
   isStructuralBinding,
+  adoptCompiledRoot,
+  constructCompiledComponent,
   mountCompiledBinding,
   mountCompiledProp,
+  queueElementRef,
   type CompiledBinding,
   type StructuralBinding,
 } from './compiled.ts'
@@ -21,6 +24,10 @@ export type DirectChild =
   | StructuralBinding
 export type DirectProps = Record<string, unknown> | null
 export type DirectComponent = (props: Record<string, unknown>) => Node
+
+export interface MutableRef<T> {
+  current: T
+}
 
 export const Fragment = Symbol('Vidact.Fragment')
 
@@ -59,7 +66,9 @@ export function h(
     return fragment
   }
   if (typeof type === 'function') {
-    return type({ ...(props ?? {}), children })
+    const root = constructCompiledComponent(() => type({ ...(props ?? {}), children }))
+    adoptCompiledRoot(root)
+    return root
   }
 
   const element = document.createElement(type)
@@ -92,6 +101,18 @@ export function useState<T>(initialValue: T | (() => T)): [T, (update: StateUpda
   }
 
   return [hook.value as T, setValue]
+}
+
+export function useRef<T>(initialValue: T): MutableRef<T> {
+  const instance = activeInstance
+  if (instance === null) return { current: initialValue }
+
+  const index = instance.cursor
+  instance.cursor += 1
+  const existing = instance.hooks[index]
+  const hook: StateHook = existing ?? { value: { current: initialValue } }
+  if (existing === undefined) instance.hooks.push(hook)
+  return hook.value as MutableRef<T>
 }
 
 export function mount(component: () => Node, host: ParentNode): { dispose: () => void } {
@@ -159,6 +180,13 @@ function applyProps(element: HTMLElement, props: DirectProps): void {
   if (props === null) return
   for (const [name, value] of Object.entries(props)) {
     if (name === 'key' || value === null || value === undefined) continue
+    if (name === 'ref') {
+      if (isCompiledBinding(value)) {
+        throw new Error('reactive ref identities are not supported')
+      }
+      queueElementRef(element, value)
+      continue
+    }
     if (isCompiledBinding(value)) {
       mountCompiledProp(value, (next) => applyProp(element, name, next))
       continue
@@ -228,6 +256,9 @@ function appendChild(parent: Node, child: DirectChild): void {
   if (child instanceof Node) {
     parent.appendChild(child)
     return
+  }
+  if (typeof child === 'object' || typeof child === 'function' || typeof child === 'symbol') {
+    throw new TypeError('unsupported direct child value; expected a DOM node or owned block')
   }
   parent.appendChild(document.createTextNode(String(child)))
 }

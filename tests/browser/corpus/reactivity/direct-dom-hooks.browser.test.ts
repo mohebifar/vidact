@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Fragment, h, mount, useState } from '@vidact/runtime'
+import { Fragment, h, mount, useRef, useState } from '@vidact/runtime'
 
 describe('direct DOM compatibility runtime', () => {
   it('flattens array children without constructing a virtual tree', () => {
@@ -38,6 +38,25 @@ describe('direct DOM compatibility runtime', () => {
 
     mounted.dispose()
     expect(host.childNodes).toHaveLength(0)
+  })
+
+  it('keeps a ref cell stable across compatibility-runtime rerenders', () => {
+    const host = document.createElement('div')
+    const seen: Array<{ current: number }> = []
+
+    function Counter(): Node {
+      const [count, setCount] = useState(0)
+      const ref = useRef(count)
+      seen.push(ref)
+      return h('button', { onClick: () => setCount(count + 1) }, count)
+    }
+
+    const mounted = mount(Counter, host)
+    host.querySelector('button')?.click()
+
+    expect(seen).toHaveLength(2)
+    expect(seen[1]).toBe(seen[0])
+    mounted.dispose()
   })
 
   it('maps React double-click handlers to the native dblclick event', () => {

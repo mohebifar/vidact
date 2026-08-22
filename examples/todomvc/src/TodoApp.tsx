@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { TodoList } from './TodoList.tsx'
 
 interface Todo {
@@ -12,6 +12,7 @@ type Filter = 'all' | 'active' | 'completed'
 const FILTERS: readonly Filter[] = ['all', 'active', 'completed']
 
 export function TodoApp(): Node {
+  const newTodoRef = useRef<HTMLInputElement | null>(null)
   const [todos, setTodos] = useState<Todo[]>([])
   const [filter, setFilter] = useState<Filter>('all')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -25,8 +26,7 @@ export function TodoApp(): Node {
 
   const addTodo = (event: SubmitEvent): void => {
     event.preventDefault()
-    const form = event.currentTarget as HTMLFormElement
-    const input = form.elements.namedItem('title') as HTMLInputElement | null
+    const input = newTodoRef.current
     const title = input?.value.trim() ?? ''
     if (title === '') return
     setTodos((current) => [
@@ -75,6 +75,7 @@ export function TodoApp(): Node {
         <form className="todo-form" onSubmit={addTodo}>
           <input
             className="new-todo"
+            ref={newTodoRef}
             name="title"
             placeholder="What needs to be done?"
             aria-label="New todo title"
@@ -97,6 +98,7 @@ export function TodoApp(): Node {
           />
           <label htmlFor="toggle-all">Mark all as complete</label>
           <TodoList
+            visibleCount={visibleTodos.length}
             rows={visibleTodos.map((todo) => (
               <li
                 key={todo.id}

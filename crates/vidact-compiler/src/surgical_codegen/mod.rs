@@ -8,13 +8,15 @@ use oxc_ast::{ast::*, builder::AstBuilder};
 use oxc_ast_visit::{
     Visit, VisitMut,
     walk::walk_call_expression,
-    walk_mut::{walk_expression as walk_expression_mut, walk_jsx_attribute},
+    walk_mut::{
+        walk_expression as walk_expression_mut, walk_jsx_attribute, walk_jsx_spread_attribute,
+    },
 };
 use oxc_codegen::Codegen;
 use oxc_parser::Parser;
 use oxc_semantic::{Scoping, SemanticBuilder};
 use oxc_span::{SPAN, SourceType};
-use oxc_syntax::{operator::LogicalOperator, symbol::SymbolId};
+use oxc_syntax::{operator::LogicalOperator, scope::ScopeFlags, symbol::SymbolId};
 
 use crate::{
     Diagnostic, DiagnosticCode,
@@ -32,6 +34,7 @@ const BINDING: &str = "__vidactBinding";
 const COMBINE_SOURCES: &str = "__vidactCombineSources";
 const COMPILED_EVENT: &str = "__vidactEvent";
 const COMPILED_ROOT: &str = "__vidactCompiledRoot";
+const CREATE_PROP: &str = "__vidactCreateProp";
 const CREATE_SCOPE: &str = "__vidactCreateScope";
 const CREATE_STATE: &str = "__vidactCreateState";
 const KEYED: &str = "__vidactKeyed";
@@ -78,12 +81,6 @@ pub fn compile_surgical_module_with_ir(
         .pop()
         .ok_or_else(|| vec![unsupported("surgical codegen found no component")])?;
     let ir = lower_component(facts).map_err(|diagnostic| vec![diagnostic])?;
-    if !input.source.contains("useState") {
-        return Ok(SurgicalCompilation {
-            code: input.source.to_string(),
-            component: ir,
-        });
-    }
     let scoping = semantic.semantic.into_scoping();
     transform_program(&allocator, &scoping, &ir, &mut parsed.program)
         .map_err(|diagnostic| vec![diagnostic])?;
@@ -106,6 +103,7 @@ fn transform_program<'a>(
         COMBINE_SOURCES,
         COMPILED_EVENT,
         COMPILED_ROOT,
+        CREATE_PROP,
         CREATE_SCOPE,
         CREATE_STATE,
         KEYED,
@@ -123,22 +121,39 @@ fn transform_program<'a>(
             )));
         }
     }
-    let function = component_function_mut(program, &ir.name)
-        .ok_or_else(|| unsupported(format!("could not find component function {}", ir.name)))?;
-    let body = function
-        .body
-        .as_deref_mut()
-        .ok_or_else(|| unsupported("compiled component has no body"))?;
-
     let source_ids = ir
         .sources
         .iter()
         .map(|source| (source.name.as_str(), source.id))
         .collect::<BTreeMap<_, _>>();
+    let prop_sources = ir
+        .sources
+        .iter()
+        .filter(|source| source.kind == SourceKind::Prop)
+        .map(|source| source.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let function = component_function_mut(program, &ir.name)
+        .ok_or_else(|| unsupported(format!("could not find component function {}", ir.name)))?;
+    let prop_bindings = prop_binding_symbols(function, &source_ids, &prop_sources, allocator)?;
+    let body = function
+        .body
+        .as_deref_mut()
+        .ok_or_else(|| unsupported("compiled component has no body"))?;
+    validate_component_returns(body)?;
     let mut source_symbols = BTreeMap::<SymbolId, SourceId>::new();
     let mut state_symbols = BTreeMap::<SymbolId, StateReference<'a>>::new();
     let (item_source_symbols, item_state_symbols) = item_parameters(body, &ast);
     state_symbols.extend(item_state_symbols);
+    for prop in &prop_bindings {
+        source_symbols.insert(prop.symbol, prop.source);
+        state_symbols.insert(
+            prop.symbol,
+            StateReference {
+                state_name: ast.allocator().alloc_str(&prop.name),
+                setter: false,
+            },
+        );
+    }
 
     for statement in &body.statements {
         let Statement::VariableDeclaration(declaration) = statement else {
@@ -170,6 +185,8 @@ fn transform_program<'a>(
         }
     }
 
+    reject_untracked_derived_bindings(body, scoping, &source_symbols, &item_source_symbols)?;
+
     for statement in &mut body.statements {
         let Statement::VariableDeclaration(declaration) = statement else {
             continue;
@@ -193,6 +210,21 @@ fn transform_program<'a>(
 
     let mut inserted = oxc_allocator::Vec::new_in(&ast);
     inserted.push(scope_statement(&ast));
+    inserted.extend(prop_bindings.iter().map(|prop| {
+        let mut arguments = vec![
+            ident(&ast, SCOPE),
+            call_name(&ast, SOURCE, [number(&ast, prop.source.get())]),
+            ident(&ast, &prop.name),
+        ];
+        if let Some(default) = &prop.default {
+            arguments.push(arrow_expression(
+                &ast,
+                [],
+                default.clone_in_with_semantic_ids(allocator),
+            ));
+        }
+        assignment_statement(&ast, &prop.name, call_name(&ast, CREATE_PROP, arguments))
+    }));
     inserted.extend(body.statements.drain(..));
     body.statements = inserted;
 
@@ -258,6 +290,13 @@ struct StateBinding<'a> {
     name: &'a str,
     symbol: SymbolId,
     source: SourceId,
+}
+
+struct PropBinding<'a> {
+    name: String,
+    symbol: SymbolId,
+    source: SourceId,
+    default: Option<Expression<'a>>,
 }
 
 #[derive(Clone, Copy)]
@@ -423,6 +462,9 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             }
             return;
         }
+        if name.name == "ref" {
+            return;
+        }
         if is_event_attribute(name.name.as_str()) {
             if let Some(JSXAttributeValue::ExpressionContainer(container)) = &mut attribute.value
                 && let Some(expression) = container.expression.as_expression_mut()
@@ -435,6 +477,22 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             return;
         }
         walk_jsx_attribute(self, attribute);
+    }
+
+    fn visit_jsx_spread_attribute(&mut self, attribute: &mut JSXSpreadAttribute<'a>) {
+        let reads = dependencies(
+            &attribute.argument,
+            self.scoping,
+            self.source_symbols,
+            self.item_source_symbols,
+        );
+        if !reads.is_empty() {
+            self.diagnostic = Some(unsupported(
+                "reactive JSX spreads are unsupported until spread deletion semantics are implemented",
+            ));
+            return;
+        }
+        walk_jsx_spread_attribute(self, attribute);
     }
 
     fn visit_jsx_expression_container(&mut self, container: &mut JSXExpressionContainer<'a>) {
@@ -532,6 +590,143 @@ fn is_event_attribute(name: &str) -> bool {
     name.strip_prefix("on")
         .and_then(|suffix| suffix.chars().next())
         .is_some_and(|first| first.is_ascii_uppercase())
+}
+
+fn prop_binding_symbols<'a>(
+    function: &Function<'a>,
+    sources: &BTreeMap<&str, SourceId>,
+    prop_sources: &BTreeSet<&str>,
+    allocator: &'a Allocator,
+) -> Result<Vec<PropBinding<'a>>, Diagnostic> {
+    let mut bindings = Vec::new();
+    for parameter in &function.params.items {
+        let BindingPattern::ObjectPattern(pattern) = &parameter.pattern else {
+            continue;
+        };
+        if pattern.rest.is_some() {
+            return Err(unsupported(
+                "rest props are unsupported until the compiled prop store models deletion",
+            ));
+        }
+        for property in &pattern.properties {
+            if property.computed {
+                return Err(unsupported("computed prop destructuring is unsupported"));
+            }
+            let Some(prop_name) = property.key.static_name() else {
+                return Err(unsupported("dynamic prop destructuring is unsupported"));
+            };
+            if !prop_sources.contains(prop_name.as_ref()) {
+                continue;
+            }
+            let (identifier, default) = match &property.value {
+                BindingPattern::BindingIdentifier(identifier) => (identifier.as_ref(), None),
+                BindingPattern::AssignmentPattern(assignment) => {
+                    let BindingPattern::BindingIdentifier(identifier) = &assignment.left else {
+                        return Err(unsupported("nested prop defaults are unsupported"));
+                    };
+                    (
+                        identifier.as_ref(),
+                        Some(assignment.right.clone_in_with_semantic_ids(allocator)),
+                    )
+                }
+                _ => return Err(unsupported("nested prop destructuring is unsupported")),
+            };
+            if identifier.name.as_str() != prop_name.as_ref() {
+                return Err(unsupported("aliased prop destructuring is unsupported"));
+            }
+            let Some(source) = sources.get(prop_name.as_ref()).copied() else {
+                return Err(analysis_error(format!(
+                    "prop {prop_name} is absent from analysis"
+                )));
+            };
+            let symbol = identifier.symbol_id.get().ok_or_else(|| {
+                analysis_error(format!("prop {prop_name} has no semantic symbol"))
+            })?;
+            bindings.push(PropBinding {
+                name: identifier.name.to_string(),
+                symbol,
+                source,
+                default,
+            });
+        }
+    }
+    if bindings.len() != prop_sources.len() {
+        return Err(unsupported(
+            "compiled props currently require direct object destructuring in the component parameter",
+        ));
+    }
+    Ok(bindings)
+}
+
+fn validate_component_returns(body: &FunctionBody<'_>) -> Result<(), Diagnostic> {
+    let direct_returns = body
+        .statements
+        .iter()
+        .filter(|statement| matches!(statement, Statement::ReturnStatement(_)))
+        .count();
+    let mut nested = NestedReturnFinder::default();
+    for statement in &body.statements {
+        if !matches!(statement, Statement::ReturnStatement(_)) {
+            nested.visit_statement(statement);
+        }
+    }
+    if direct_returns != 1 || nested.found {
+        return Err(unsupported(
+            "compiled components currently require exactly one top-level return statement",
+        ));
+    }
+    Ok(())
+}
+
+fn reject_untracked_derived_bindings(
+    body: &FunctionBody<'_>,
+    scoping: &Scoping,
+    source_symbols: &BTreeMap<SymbolId, SourceId>,
+    item_source_symbols: &BTreeMap<SymbolId, SourceId>,
+) -> Result<(), Diagnostic> {
+    for statement in &body.statements {
+        let Statement::VariableDeclaration(declaration) = statement else {
+            continue;
+        };
+        for declarator in &declaration.declarations {
+            let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+                continue;
+            };
+            let Some(symbol) = identifier.symbol_id.get() else {
+                continue;
+            };
+            if source_symbols.contains_key(&symbol) {
+                continue;
+            }
+            let Some(initializer) = &declarator.init else {
+                continue;
+            };
+            let reads =
+                immediate_dependencies(initializer, scoping, source_symbols, item_source_symbols);
+            if !reads.is_empty() {
+                return Err(unsupported(format!(
+                    "reactive local {} is absent from compiler data-flow analysis",
+                    identifier.name
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+struct NestedReturnFinder {
+    found: bool,
+}
+
+impl<'a> Visit<'a> for NestedReturnFinder {
+    fn visit_return_statement(&mut self, _statement: &ReturnStatement<'a>) {
+        self.found = true;
+    }
+
+    fn visit_function(&mut self, _function: &Function<'a>, _flags: ScopeFlags) {}
+
+    fn visit_arrow_function_expression(&mut self, _function: &ArrowFunctionExpression<'a>) {}
 }
 
 #[derive(Default)]
@@ -645,6 +840,13 @@ struct DependencyFinder<'s> {
     reads: DependencyReads,
 }
 
+struct ImmediateDependencyFinder<'s> {
+    scoping: &'s Scoping,
+    source_symbols: &'s BTreeMap<SymbolId, SourceId>,
+    item_source_symbols: &'s BTreeMap<SymbolId, SourceId>,
+    reads: DependencyReads,
+}
+
 impl<'a> Visit<'a> for DependencyFinder<'_> {
     fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
         let Some(reference) = identifier.reference_id.get() else {
@@ -662,6 +864,27 @@ impl<'a> Visit<'a> for DependencyFinder<'_> {
     }
 }
 
+impl<'a> Visit<'a> for ImmediateDependencyFinder<'_> {
+    fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
+        let Some(reference) = identifier.reference_id.get() else {
+            return;
+        };
+        let Some(symbol) = self.scoping.get_reference(reference).symbol_id() else {
+            return;
+        };
+        if let Some(source) = self.source_symbols.get(&symbol) {
+            self.reads.parent.insert(*source);
+        }
+        if let Some(source) = self.item_source_symbols.get(&symbol) {
+            self.reads.item.insert(*source);
+        }
+    }
+
+    fn visit_function(&mut self, _function: &Function<'a>, _flags: ScopeFlags) {}
+
+    fn visit_arrow_function_expression(&mut self, _function: &ArrowFunctionExpression<'a>) {}
+}
+
 fn dependencies(
     expression: &Expression<'_>,
     scoping: &Scoping,
@@ -669,6 +892,22 @@ fn dependencies(
     item_source_symbols: &BTreeMap<SymbolId, SourceId>,
 ) -> DependencyReads {
     let mut finder = DependencyFinder {
+        scoping,
+        source_symbols,
+        item_source_symbols,
+        reads: DependencyReads::default(),
+    };
+    finder.visit_expression(expression);
+    finder.reads
+}
+
+fn immediate_dependencies(
+    expression: &Expression<'_>,
+    scoping: &Scoping,
+    source_symbols: &BTreeMap<SymbolId, SourceId>,
+    item_source_symbols: &BTreeMap<SymbolId, SourceId>,
+) -> DependencyReads {
+    let mut finder = ImmediateDependencyFinder {
         scoping,
         source_symbols,
         item_source_symbols,
@@ -834,6 +1073,7 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>) -> Statement<'a> {
         ("combineSources", COMBINE_SOURCES),
         ("compiledEvent", COMPILED_EVENT),
         ("compiledRoot", COMPILED_ROOT),
+        ("createCompiledProp", CREATE_PROP),
         ("createCompiledScope", CREATE_SCOPE),
         ("createCompiledState", CREATE_STATE),
         ("keyed", KEYED),
