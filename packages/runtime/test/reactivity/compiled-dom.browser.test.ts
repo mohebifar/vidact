@@ -37,7 +37,7 @@ describe('compiled DOM corpus', () => {
     let componentRuns = 0
     const second = { id: 2, label: 'two' }
 
-    const Component = (): Node => {
+    const Component = () => {
       componentRuns += 1
       const scope = createCompiledScope()
       const count = createCompiledState(scope, countSource, 0)
@@ -397,7 +397,7 @@ describe('compiled DOM corpus', () => {
     const rowsSource = source(0)
     let setItems!: ReturnType<typeof createCompiledState<readonly Item[]>>['set']
     const host = document.createElement('div')
-    const List: DirectComponent = (props): Node => {
+    const List: DirectComponent = (props) => {
       const scope = createCompiledScope()
       const rows = createCompiledProp(scope, rowsSource, props.rows)
       return compiledRoot(scope, () => h('ul', null, binding(scope, rowsSource, rows.get)))
@@ -505,7 +505,7 @@ describe('compiled DOM corpus', () => {
     let childUpdates = 0
     let childRefCleanups = 0
     const host = document.createElement('div')
-    const Child: DirectComponent = (props): Node => {
+    const Child: DirectComponent = (props) => {
       const scope = createCompiledScope()
       const label = createCompiledProp(scope, childLabelSource, props.label)
       scope.add({
@@ -585,7 +585,7 @@ describe('compiled DOM corpus', () => {
     const childSource = source(0)
     let setLabel!: ReturnType<typeof createCompiledState<string | undefined>>['set']
     const host = document.createElement('div')
-    const Child: DirectComponent = (props): Node => {
+    const Child: DirectComponent = (props) => {
       const scope = createCompiledScope()
       const label = createCompiledProp(
         scope,
@@ -623,7 +623,7 @@ describe('compiled DOM corpus', () => {
     let setBoth!: (first: string, second: string) => void
     const observed: string[] = []
     const host = document.createElement('div')
-    const Child: DirectComponent = (props): Node => {
+    const Child: DirectComponent = (props) => {
       const scope = createCompiledScope()
       const first = createCompiledProp(scope, firstChildSource, props.first)
       const second = createCompiledProp(scope, secondChildSource, props.second)
@@ -677,7 +677,7 @@ describe('compiled DOM corpus', () => {
     let setVisible!: ReturnType<typeof createCompiledState<boolean>>['set']
     let leakedUpdates = 0
     const host = document.createElement('div')
-    const BrokenChild: DirectComponent = (props): Node => {
+    const BrokenChild: DirectComponent = (props) => {
       const scope = createCompiledScope()
       createCompiledProp(scope, childLabelSource, props.label)
       scope.add({

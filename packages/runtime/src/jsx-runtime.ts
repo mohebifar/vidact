@@ -8,7 +8,7 @@ interface JsxProps extends Record<string, unknown> {
 
 export { Fragment }
 
-export function jsx(type: ElementType, props: JsxProps | null, key?: unknown): Node {
+export function jsx(type: ElementType, props: JsxProps | null, key?: unknown): DirectChild {
   const { children, ...attributes } = props ?? {}
   const normalizedChildren = Array.isArray(children) ? children : [children]
   return h(type, key === undefined ? attributes : { ...attributes, key }, ...normalizedChildren)

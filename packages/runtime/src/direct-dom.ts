@@ -23,7 +23,7 @@ export type DirectChild =
   | CompiledBinding<unknown>
   | StructuralBinding
 export type DirectProps = Record<string, unknown> | null
-export type DirectComponent = (props: Record<string, unknown>) => Node
+export type DirectComponent = (props: Record<string, unknown>) => DirectChild
 
 export interface MutableRef<T> {
   current: T
@@ -51,15 +51,25 @@ export function h<Tag extends keyof HTMLElementTagNameMap>(
   ...children: DirectChild[]
 ): HTMLElementTagNameMap[Tag]
 export function h(
-  type: string | typeof Fragment | DirectComponent,
+  type: typeof Fragment,
   props: DirectProps,
   ...children: DirectChild[]
-): Node
+): DocumentFragment
+export function h(
+  type: DirectComponent,
+  props: DirectProps,
+  ...children: DirectChild[]
+): DirectChild
 export function h(
   type: string | typeof Fragment | DirectComponent,
   props: DirectProps,
   ...children: DirectChild[]
-): Node {
+): DirectChild
+export function h(
+  type: string | typeof Fragment | DirectComponent,
+  props: DirectProps,
+  ...children: DirectChild[]
+): DirectChild {
   if (type === Fragment) {
     const fragment = document.createDocumentFragment()
     appendChildren(fragment, children)

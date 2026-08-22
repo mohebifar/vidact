@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-export function CounterApp(): Node {
+export function CounterApp(): JSX.Element {
   const [count, setCount] = useState(0)
   const doubled = count * 2
 

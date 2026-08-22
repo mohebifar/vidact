@@ -8,7 +8,7 @@ interface Member {
   readonly score: number
 }
 
-export function RosterApp(): Node {
+export function RosterApp(): JSX.Element {
   const [members, setMembers] = useState<Member[]>([
     { id: 'ada', name: 'Ada', score: 1 },
     { id: 'grace', name: 'Grace', score: 2 },

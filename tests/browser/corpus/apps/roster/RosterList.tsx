@@ -5,7 +5,7 @@ interface RosterListProps {
   readonly rows: ReactNode
 }
 
-export function RosterList({ count, rows }: RosterListProps): Node {
+export function RosterList({ count, rows }: RosterListProps): JSX.Element {
   return (
     <ul className="roster" data-member-count={count}>
       {rows}

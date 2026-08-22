@@ -12,7 +12,7 @@ type Filter = 'all' | 'active' | 'completed'
 
 const FILTERS: readonly Filter[] = ['all', 'active', 'completed']
 
-export function TodoApp(): Node {
+export function TodoApp(): JSX.Element {
   const newTodoRef = useRef<HTMLInputElement | null>(null)
   const [todos, setTodos] = useState<Todo[]>([])
   const [filter, setFilter] = useState<Filter>('all')

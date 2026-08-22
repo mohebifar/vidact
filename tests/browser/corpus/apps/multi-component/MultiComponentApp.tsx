@@ -1,10 +1,10 @@
 import { useState } from 'react'
 
-function CounterValue({ value }: { value: number }): Node {
+function CounterValue({ value }: { value: number }): JSX.Element {
   return <output data-counter-value>{value}</output>
 }
 
-export function MultiComponentApp(): Node {
+export function MultiComponentApp(): JSX.Element {
   const [count, setCount] = useState(0)
   return (
     <section data-multi-component-app>

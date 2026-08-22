@@ -2,6 +2,11 @@
 
 - Decision state: Accepted
 - Decided: 2026-08-21
+- Component-result ABI superseded by: [Owned component result ranges](owned-component-result-ranges.md)
+
+The prop-bridge, dynamic binding-range, and ref contracts in this decision
+remain accepted. The former single-root component-result limitation was
+superseded on 2026-08-22 by the owned component range ABI linked above.
 
 ## Context
 

@@ -11,6 +11,7 @@ import { createStateSlot, type StateSlot } from './state-slot.ts'
 const MAX_FLUSH_PASSES = 100
 const BINDING = Symbol('Vidact.Binding')
 const STRUCTURAL = Symbol('Vidact.StructuralBinding')
+const COMPONENT = Symbol('Vidact.CompiledComponent')
 
 interface Owner {
   disposed: boolean
@@ -51,7 +52,11 @@ export interface OwnedBlock {
 
 export type StructuralBinding = OwnedBlock
 
-type RenderValue =
+export interface CompiledComponentResult extends OwnedBlock {
+  readonly [COMPONENT]: true
+}
+
+export type CompiledRenderValue =
   | Node
   | string
   | number
@@ -61,7 +66,9 @@ type RenderValue =
   | undefined
   | CompiledBinding<unknown>
   | StructuralBinding
-  | readonly RenderValue[]
+  | readonly CompiledRenderValue[]
+
+type RenderValue = CompiledRenderValue
 
 type RefValue = ((value: Element | null) => void | (() => void)) | { current: unknown }
 
@@ -76,13 +83,19 @@ interface NodePosition {
   readonly nextSibling: Node | null
 }
 
+interface ComponentRange {
+  readonly start: Comment
+  readonly end: Comment
+  readonly scope: CompiledScope
+}
+
 let activeOwner: Owner | null = null
 let activeScopeCollector: Set<CompiledScope> | null = null
 let transactionDepth = 0
 let drainingFlushes = false
 const scheduledFlushes = new Set<() => void>()
 const scopeOwners = new WeakMap<CompiledScope, Owner>()
-const rootScopes = new WeakMap<Node, CompiledScope>()
+const componentRanges = new WeakMap<CompiledComponentResult, ComponentRange>()
 const pendingRefs = new WeakMap<Element, PendingRef>()
 
 export function createCompiledScope(): CompiledScope {
@@ -356,24 +369,71 @@ export function keyed<T, K>(
   })
 }
 
-export function compiledRoot(scope: CompiledScope, render: () => Node): Node {
+export function compiledRoot(
+  scope: CompiledScope,
+  render: () => CompiledRenderValue,
+): CompiledComponentResult {
   const owner = scopeOwners.get(scope)
   if (owner === undefined) throw new Error('compiledRoot received an unknown scope')
-  const root = withOwner(owner, render)
-  rootScopes.set(root, scope)
-  return root
+  const start = document.createComment('vidact:component')
+  const end = document.createComment('/vidact:component')
+  const fragment = document.createDocumentFragment()
+  fragment.append(start, end)
+  owner.cleanups.add(() => {
+    try {
+      removeBetween(start, end)
+    } finally {
+      start.remove()
+      end.remove()
+    }
+  })
+
+  try {
+    withOwner(owner, () => insertValue(fragment, render(), end))
+  } catch (error) {
+    try {
+      scope.dispose()
+    } catch {
+      // Preserve the render error that made this component unmountable.
+    }
+    throw error
+  }
+
+  let mounted = false
+  const component: CompiledComponentResult = {
+    [STRUCTURAL]: true,
+    [COMPONENT]: true,
+    mount(parent, before) {
+      if (mounted) throw new Error('compiled component is already mounted')
+      mounted = true
+      adoptCompiledRoot(component)
+      try {
+        parent.insertBefore(fragment, before)
+      } catch (error) {
+        try {
+          scope.dispose()
+        } catch {
+          // Preserve the insertion error that made this component unmountable.
+        }
+        throw error
+      }
+    },
+  }
+  componentRanges.set(component, { start, end, scope })
+  return component
 }
 
-export function adoptCompiledRoot(root: Node): void {
-  const scope = rootScopes.get(root)
-  if (scope === undefined) return
-  const owner = scopeOwners.get(scope)
+export function adoptCompiledRoot(root: unknown): void {
+  if (!isCompiledComponentResult(root)) return
+  const range = componentRanges.get(root)
+  if (range === undefined) return
+  const owner = scopeOwners.get(range.scope)
   if (activeOwner !== null && owner !== undefined && activeOwner !== owner) {
-    activeOwner.cleanups.add(scope.dispose)
+    activeOwner.cleanups.add(range.scope.dispose)
   }
 }
 
-export function constructCompiledComponent(component: () => Node): Node {
+export function constructCompiledComponent<T extends CompiledRenderValue>(component: () => T): T {
   const previousCollector = activeScopeCollector
   const scopes = new Set<CompiledScope>()
   activeScopeCollector = scopes
@@ -399,22 +459,28 @@ export function queueElementRef(element: Element, value: unknown): void {
   pendingRefs.set(element, { owner: activeOwner, value })
 }
 
-export function mountCompiled(component: () => Node, host: ParentNode): { dispose: () => void } {
+export function mountCompiled(
+  component: () => CompiledComponentResult,
+  host: ParentNode,
+): { dispose: () => void } {
   const root = constructCompiledComponent(component)
-  const scope = rootScopes.get(root)
-  const roots = root instanceof DocumentFragment ? [...root.childNodes] : [root]
-  host.replaceChildren(root)
-  for (const mountedRoot of roots) commitPendingRefs(mountedRoot)
+  const range = componentRanges.get(root)
+  if (range === undefined) throw new Error('mountCompiled received an unknown component result')
+  const previous = [...host.childNodes]
+  try {
+    root.mount(host, previous[0] ?? null)
+    commitRangeRefs(range.start, range.end)
+    for (const node of previous) host.removeChild(node)
+  } catch (error) {
+    try {
+      range.scope.dispose()
+    } catch {
+      // Preserve the mount error while still running every component cleanup.
+    }
+    throw error
+  }
   return {
-    dispose: () => {
-      try {
-        scope?.dispose()
-      } finally {
-        for (const mountedRoot of roots) {
-          if (mountedRoot.parentNode === host) host.removeChild(mountedRoot)
-        }
-      }
-    },
+    dispose: range.scope.dispose,
   }
 }
 
@@ -424,6 +490,10 @@ export function isCompiledBinding(value: unknown): value is CompiledBinding<unkn
 
 export function isStructuralBinding(value: unknown): value is StructuralBinding {
   return typeof value === 'object' && value !== null && STRUCTURAL in value
+}
+
+export function isCompiledComponentResult(value: unknown): value is CompiledComponentResult {
+  return typeof value === 'object' && value !== null && COMPONENT in value
 }
 
 export function mountCompiledBinding(parent: Node, value: CompiledBinding<unknown>): void {
@@ -608,6 +678,7 @@ function insertValue(
 ): void {
   if (value === null || value === undefined || typeof value === 'boolean') return
   if (isStructuralBinding(value)) {
+    adoptCompiledRoot(value)
     value.mount(parent, before)
     return
   }
@@ -717,6 +788,16 @@ function commitPendingRefs(root: Node): void {
     const cleanup = attachRef(pending.value, element)
     owner?.cleanups.add(cleanup)
   })
+}
+
+function commitRangeRefs(start: Node, end: Node): void {
+  const nodes: Node[] = []
+  let node = start.nextSibling
+  while (node !== null && node !== end) {
+    nodes.push(node)
+    node = node.nextSibling
+  }
+  for (const rangeNode of nodes) commitPendingRefs(rangeNode)
 }
 
 function visitElements(root: Node, visit: (element: Element) => void): void {
