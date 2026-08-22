@@ -22,6 +22,11 @@
       "components": ["Child", "Parent"]
     },
     {
+      "path": "accepted/raw-html.tsx",
+      "expectation": "accepted",
+      "components": ["RawHtml"]
+    },
+    {
       "path": "rejected/arrow-component.tsx",
       "expectation": "rejected",
       "code": "UnsupportedComponentForm",
@@ -47,6 +52,18 @@
       "expectation": "rejected",
       "code": "UnsupportedSyntax",
       "spanContains": "function ReactiveSpread"
+    },
+    {
+      "path": "rejected/raw-html-children.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "dangerouslySetInnerHTML"
+    },
+    {
+      "path": "rejected/raw-html-executable-script.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "dangerouslySetInnerHTML"
     },
     {
       "path": "rejected/synchronous-finally.tsx",

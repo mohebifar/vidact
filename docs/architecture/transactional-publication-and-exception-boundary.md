@@ -41,11 +41,15 @@ the owned Oxc patch can export a correct upstream-shaped analysis.
 ## Atomicity still required before U10 closes
 
 The publication queue currently covers scalar binding and host prop/event
-writes. Existing range staging still protects construction failures, duplicate
-keys, and new keyed records. Full U10 closure additionally requires publication
-operations and inverses for retained-list item writes, list moves/removals,
-branch/dispatcher replacement, ref attachment, and owner finalization. Those
-operations must commit only after all reached computations succeed.
+writes plus opaque raw-HTML subtree replacement. Raw HTML parses in an inert
+document during computation, upgrades custom elements only during its final
+publication phase, and retains the previous node objects as its rollback
+inverse. Existing range staging still protects construction failures,
+duplicate keys, and new keyed records. Full U10 closure additionally requires
+publication operations and inverses for retained-list item writes, list
+moves/removals, branch/dispatcher replacement, ref attachment, and owner
+finalization. Those operations must commit only after all reached computations
+succeed.
 
 ## Evidence
 

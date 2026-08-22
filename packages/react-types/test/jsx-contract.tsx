@@ -29,16 +29,18 @@ const captureHandler = (
     }}
   />
 )
+const rawHtml = <div dangerouslySetInnerHTML={{ __html: '<b>trusted source</b>' }} />
 
 void nativeElements
 void customElement
 void captureHandler
+void rawHtml
 
 // @ts-expect-error `href` is not a button attribute.
 const invalidAttribute = <button href="/not-a-button-link" />
 
-// @ts-expect-error The direct DOM runtime deliberately rejects raw HTML injection.
-const unsupportedAttribute = <div dangerouslySetInnerHTML={{ __html: '<b>unsafe</b>' }} />
+// @ts-expect-error Raw HTML must use React's `{ __html: string | TrustedHTML }` shape.
+const invalidRawHtml = <div dangerouslySetInnerHTML={{ html: '<b>invalid</b>' }} />
 
 // @ts-expect-error React server actions are not native DOM form actions.
 const unsupportedFormAction = <form action={() => undefined} />
@@ -53,7 +55,7 @@ const unsupportedSvg = <svg viewBox="0 0 10 10" />
 const reactElement: ReactElement = <div />
 
 void invalidAttribute
-void unsupportedAttribute
+void invalidRawHtml
 void unsupportedFormAction
 void unsupportedHydrationFlag
 void unsupportedSvg

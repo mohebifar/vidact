@@ -89,6 +89,15 @@ interface PublicationOperation {
   readonly rollback: () => void
   readonly abort?: () => void
   readonly finalize?: () => void
+  readonly priority?: number
+}
+
+export interface CompiledPropTransition {
+  readonly commit: () => void
+  readonly rollback: () => void
+  readonly abort?: () => void
+  readonly finalize?: () => void
+  readonly priority?: number
 }
 
 interface ComponentRange {
@@ -774,6 +783,42 @@ export function mountCompiledProp(
   })
 }
 
+export function mountCompiledPropTransition<T>(
+  value: CompiledBinding<T>,
+  initialize: (initial: T) => void,
+  prepare: (next: T, previous: T) => CompiledPropTransition | undefined,
+): void {
+  let current = value.evaluate()
+  initialize(current)
+  const removeUpdater = subscribe(value, () => {
+    const next = value.evaluate()
+    if (Object.is(next, current)) return
+    const previous = current
+    const transition = prepare(next, previous)
+    let attempted = false
+    stagePublication({
+      ...(transition?.priority === undefined ? {} : { priority: transition.priority }),
+      commit() {
+        attempted = true
+        transition?.commit()
+        current = next
+      },
+      rollback() {
+        if (!attempted) return
+        try {
+          transition?.rollback()
+        } finally {
+          current = previous
+          attempted = false
+        }
+      },
+      ...(transition?.abort === undefined ? {} : { abort: transition.abort }),
+      ...(transition?.finalize === undefined ? {} : { finalize: transition.finalize }),
+    })
+  })
+  onCleanup(removeUpdater)
+}
+
 function structural(mount: StructuralBinding['mount']): StructuralBinding {
   let mounted = false
   return {
@@ -1158,9 +1203,12 @@ function stagePublication(operation: PublicationOperation): void {
 }
 
 function commitPublication(operations: readonly PublicationOperation[]): void {
+  const ordered = operations.some((operation) => operation.priority !== undefined)
+    ? operations.toSorted((left, right) => (left.priority ?? 0) - (right.priority ?? 0))
+    : operations
   const applied: PublicationOperation[] = []
   try {
-    for (const operation of operations) {
+    for (const operation of ordered) {
       applied.push(operation)
       operation.commit()
     }
@@ -1172,7 +1220,7 @@ function commitPublication(operations: readonly PublicationOperation[]): void {
         // Preserve the publication error while attempting every inverse.
       }
     }
-    for (const operation of operations.slice(applied.length)) {
+    for (const operation of ordered.slice(applied.length)) {
       try {
         operation.abort?.()
       } catch {
@@ -1181,7 +1229,7 @@ function commitPublication(operations: readonly PublicationOperation[]): void {
     }
     throw error
   }
-  for (const operation of operations) operation.finalize?.()
+  for (const operation of ordered) operation.finalize?.()
 }
 
 function abortPublication(operations: readonly PublicationOperation[]): void {

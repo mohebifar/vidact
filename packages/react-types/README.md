@@ -20,8 +20,10 @@ source while preserving TSX for the Vidact compiler:
 The package reuses `@types/react` for standard HTML, ARIA, `key`, and `ref`
 attributes. It adapts event handlers to the native DOM events Vidact actually
 dispatches, including capture handlers. React-only hydration flags, function
-form actions, and `dangerouslySetInnerHTML` are excluded. SVG remains rejected
-until Vidact has namespace-aware compiler lowering.
+form actions, and unsupported namespaces are excluded. `dangerouslySetInnerHTML`
+uses React's `{ __html: string | TrustedHTML }` contract and remains an explicit,
+unsanitized HTML sink. SVG remains rejected until Vidact has namespace-aware
+compiler lowering.
 
 The package also replaces React's element and child value types with Vidact's
 owned compiled values. Use `VidactNode` for component props that accept

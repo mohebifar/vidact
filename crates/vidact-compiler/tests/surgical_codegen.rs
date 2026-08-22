@@ -250,6 +250,135 @@ fn rejects_reactive_structures_that_do_not_have_surgical_range_semantics() {
 }
 
 #[test]
+fn compiles_static_and_reactive_raw_html_bindings() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "RawHtml.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function RawHtml(): Node {
+                const [html, setHtml] = useState('<strong>one</strong>');
+                return <main>
+                    <button onClick={() => setHtml('<em>two</em>')}>change</button>
+                    <section dangerouslySetInnerHTML={{ __html: html }} />
+                    <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: '{"ok":true}' }} />
+                </main>;
+            }
+        "#,
+    })
+    .expect("raw HTML belongs to the React-shaped direct DOM subset");
+
+    assert!(output.contains("dangerouslySetInnerHTML"), "{output}");
+    assert!(output.contains("__vidactBinding"), "{output}");
+}
+
+#[test]
+fn rejects_statically_provable_invalid_raw_html_contracts() {
+    for (source, expected) in [
+        (
+            "export function Invalid(): Node { return <div dangerouslySetInnerHTML={{ __html: '<b>raw</b>' }}>child</div>; }",
+            "only set one of",
+        ),
+        (
+            "export function Invalid(): Node { return <img dangerouslySetInnerHTML={{ __html: 'raw' }} />; }",
+            "void element",
+        ),
+        (
+            "export function Invalid(): Node { return <textarea dangerouslySetInnerHTML={{ __html: 'raw' }} />; }",
+            "does not make sense on <textarea>",
+        ),
+        (
+            "export function Invalid(): Node { return <img dangerouslySetInnerHTML={{ __html: null }} />; }",
+            "void element",
+        ),
+        (
+            "export function Invalid(): Node { return <textarea dangerouslySetInnerHTML={{ __html: null }} />; }",
+            "does not make sense on <textarea>",
+        ),
+        (
+            "export function Invalid(): Node { return <div dangerouslySetInnerHTML={{ html: 'raw' }} />; }",
+            "must be in the form",
+        ),
+        (
+            "export function Invalid(): Node { return <script dangerouslySetInnerHTML={{ __html: 'alert(1)' }} />; }",
+            "executable <script>",
+        ),
+    ] {
+        let diagnostics = compile_surgical_module(ModuleInput {
+            filename: "InvalidRawHtml.tsx",
+            source,
+        })
+        .expect_err("provably invalid raw HTML must fail compilation");
+
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == DiagnosticCode::UnsupportedSyntax
+                    && diagnostic.span.is_some()
+                    && diagnostic.message.contains(expected)
+            }),
+            "expected {expected:?}, got {diagnostics:#?}"
+        );
+    }
+}
+
+#[test]
+fn defers_nullable_raw_html_contracts_to_runtime_without_false_positives() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "NullableRawHtml.tsx",
+        source: r#"
+            export function NullableRawHtml({ raw }): Node {
+                return <div dangerouslySetInnerHTML={raw}>fallback</div>;
+            }
+        "#,
+    })
+    .expect("analysis cannot prove that an unknown raw HTML value is non-null");
+
+    assert!(output.contains("dangerouslySetInnerHTML"), "{output}");
+
+    compile_surgical_module(ModuleInput {
+        filename: "StaticNullRawHtml.tsx",
+        source: r#"
+            export function StaticNullRawHtml(): Node {
+                return <div dangerouslySetInnerHTML={{ __html: null }}>fallback</div>;
+            }
+        "#,
+    })
+    .expect("React permits children when the statically known __html payload is nullish");
+
+    compile_surgical_module(ModuleInput {
+        filename: "TypedRawHtml.tsx",
+        source: r#"
+            export function TypedRawHtml({ raw }): Node {
+                return <div dangerouslySetInnerHTML={raw as { __html: string }} />;
+            }
+            export function TypedPayload({ html }): Node {
+                return <div dangerouslySetInnerHTML={{ __html: html as string }} />;
+            }
+        "#,
+    })
+    .expect("TypeScript-only wrappers must not create raw HTML false positives");
+
+    compile_surgical_module(ModuleInput {
+        filename: "ConservativeRawHtml.tsx",
+        source: r#"
+            function Wrapper({ dangerouslySetInnerHTML }): Node {
+                return <div>{dangerouslySetInnerHTML}</div>;
+            }
+            export function CustomProp(): Node {
+                return <Wrapper dangerouslySetInnerHTML="component metadata" />;
+            }
+            export function LaterSpread(): Node {
+                const overrides = { dangerouslySetInnerHTML: null };
+                return <div dangerouslySetInnerHTML={{ __html: '<b>raw</b>' }} {...overrides}>fallback</div>;
+            }
+            export function ComputedOverride({ key }): Node {
+                return <div dangerouslySetInnerHTML={{ __html: '<b>raw</b>', [key]: null }}>fallback</div>;
+            }
+        "#,
+    })
+    .expect("component props and ordered overrides are not statically provable host errors");
+}
+
+#[test]
 fn compiles_keyed_item_and_parent_reads_into_separate_static_domains() {
     let output = compile_surgical_module(ModuleInput {
         filename: "Items.tsx",

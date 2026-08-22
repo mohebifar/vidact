@@ -37,7 +37,9 @@ adaptations:
   does not construct synthetic events.
 - `on*Capture` attributes register the same native event in the capture phase;
   the phase suffix is not part of the DOM event name.
-- `dangerouslySetInnerHTML` is omitted because the runtime rejects it.
+- `dangerouslySetInnerHTML` preserves React's `{ __html: string | TrustedHTML }`
+  shape. The compiler and runtime enforce its opaque-subtree restrictions; the
+  type package does not claim sanitization.
 - React-only hydration warnings and function-valued form actions are omitted;
   the direct DOM runtime neither hydrates nor invokes React server actions.
 - SVG and MathML intrinsic names are omitted until compiler lowering carries

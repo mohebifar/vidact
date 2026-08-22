@@ -39,7 +39,6 @@ type WithVidactProps<Name extends HtmlIntrinsicName> = {
   [
     Property in keyof ReactIntrinsicElements[Name] as Property extends
       | 'children'
-      | 'dangerouslySetInnerHTML'
       | 'suppressContentEditableWarning'
       | 'suppressHydrationWarning'
       ? never

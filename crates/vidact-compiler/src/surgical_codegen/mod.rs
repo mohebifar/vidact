@@ -9,7 +9,8 @@ use oxc_ast_visit::{
     Visit, VisitMut,
     walk::walk_call_expression,
     walk_mut::{
-        walk_expression as walk_expression_mut, walk_jsx_attribute, walk_jsx_spread_attribute,
+        walk_expression as walk_expression_mut, walk_jsx_attribute, walk_jsx_element,
+        walk_jsx_spread_attribute,
     },
 };
 use oxc_codegen::Codegen;
@@ -30,6 +31,7 @@ use crate::{
 mod ast;
 mod derived;
 mod iterative;
+mod raw_html;
 mod render;
 
 use ast::*;
@@ -656,6 +658,14 @@ struct JsxBindingTransformer<'a, 'b, 's> {
 }
 
 impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
+    fn visit_jsx_element(&mut self, element: &mut JSXElement<'a>) {
+        if let Some(diagnostic) = raw_html::validate(element) {
+            self.diagnostic = Some(diagnostic);
+            return;
+        }
+        walk_jsx_element(self, element);
+    }
+
     fn visit_jsx_attribute(&mut self, attribute: &mut JSXAttribute<'a>) {
         let JSXAttributeName::Identifier(name) = &attribute.name else {
             walk_jsx_attribute(self, attribute);

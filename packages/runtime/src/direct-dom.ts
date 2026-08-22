@@ -10,6 +10,7 @@ import {
   type CompiledBinding,
   type StructuralBinding,
 } from './compiled.ts'
+import { mountRawHtmlProp, validateRawHtmlRelatedProp } from './raw-html.ts'
 
 export type DirectChild =
   | Node
@@ -64,15 +65,21 @@ export function h(
   }
 
   const element = document.createElement(type)
-  applyProps(element, props)
+  applyProps(element, props, children)
   appendChildren(element, children)
   return element
 }
 
-function applyProps(element: HTMLElement, props: DirectProps): void {
+function applyProps(
+  element: HTMLElement,
+  props: DirectProps,
+  children: readonly DirectChild[],
+): void {
   if (props === null) return
+  const rawHtml = props.dangerouslySetInnerHTML
   for (const [name, value] of Object.entries(props)) {
     if (name === 'key' || value === null || value === undefined) continue
+    if (name === 'dangerouslySetInnerHTML') continue
     if (name === 'ref') {
       if (isCompiledBinding(value)) {
         throw new Error('reactive ref identities are not supported')
@@ -94,6 +101,7 @@ function applyProps(element: HTMLElement, props: DirectProps): void {
     }
     applyProp(element, name, value)
   }
+  mountRawHtmlProp(element, rawHtml, children)
 }
 
 function attachEventProp(element: HTMLElement, name: string, value: unknown): () => void {
@@ -118,13 +126,14 @@ function applyProp(element: HTMLElement, name: string, value: unknown): void {
   if (value === null || value === undefined) {
     if (property in element && !name.startsWith('data-') && !name.startsWith('aria-')) {
       Reflect.set(element, property, property === 'value' ? '' : false)
+      validateRawHtmlRelatedProp(element, name)
     } else {
       element.removeAttribute(name)
     }
     return
   }
   if (name === 'dangerouslySetInnerHTML') {
-    throw new Error('dangerouslySetInnerHTML is not supported by the direct DOM runtime')
+    throw new Error('dangerouslySetInnerHTML must be handled as an owned opaque subtree')
   }
   if (name === 'style' && typeof value === 'object') {
     Object.assign(element.style, value)
@@ -132,6 +141,7 @@ function applyProp(element: HTMLElement, name: string, value: unknown): void {
   }
   if (property in element && !name.startsWith('data-') && !name.startsWith('aria-')) {
     Reflect.set(element, property, value)
+    validateRawHtmlRelatedProp(element, name)
   } else if (value === true) {
     element.setAttribute(name, '')
   } else if (value === false) {

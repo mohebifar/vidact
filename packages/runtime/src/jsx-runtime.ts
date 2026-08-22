@@ -10,8 +10,14 @@ export { Fragment }
 
 export function jsx(type: ElementType, props: JsxProps | null, key?: unknown): DirectChild {
   const { children, ...attributes } = props ?? {}
-  const normalizedChildren = Array.isArray(children) ? children : [children]
-  return h(type, key === undefined ? attributes : { ...attributes, key }, ...normalizedChildren)
+  const hasChildren = props !== null && Object.hasOwn(props, 'children')
+  const normalizedChildren =
+    hasChildren && typeof type === 'function' && Array.isArray(children) ? children : [children]
+  return h(
+    type,
+    key === undefined ? attributes : { ...attributes, key },
+    ...(hasChildren ? normalizedChildren : []),
+  )
 }
 
 export const jsxs = jsx
