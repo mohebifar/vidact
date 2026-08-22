@@ -1,0 +1,4 @@
+interface:
+  display_name: "Test Surgical DOM Updates"
+  short_description: "Verify precise DOM mutation behavior"
+  default_prompt: "Use $test-surgical-dom-updates to add mutation-envelope and node-identity coverage for this Vidact update."

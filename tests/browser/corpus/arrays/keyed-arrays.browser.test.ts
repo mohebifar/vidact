@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createKeyedList } from '@vidact/runtime'
+import { captureMutations, startMutationCapture } from '../support/mutations.ts'
 
 interface Todo {
   id: number
@@ -65,6 +66,7 @@ describe('keyed array corpus', () => {
       { id: 1, label: 'one' },
     ])
     const beforeDuplicate = host.textContent
+    const mutations = startMutationCapture(host)
 
     expect(host.textContent).toBe('[2]two[1]one')
     expect(() =>
@@ -73,6 +75,7 @@ describe('keyed array corpus', () => {
         { id: 2, label: 'duplicate' },
       ]),
     ).toThrow(/duplicate key/i)
+    expect(mutations.stop()).toEqual([])
     expect(host.textContent).toBe(beforeDuplicate)
   })
 
@@ -87,15 +90,9 @@ describe('keyed array corpus', () => {
       { id: 2, label: 'two' },
     ]
     list.update(values)
-    const mutations: MutationRecord[] = []
-    const observer = new MutationObserver((records) => mutations.push(...records))
-    observer.observe(host, { childList: true })
+    const { records } = await captureMutations(host, () => list.update(values))
 
-    list.update(values)
-    await Promise.resolve()
-    observer.disconnect()
-
-    expect(mutations).toEqual([])
+    expect(records).toEqual([])
   })
 
   it('finishes removing and disposing records before rethrowing cleanup errors', () => {

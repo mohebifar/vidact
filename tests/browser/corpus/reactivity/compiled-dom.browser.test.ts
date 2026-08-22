@@ -15,6 +15,12 @@ import {
   source,
   when,
 } from '@vidact/runtime'
+import {
+  assertMutationEnvelope,
+  captureMutations,
+  requireSingleDirectText,
+  startMutationCapture,
+} from '../support/mutations.ts'
 
 interface Item {
   readonly id: number
@@ -22,7 +28,7 @@ interface Item {
 }
 
 describe('compiled DOM corpus', () => {
-  it('updates scalar, branch, and keyed parts without rerunning the component', () => {
+  it('updates scalar, branch, and keyed parts without rerunning the component', async () => {
     const countSource = source(0)
     const itemsSource = source(1)
     let setCount!: ReturnType<typeof createCompiledState<number>>['set']
@@ -68,9 +74,15 @@ describe('compiled DOM corpus', () => {
     const mounted = mountCompiled(Component, host)
     const root = host.firstChild
     const untouched = host.querySelector('[data-id="2"]')
+    const section = host.querySelector('section')!
+    const countText = requireSingleDirectText(host.querySelector('[data-count]')!)
 
-    setCount(1)
-    setItems((items) => [{ ...items[0]!, label: 'ONE' }, items[1]!])
+    const countCapture = await captureMutations(host, () => setCount(1))
+    const first = host.querySelector('[data-id="1"]')!
+    const itemText = requireSingleDirectText(first)
+    const itemsCapture = await captureMutations(host, () => {
+      setItems((items) => [{ ...items[0]!, label: 'ONE' }, items[1]!])
+    })
 
     expect(componentRuns).toBe(1)
     expect(host.firstChild).toBe(root)
@@ -78,6 +90,14 @@ describe('compiled DOM corpus', () => {
     expect(host.querySelector('p')?.textContent).toBe('visible')
     expect(host.querySelector('[data-id="1"]')?.textContent).toBe('ONE')
     expect(host.querySelector('[data-id="2"]')).toBe(untouched)
+    expect(() => assertMutationEnvelope(countCapture.records, [
+      { type: 'characterData', target: countText },
+      { type: 'childList', target: section },
+    ], 'compiled scalar and branch update')).not.toThrow()
+    expect(() => assertMutationEnvelope(itemsCapture.records, [
+      { type: 'characterData', target: itemText },
+    ], 'compiled keyed item update')).not.toThrow()
+    expect(itemsCapture.records).toHaveLength(1)
 
     mounted.dispose()
     expect(host.childNodes).toHaveLength(0)
@@ -111,11 +131,13 @@ describe('compiled DOM corpus', () => {
       ))
     }, host)
     const before = host.innerHTML
+    const mutations = startMutationCapture(host)
 
     expect(() => setItems([
       { id: 2, label: 'two' },
       { id: 2, label: 'duplicate' },
     ])).toThrow(/duplicate key/i)
+    expect(mutations.stop()).toEqual([])
     expect(host.innerHTML).toBe(before)
 
     mounted.dispose()
@@ -229,7 +251,7 @@ describe('compiled DOM corpus', () => {
     secondScope.dispose()
   })
 
-  it('updates same-key records through item slots without replacing their DOM', () => {
+  it('updates same-key records through item slots without replacing their DOM', async () => {
     const itemsSource = source(0)
     const prefixSource = source(1)
     const itemSource = source(0)
@@ -277,21 +299,31 @@ describe('compiled DOM corpus', () => {
     }, host)
     const first = host.querySelector('[data-id="1"]')
     const second = host.querySelector('[data-id="2"]')
+    const list = host.querySelector('ul')!
 
-    setItems([
+    const reorderCapture = await captureMutations(host, () => setItems([
       { id: 2, label: 'TWO' },
       { id: 1, label: 'ONE' },
-    ])
+    ]))
 
     expect(host.querySelector('[data-id="1"]')).toBe(first)
     expect(host.querySelector('[data-id="2"]')).toBe(second)
     expect(host.querySelectorAll('li')[0]).toBe(second)
     expect(host.querySelectorAll('li')[1]).toBe(first)
     expect(host.textContent).toBe('0:TWO1:ONE')
+    expect(() => assertMutationEnvelope(reorderCapture.records, [
+      { type: 'characterData', within: list },
+      { type: 'childList', target: list },
+    ], 'compiled keyed reorder')).not.toThrow()
 
-    setPrefix('item')
+    const prefixCapture = await captureMutations(host, () => setPrefix('item'))
     expect(first?.className).toBe('item-1')
     expect(second?.className).toBe('item-2')
+    expect(prefixCapture.records).toHaveLength(2)
+    expect(() => assertMutationEnvelope(prefixCapture.records, [
+      { type: 'attributes', target: first!, attributeName: 'class' },
+      { type: 'attributes', target: second!, attributeName: 'class' },
+    ], 'compiled shared attribute update')).not.toThrow()
 
     mounted.dispose()
   })
@@ -392,7 +424,7 @@ describe('compiled DOM corpus', () => {
     mounted.dispose()
   })
 
-  it('bridges parent bindings into owned child prop slots and disposes them with the branch', () => {
+  it('bridges parent bindings into owned child prop slots and disposes them with the branch', async () => {
     const labelSource = source(0)
     const visibleSource = source(1)
     const childLabelSource = source(0)
@@ -428,16 +460,28 @@ describe('compiled DOM corpus', () => {
         })),
       ))
     }, host)
+    const section = host.querySelector('section')!
+    const child = host.querySelector('strong')!
+    const childText = requireSingleDirectText(child)
 
-    setLabel('two')
+    const labelCapture = await captureMutations(host, () => setLabel('two'))
     expect(host.querySelector('strong')?.textContent).toBe('two')
     expect(childUpdates).toBe(1)
+    expect(host.querySelector('strong')).toBe(child)
+    expect(labelCapture.records).toHaveLength(1)
+    expect(() => assertMutationEnvelope(labelCapture.records, [
+      { type: 'characterData', target: childText },
+    ], 'compiled child prop update')).not.toThrow()
 
-    setVisible(false)
+    const branchCapture = await captureMutations(host, () => setVisible(false))
     setLabel('three')
     expect(host.querySelector('strong')).toBeNull()
     expect(childUpdates).toBe(1)
     expect(childRefCleanups).toBe(1)
+    expect(() => assertMutationEnvelope(branchCapture.records, [
+      { type: 'childList', within: child },
+      { type: 'childList', target: section },
+    ], 'compiled child branch removal')).not.toThrow()
 
     mounted.dispose()
   })
