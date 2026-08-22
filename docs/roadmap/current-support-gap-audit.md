@@ -1,6 +1,6 @@
 # Current support-gap audit
 
-Updated: 2026-08-21
+Updated: 2026-08-22
 Audited implementation: component/prop/range/ref bridge on
 `feat/rust-compiler-rebuild`
 
@@ -15,10 +15,12 @@ The first component-boundary gaps are now bridged: direct destructured props
 use child-local updater slots, nested compiled scopes are adopted by their
 owner, generic bindings own recursive value ranges, and host refs have
 commit-time cleanup. Early returns, reactive spreads, and data-flow omissions
-now fail closed for the covered shapes. Source and render classification now
-uses OXC AST nodes and semantic bindings. The main remaining risks are the
-broad DOM/React surface and compatibility boundary: diagnostics still lack
-spans and many unsupported forms are not yet classified precisely.
+now fail closed for the covered shapes. Source and render classification uses
+Oxc AST nodes and semantic bindings; exact function spans isolate multiple
+components in one module; and diagnostics carry source offsets plus CLI
+line/column locations. The main remaining risks are the broad DOM/React surface
+and compatibility boundary: many downstream diagnostics still point at the
+whole component, and many unsupported forms are not yet classified precisely.
 
 Status terms in this audit:
 
@@ -29,6 +31,32 @@ Status terms in this audit:
 - **Unsafe** — the construct can compile without preserving the expected
   behavior; this is more serious than an explicit rejection.
 
+## Completed bridges
+
+These checkmarks mean the bounded contract described in this audit is done;
+they do not imply that the entire surrounding React feature family is complete.
+
+- [x] Classify accepted named-function components from Oxc AST and semantic
+  bindings instead of source-text scanning.
+- [x] Analyze and lower multiple named components in one module using exact
+  function spans.
+- [x] Capture React Compiler's analyzed CFG as owned typed blocks/terminals and
+  carry the terminal graph into Vidact's compiler IR.
+- [x] Emit stable diagnostic codes with source offsets and CLI line/column
+  locations.
+- [x] Keep every compatibility fixture in a versioned accepted, rejected, or
+  deliberately-different manifest.
+- [x] Bridge direct reactive props from parent sources into child updater
+  scopes.
+- [x] Adopt nested component scopes into their nearest owner and dispose them
+  with conditional ranges.
+- [x] Normalize compiled render values across scalars, empty values, DOM nodes,
+  nested arrays, bindings, and owned blocks.
+- [x] Support callback and object refs on host elements, including cleanup on
+  conditional removal.
+- [x] Preserve keyed row identity while reordering, appending, and replacing a
+  same-key immutable record.
+
 ## Promise-to-implementation matrix
 
 The promise IDs come from
@@ -38,9 +66,9 @@ The promise IDs come from
 |---|---|---|
 | R1: direct DOM, no Virtual DOM | **Partial** | The Vite path lowers JSX through `@vidact/runtime/jsx-runtime`, whose `h` creates DOM nodes directly. Dynamic keyed and conditional structures are owned blocks, not runtime element trees. Generic JSX still goes through a general `h` helper rather than fully specialized DOM codegen. |
 | R2: construct once, targeted updates | **Proven for the supported component slice** | `compiledRoot`, prop slots, bindings, `when`, and `keyed` preserve component and retained-row DOM. Unsupported early/nested returns are rejected. The classifier still limits which component shapes enter this slice. |
-| R3: versioned compatibility contract | **Missing** | README language is intentionally cautious, but there is no accepted/rejected/different fixture manifest or versioned public subset. |
-| R4: lexical component and hook identity | **Proven for the accepted named-function slice** | Props, state, derived declarations, returns, JSX sites, and keyed lists come from OXC AST. Named aliases and namespace `React.useState` calls resolve through import symbols; foreign hook-shaped calls fail closed. Multiple components and non-declaration component forms remain explicitly unsupported until analysis is keyed by function span. |
-| R5: source-located diagnostics | **Unsafe** | `Diagnostic` contains only a code and message. Generated nodes use empty spans, and the CLI reports a filename without a source range. Some unsupported forms are accepted and become stale instead of producing a diagnostic. |
+| R3: versioned compatibility contract | **Partial** | `vidact-react-subset-v1` manifests accepted, rejected, and intentionally different compiler fixtures and rejects unmanifested files. The corpus is still small and is not yet a published support policy. |
+| R4: lexical component and hook identity | **Proven for the accepted named-function slice** | Props, state, derived declarations, returns, JSX sites, and keyed lists come from OXC AST. Exact function spans isolate several same-module components. The owned React Compiler CFG supplies typed outer-function control flow without nested-callback or source-text false positives. Named aliases and namespace `React.useState` calls resolve through import symbols; foreign hook-shaped calls fail closed. Named arrows are recognized and source-located but remain rejected by lowering. |
+| R5: source-located diagnostics | **Partial** | Diagnostics carry original byte spans and the CLI reports line/column locations. Multiple render returns now reject at an exact React Compiler terminal span and compatibility rejections require spans, but many other downstream errors still fall back to the whole component, generated nodes use empty spans, and composed original-TSX source maps remain absent. |
 | R6: one model for state, props, effects, hooks, errors, disposal | **Partial** | State and direct destructured prop slots, batching, static bridge subscriptions, list-item scopes, adopted child scopes, refs, and cleanup owners exist. Effects, custom hooks beyond `useRef`, context, error boundaries, and a complete prop store do not. |
 | R7: effect cleanup | **Missing** | No effect hook or effect scheduling phase exists. Internal owner cleanups do run in reverse registration order on explicit disposal. |
 | R8: dynamic child normalization | **Proven for compiled render values** | Generic binding ranges transition among primitives, empties, DOM nodes, recursively nested arrays, bindings, and owned blocks with value-owner disposal. Foreign React element objects and promises remain outside the contract and require stable rejection diagnostics. |
@@ -72,9 +100,12 @@ function Early() {
 }
 ```
 
-Current outcome: surgical lowering rejects any component without exactly one
-top-level return. Modeled multi-return control flow and source spans remain
-future work.
+Current outcome: React Compiler's owned CFG exposes each explicit return and its
+original span. Vidact rejects multiple render returns with
+`UnsupportedControlFlow` at the first exact return site. Tests prove that
+returns inside nested callbacks, expression-level branches, and source-text
+lookalikes do not cause false component rejections. DOM-range lowering for the
+multi-return graph remains future work.
 
 #### Reactive props are not a component ABI
 
@@ -124,16 +155,16 @@ spread reconciler exists.
 #### Source-string classification could corrupt semantic facts
 
 Current outcome: bridged. Components, imported hooks, props, state tuples,
-declarations, returns, JSX sites, and keyed maps are selected from OXC AST.
-OXC symbols distinguish aliases, namespaces, foreign hooks, and shadowed
-bindings. React Compiler remains responsible for derived def-use facts. Tests
-also prove that strings containing `return`, JSX, `.map(`, and `key={` do not
-affect classification.
-
-Remaining gap: React Compiler's owned snapshot exposes a component name but no
-stable function span. Vidact therefore accepts exactly one named function
-component per module and rejects multiple components rather than risking mixed
-facts. Diagnostics still need original source ranges.
+declarations, returns, JSX sites, and keyed maps are selected from OXC AST. OXC
+symbols distinguish aliases, namespaces, foreign hooks, and shadowed bindings;
+React Compiler remains responsible for derived def-use facts. Its owned
+snapshot now exposes the original function span and an owned pre-reactive CFG,
+so Vidact joins by exact span, carries typed terminals into `ComponentIr`,
+compiles several named declarations in source order, and rejects recognized
+arrow components with their original location. Strings containing `return`,
+JSX, `.map(`, and `key={` do not affect classification. Remaining gaps are
+arrow/default lowering, DOM-range lowering of supported control flow, narrower
+non-return feature spans, and original-TSX source maps.
 
 ### P1: runtime behavior is incomplete or observably different
 
@@ -189,15 +220,16 @@ facts. Diagnostics still need original source ranges.
 
 ### P2: production and integration gaps
 
-- Stateful arrow components are analyzed but surgical codegen only locates
-  named function declarations; the current diagnostic can mention
-  `AnonymousComponent` rather than the source declaration.
-- Exactly one React Compiler-analyzed component is allowed per module.
-- Every TSX module is sent to the compiler; non-component TSX and multi-component
-  utility modules can fail the build.
-- Static prop-only components now enter lowering; non-component TSX and
-  multi-component module classification remain incomplete.
-- Generated diagnostics have no source ranges or stable feature-specific codes.
+- Stateful arrow components are recognized by source binding and rejected with
+  the original declaration name and span; lowering them remains unsupported.
+- Several named function components are supported per module; arrow/default and
+  nested component forms remain rejected.
+- Every TSX module is sent to the compiler; non-component TSX and mixed
+  component/utility modules can still fail the build.
+- Static prop-only and multiple named components now enter lowering;
+  non-component TSX classification remains incomplete.
+- Diagnostics have stable codes and source ranges, but the catalog is
+  incomplete and many downstream failures use a whole-component fallback span.
 - OXC creates a source map from already-generated Rust output, so it cannot by
   itself map generated code through to the original TSX transformations.
 - Vite starts `cargo run` for every uncached TSX file. There is no persistent
@@ -217,38 +249,80 @@ The following fixtures should exist before the corresponding syntax is called
 supported. `reject` means a source-located compiler diagnostic is acceptable
 until the implementation is ready.
 
-| Area | Fixture | Expected now | Eventual behavior |
-|---|---|---|---|
-| Classification | aliased, namespace, shadowed, and foreign `useState` bindings | Reject unsupported aliases; never transform foreign/shadowed bindings | Resolve imports and symbols lexically. |
-| Components | arrow, default anonymous, multiple components, nested helper functions | Reject precisely | Compile each component by semantic span. |
-| Control flow | early returns, ternaries, switch, loops, try/catch/finally | Reject every unmodeled path | Range-aware lowering with explicit semantics. |
-| Props | add/update/delete, defaults, rest, nested destructuring, `children`, `ref` | Direct prop updates/defaults work; reject unsupported patterns | Complete stable prop-store semantics and component ref-as-prop. |
-| Derived values | aliases, mutations, closure capture, computed access, branch-dependent reads, cycles | Reject ambiguity | Static data-flow with deterministic updater order. |
-| Dynamic values | scalar-to-empty, scalar-to-node, node-to-array, nested mixed arrays, promises, plain objects | Compiled values work; reject promises/foreign objects | Complete owned range normalizer and explicit DOM escape hatch. |
-| Keyed lists | prepend, delete, swap, reverse, arbitrary reorder, same-key object, focus, selection, local state, refs, cleanup | Only DOM/item bindings are supported | Preserve the complete record owner and range. |
-| Unkeyed lists | prepend, append, truncate, reorder-looking updates | Reject with guidance | Documented index semantics. |
-| Nested lists | parent item dependencies, empty inner lists, fragment rows, child components | Reject | Independent nested owner/source domains. |
-| Events | replacement, removal, capture, non-bubbling, custom case, shadow DOM, exceptions | Reject unsupported names/options | Correct listener lifecycle and event contract. |
-| Forms | controlled/uncontrolled transitions, IME, selection, radio, select multiple, textarea | Document as unsupported | Cross-browser controlled-value contract. |
-| Refs | object, callback, callback cleanup, keyed move, conditional removal, imperative handle | Host refs and conditional cleanup work | Add keyed-move coverage, ref-as-prop, and imperative handles. |
-| Failure | initial render throw, retained-row update throw, cleanup throw, nested owner throw | Root error, no leak, consistent recovery | Error boundaries and deterministic cleanup. |
-| SSR | deterministic IDs, fragments, lists, escaped data, mismatch, version skew | Unsupported | Shared server/client IR and hydration protocol. |
+| Area | Progress | Fixture | Expected now | Eventual behavior |
+|---|---|---|---|---|
+| Classification | **Proven** | aliased, namespace, shadowed, and foreign `useState` bindings | Resolve React aliases/namespaces; never transform foreign or shadowed bindings | Keep symbol-based classification as syntax expands. |
+| Components | **Partial** | arrow, default anonymous, multiple components, nested helper functions | Multiple named declarations compile; arrow/default forms reject with spans | Extend span-keyed lowering to supported function forms. |
+| Control flow | **Partial** | early returns, ternaries, switch, loops, try/catch/finally | Typed CFG terminals are retained; multiple returns reject at the exact return span; add every unmodeled path | Range-aware lowering with explicit semantics. |
+| Props | **Partial** | add/update/delete, defaults, rest, nested destructuring, `children`, `ref` | Direct prop updates/defaults work; reject unsupported patterns | Complete stable prop-store semantics and component ref-as-prop. |
+| Derived values | **Partial** | aliases, mutations, closure capture, computed access, branch-dependent reads, cycles | Ordered aliases and cycles are covered; reject remaining ambiguity | Static data-flow with deterministic updater order. |
+| Dynamic values | **Partial** | scalar-to-empty, scalar-to-node, node-to-array, nested mixed arrays, promises, plain objects | Compiled values work; add explicit promise/foreign-object rejection | Complete owned range normalizer and explicit DOM escape hatch. |
+| Keyed lists | **Partial** | prepend, delete, swap, reverse, arbitrary reorder, same-key object, focus, selection, local state, refs, cleanup | Reorder, append, same-key replacement, child ownership, and refs preserve retained rows | Preserve the complete record owner and range across the full matrix. |
+| Unkeyed lists | **Missing** | prepend, append, truncate, reorder-looking updates | Reject with distinct index-mode guidance | Documented index semantics. |
+| Nested lists | **Missing** | parent item dependencies, empty inner lists, fragment rows, child components | Reject | Independent nested owner/source domains. |
+| Events | **Missing** | replacement, removal, capture, non-bubbling, custom case, shadow DOM, exceptions | Reject unsupported names/options | Correct listener lifecycle and event contract. |
+| Forms | **Missing** | controlled/uncontrolled transitions, IME, selection, radio, select multiple, textarea | Native `onChange` difference is manifested; broader behavior is unsupported | Cross-browser controlled-value contract. |
+| Refs | **Partial** | object, callback, callback cleanup, keyed move, conditional removal, imperative handle | Host refs and conditional cleanup work | Add keyed-move coverage, ref-as-prop, and imperative handles. |
+| Failure | **Missing** | initial render throw, retained-row update throw, cleanup throw, nested owner throw | Root error, no leak, consistent recovery | Error boundaries and deterministic cleanup. |
+| SSR | **Missing** | deterministic IDs, fragments, lists, escaped data, mismatch, version skew | Unsupported | Shared server/client IR and hydration protocol. |
 
-## Immediate release gates
+## What comes next
+
+The next implementation slice should finish compiler soundness before expanding
+the React surface:
+
+1. **Lower typed render control flow and finish precise feature spans.** React
+   Compiler CFG blocks and terminals now reach Vidact's Rust IR. Convert the
+   supported return/branch graph into owned DOM ranges instead of relying on a
+   single top-level return. Point spread, key, and expression rejections at
+   their exact sites and start original-TSX source-map segments at the same IR
+   boundary.
+2. **Complete the component ABI.** Make a component own a general multi-node
+   range, then extend prop slots into stable add/update/delete semantics for
+   `children`, rest, spreads, and supported destructuring forms. Lower named
+   arrow and export forms only after they use this same ABI.
+3. **Make the declared DOM subset correct.** Implement listener replacement and
+   capture options, property-specific clearing, deletion-aware style updates,
+   ARIA/data semantics, namespace-aware SVG/MathML, and controlled form rules.
+4. **Define lifecycle and failure semantics.** Add insertion/layout/passive
+   effect phases with cleanup, then construction/update error recovery and error
+   boundaries before adding Suspense or async owners.
+5. **Expand array semantics deliberately.** Add a separate unkeyed index
+   reconciler, nested source/owner domains, fragment-rooted rows, a public key
+   domain, and retained-row failure atomicity.
+6. **Productionize the toolchain.** Add a persistent compiler or native binding,
+   complete cache keys, publishable artifacts and source maps, Firefox/WebKit,
+   bundle/performance gates, then SSR and hydration on a shared IR.
+
+## Release-gate progress
 
 Before adding broad React compatibility claims:
 
-1. Introduce accepted/rejected/different fixture manifests; make all known P0
-   cases reject with spans.
-2. Key React Compiler snapshots and Vidact classification by component function
-   spans so multiple components and supported function forms cannot mix facts.
-3. Extend the implemented direct-prop/adopted-owner ABI into a complete prop
-   store and multi-root component range.
-4. Extend the implemented mixed-value ranges with explicit foreign-object and
-   promise diagnostics.
-5. Establish nested component disposal and error recovery invariants.
-6. Complete DOM event/property/style/ref behavior for the declared subset.
-7. Add Firefox/WebKit, source-map, package, size, and compiler-performance gates.
+- [x] Establish a versioned accepted/rejected/different compatibility manifest
+  that fails when a fixture is unclassified.
+- [x] Replace source-text component discovery with Oxc AST/symbol analysis and
+  exact per-function spans.
+- [x] Support several named function components in one module without joining
+  React Compiler facts to the wrong function.
+- [x] Carry diagnostic codes and original source locations through the CLI.
+- [x] Carry React Compiler's typed terminal graph into Vidact IR and reject
+  multiple returns at an exact return site without callback/string false
+  positives.
+- [x] Prove the direct-prop, adopted-owner, mixed-value, ref, conditional, and
+  keyed same-record bridges with compiler and/or browser tests.
+- [ ] Expand the manifest until every known P0 form rejects at its precise
+  feature span rather than a whole-component fallback.
+- [ ] Lower the typed multi-return graph into DOM ranges and add original-TSX
+  source maps.
+- [ ] Extend the implemented direct-prop/adopted-owner ABI into a complete prop
+  store and multi-root component range.
+- [ ] Add explicit foreign-object and promise diagnostics to mixed-value ranges.
+- [ ] Establish component construction, nested disposal, updater failure, and
+  error-recovery invariants.
+- [ ] Complete event/property/style/form/ref behavior for the declared DOM
+  subset.
+- [ ] Add Firefox/WebKit, package-install, bundle-size, compiler-performance,
+  and memory-retention gates.
 
 ## Evidence consulted
 
@@ -257,6 +331,7 @@ Before adding broad React compatibility claims:
 - `docs/architecture/keyed-record-updaters-and-owned-blocks.md`
 - `docs/plans/2026-08-20-1543-feat-vidact-production-rebuild-plan.md`
 - `crates/vidact-compiler/src/oxc_react.rs`
+- `crates/vidact-compiler/tests/react_compiler_control_flow.rs`
 - `crates/vidact-compiler/src/surgical_codegen/mod.rs`
 - `packages/runtime/src/compiled.ts`
 - `packages/runtime/src/direct-dom.ts`

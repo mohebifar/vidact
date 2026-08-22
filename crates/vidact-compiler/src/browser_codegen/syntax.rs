@@ -9,7 +9,8 @@ use oxc_span::GetSpan;
 use oxc_syntax::symbol::SymbolId;
 
 use crate::{
-    Diagnostic, DiagnosticCode, ast_utils::component_function, react_bindings::ReactBindings,
+    Diagnostic, DiagnosticCode, SourceSpan, ast_utils::component_function,
+    react_bindings::ReactBindings,
 };
 
 #[derive(Debug)]
@@ -93,12 +94,14 @@ pub(super) fn extract<'a>(
     program: &'a Program<'a>,
     scoping: &Scoping,
     component_name: &str,
+    component_span: Option<SourceSpan>,
 ) -> Result<ComponentSyntax<'a>, Diagnostic> {
-    let function = component_function(program, component_name).ok_or_else(|| {
-        unsupported(format!(
-            "could not find component function {component_name} in the parsed module"
-        ))
-    })?;
+    let function =
+        component_function(program, component_name, component_span).ok_or_else(|| {
+            unsupported(format!(
+                "could not find component function {component_name} in the parsed module"
+            ))
+        })?;
     let body = function
         .body
         .as_deref()

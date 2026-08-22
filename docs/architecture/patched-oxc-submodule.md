@@ -5,9 +5,10 @@
 
 ## Context
 
-Vidact needs one private seam in Oxc's Rust React Compiler: an owned snapshot of
-def-use and optimized reactive-scope facts before React code generation. The
-published crate does not expose that seam.
+Vidact needs one private seam in Oxc's Rust React Compiler: owned snapshots of
+the analyzed HIR control-flow graph, def-use relationships, and optimized
+reactive-scope facts before React code generation. The published crate does not
+expose that seam.
 
 The spike copied the complete published `oxc_react_compiler` crate into this
 repository. That made the experiment build, but it hid the effective fork among
@@ -29,9 +30,11 @@ that series with Microsoft's `git-go-patch`, pinned to Go module `v0.0.16`
 initialize the pinned submodule and apply the same patches without requiring Go
 or `git-go-patch`.
 
-The initial series has one upstream-shaped patch: expose owned pre-codegen
-analysis snapshots. Vidact-specific DOM classification, updater IR, and runtime
-policy remain outside Oxc.
+The series has one upstream-shaped patch: expose owned pre-codegen analysis
+snapshots. It captures the CFG before conversion to the codegen-oriented
+reactive tree, def-use facts before lvalue pruning, and optimized scopes before
+React codegen. Vidact-specific DOM classification, updater IR, and runtime policy
+remain outside Oxc.
 
 ## Compiler and dependency contract
 
@@ -43,8 +46,10 @@ policy remain outside Oxc.
 - `git-go-patch apply` may create temporary commits inside the submodule for
   editing and extraction. Those commits must never replace the staged outer
   gitlink.
-- The public Vidact boundary remains owned `FunctionAnalysis` data. Arena-backed
-  Oxc and React Compiler HIR types do not escape the adapter.
+- The patched crate exports owned `FunctionAnalysis` data containing plain
+  integers, enums, strings, and span pairs. Arena-backed Oxc and React Compiler
+  HIR types do not escape the adapter, and Vidact translates the terminal graph
+  again into its own `ControlFlowFacts`.
 
 ## Invariants
 
@@ -74,12 +79,15 @@ policy remain outside Oxc.
 
 ## Consequences
 
-The effective fork is now a 214-line patch instead of a copied source tree, and
-upstream syncs become explicit rebases. Fresh checkouts must initialize and
-prepare the submodule before Cargo commands. Contributors editing the seam need
-Go and the pinned `git-go-patch` binary; ordinary builds and CI do not. The whole
-Oxc checkout is larger on disk than one copied crate, but it supplies consistent
-path dependencies and preserves exact upstream history.
+The effective fork remains one reviewable patch instead of a copied source tree,
+and upstream syncs become explicit rebases. The complete terminal and
+instruction-kind enums intentionally make upstream HIR drift a compile failure
+instead of silently mapping a new construct to an unsafe fallback. Fresh
+checkouts must initialize and prepare the submodule before Cargo commands.
+Contributors editing the seam need Go and the pinned `git-go-patch` binary;
+ordinary builds and CI do not. The whole Oxc checkout is larger on disk than one
+copied crate, but it supplies consistent path dependencies and preserves exact
+upstream history.
 
 ## Verification
 

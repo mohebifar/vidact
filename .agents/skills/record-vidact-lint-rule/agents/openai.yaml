@@ -1,0 +1,4 @@
+interface:
+  display_name: "Record Vidact Lint Rule"
+  short_description: "Capture future Vidact compatibility lint rules"
+  default_prompt: "Use $record-vidact-lint-rule to document this Vidact compatibility hazard as a future lint rule."

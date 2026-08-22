@@ -6,6 +6,7 @@ use oxc_semantic::Scoping;
 use oxc_syntax::symbol::SymbolId;
 
 use crate::{
+    SourceSpan,
     analysis::{KeyPath, SourceId, SourceKind, UpdaterFact, UpdaterId, UpdaterKind},
     ast_utils::{component_function, is_event_attribute},
     react_bindings::{ReactBindings, reference_symbol},
@@ -28,9 +29,12 @@ pub(super) fn classify_component<'a>(
     program: &'a Program<'a>,
     scoping: &Scoping,
     component_name: &str,
+    component_span: SourceSpan,
 ) -> Result<ComponentSyntax<'a>, String> {
-    let function = component_function(program, component_name)
-        .ok_or_else(|| format!("could not find named component function {component_name}"))?;
+    let function =
+        component_function(program, component_name, Some(component_span)).ok_or_else(|| {
+            format!("component {component_name} is not a supported named function declaration")
+        })?;
     let body = function
         .body
         .as_deref()

@@ -1,6 +1,9 @@
 use vidact_compiler::{
     DiagnosticCode, OxcReactAnalysisAdapter,
-    analysis::{KeyPath, ModuleInput, ReactAnalysisAdapter, SourceKind, UpdaterKind},
+    analysis::{
+        ControlFlowReturnVariant, ControlFlowTerminalKind, KeyPath, ModuleInput,
+        ReactAnalysisAdapter, SourceKind, UpdaterKind,
+    },
 };
 
 fn analyze(filename: &str, source: &str) -> vidact_compiler::analysis::ComponentFacts {
@@ -352,23 +355,143 @@ fn ignores_return_and_jsx_lookalikes_outside_the_render_ast() {
 }
 
 #[test]
-fn rejects_multiple_components_until_classification_is_span_scoped() {
+fn reports_multiple_render_returns_at_the_exact_cfg_return_site() {
+    let source = r#"
+        import { useState } from "react";
+        export function Early() {
+            const [ready] = useState(false);
+            if (!ready) return <button>Load</button>;
+            return <p>Ready</p>;
+        }
+    "#;
     let diagnostics = OxcReactAnalysisAdapter
         .analyze(ModuleInput {
-            filename: "two-components.tsx",
-            source: r#"
+            filename: "early-return.tsx",
+            source,
+        })
+        .expect_err("multi-return render flow must fail closed until it is lowered");
+
+    assert_eq!(diagnostics[0].code, DiagnosticCode::UnsupportedControlFlow);
+    let span = diagnostics[0]
+        .span
+        .expect("React Compiler return terminals retain original spans");
+    assert!(
+        source[span.start as usize..span.end as usize].contains("return <button>Load</button>")
+    );
+}
+
+#[test]
+fn nested_callback_returns_do_not_trigger_component_control_flow_rejection() {
+    let facts = analyze(
+        "callback-return.tsx",
+        r#"
+            export function Counter({ label }) {
+                const handleClick = () => {
+                    if (label) return;
+                };
+                return <button onClick={handleClick}>{label}</button>;
+            }
+        "#,
+    );
+
+    let explicit_returns = facts
+        .control_flow
+        .blocks
+        .iter()
+        .filter(|block| {
+            block.terminal.kind
+                == ControlFlowTerminalKind::Return(ControlFlowReturnVariant::Explicit)
+        })
+        .count();
+    assert_eq!(explicit_returns, 1);
+    assert!(!facts.control_flow.blocks.iter().any(|block| {
+        matches!(
+            block.terminal.kind,
+            ControlFlowTerminalKind::If | ControlFlowTerminalKind::Branch
+        )
+    }));
+}
+
+#[test]
+fn expression_control_flow_is_retained_without_becoming_an_early_return() {
+    let facts = analyze(
+        "expression-branch.tsx",
+        r#"
+            export function Greeting({ ready }) {
+                const label = ready ? "Ready" : "Waiting";
+                return <p>{label}</p>;
+            }
+        "#,
+    );
+
+    assert!(facts.control_flow.blocks.iter().any(|block| {
+        matches!(
+            block.terminal.kind,
+            ControlFlowTerminalKind::Ternary | ControlFlowTerminalKind::Branch
+        )
+    }));
+    let block_ids = facts
+        .control_flow
+        .blocks
+        .iter()
+        .map(|block| block.id)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(facts.control_flow.blocks.iter().all(|block| {
+        block
+            .terminal
+            .successors
+            .iter()
+            .all(|successor| block_ids.contains(successor))
+    }));
+    let ir = vidact_compiler::lower_component(facts.clone())
+        .expect("typed control flow must cross the stable IR boundary");
+    assert_eq!(ir.control_flow, facts.control_flow);
+}
+
+#[test]
+fn classifies_multiple_components_by_function_span() {
+    let source = r#"
                 export function First({ first }) {
                     return <p>{first}</p>;
                 }
                 export function Second({ second }) {
                     return <p>{second}</p>;
                 }
-            "#,
+            "#;
+    let facts = OxcReactAnalysisAdapter
+        .analyze(ModuleInput {
+            filename: "two-components.tsx",
+            source,
         })
-        .expect_err("the lexical spike must fail closed instead of mixing component facts");
+        .expect("each component must be joined to its own React Compiler snapshot");
 
-    assert_eq!(diagnostics[0].code, DiagnosticCode::AnalysisFailed);
-    assert!(diagnostics[0].message.contains("exactly one component"));
+    assert_eq!(facts.len(), 2);
+    assert_eq!(facts[0].name, "First");
+    assert_eq!(facts[1].name, "Second");
+    assert!(facts[0].sources.iter().any(|source| source.name == "first"));
+    assert!(
+        !facts[0]
+            .sources
+            .iter()
+            .any(|source| source.name == "second")
+    );
+    assert!(
+        facts[1]
+            .sources
+            .iter()
+            .any(|source| source.name == "second")
+    );
+    assert!(!facts[1].sources.iter().any(|source| source.name == "first"));
+    for component in &facts {
+        let span = component
+            .span
+            .expect("compiler analyses must carry source spans");
+        let text = &source[span.start as usize..span.end as usize];
+        assert!(
+            text.contains(&format!("function {}", component.name)),
+            "{text}"
+        );
+    }
 }
 
 #[test]

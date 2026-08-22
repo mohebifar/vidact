@@ -23,7 +23,7 @@ React AST + scope --------------------------+
                                             v
                                 HIR -> CFG -> SSA -> inference
                                             |
-                                            | extracted facts only
+                                            | owned CFG + extracted facts only
                                             v
                      Vidact-owned  ComponentFacts
                                             |
@@ -99,6 +99,12 @@ React Compiler owns control-flow, SSA, alias, effect, and def-use analysis.
 Vidact's smaller DOM classifier operates on the same parsed OXC program and
 semantic scope graph:
 
+- the analyzed HIR CFG is captured before conversion into React Compiler's
+  codegen-oriented reactive tree as owned blocks, instruction kinds, typed
+  terminals, operands, successor IDs, and original spans;
+- Vidact immediately lowers the terminal graph into its own `ControlFlowFacts`,
+  which is carried by `ComponentFacts` and `ComponentIr`; no arena-backed HIR
+  type crosses the adapter;
 - component parameters, state tuples, declarations, returns, JSX attributes,
   JSX children, and keyed maps are selected from AST nodes rather than source
   slices;
@@ -114,21 +120,31 @@ semantic scope graph:
 - JSX-producing `.map` calls enter the keyed-list IR only for `key={item}` or
   `key={item.property}`. Parent-dependent, computed, and index keys fail closed
   instead of falling through to a text updater or being reinterpreted by codegen.
+- multiple explicit component returns fail with `UnsupportedControlFlow` at the
+  first exact return-terminal span. Returns and branches inside nested callbacks,
+  plus source-text lookalikes, are absent from the outer component CFG and do
+  not trigger this rejection.
 
-The currently accepted component form remains one named function component per
-module. Multiple components and other function forms fail closed until React
-Compiler's owned snapshot exposes a stable function span for per-component
-matching.
+The accepted component form remains named function declarations, but a module
+may contain several of them. Each owned React Compiler snapshot carries its
+original function span, and Vidact joins it only to the declaration with that
+exact span. Named arrows are recognized by span and binding name but fail with a
+source-located `UnsupportedComponentForm` diagnostic until lowering supports
+their body and replacement semantics.
 
 ## Next integration step
 
-The pinned adapter captures owned pre-codegen def-use and reactive-scope facts
-and lowers them immediately into `ComponentFacts`. Vidact classification and
-both executable emitters now use OXC AST and semantic identities; generated
-output is printed with `oxc_codegen`. The next step is adding stable source-range
-diagnostics, accepted/rejected/different fixture manifests, per-component span
-analysis, and golden per-pass fixtures that detect drift whenever the vendored
-React Compiler revision changes.
+The pinned adapter now captures the pre-reactive CFG, pre-pruning def-use facts,
+and optimized reactive-scope facts. Vidact carries the owned terminal graph into
+its stable IR and uses it for exact early-return rejection. Classification and
+both executable emitters use OXC AST and semantic identities; generated output
+is printed with `oxc_codegen`. A versioned compatibility manifest gates
+accepted, rejected, and intentionally different fixtures.
+
+The next analysis work is lowering supported return/branch graphs into owned DOM
+ranges, selectively carrying instruction operands into that render IR, composing
+original-TSX source maps, and adding golden per-pass fixtures that detect
+upstream analysis drift.
 
 ## Verification
 
@@ -139,4 +155,9 @@ React Compiler revision changes.
   `crates/vidact-compiler/tests/browser_codegen.rs` prove the executable paths
   transform aliased and namespace hooks using the same semantic contract;
   surgical codegen also proves unsupported key forms cannot bypass analysis.
+- `crates/vidact-compiler/tests/compatibility_corpus.rs` requires every fixture
+  to be manifested and every rejection to carry its declared code and span.
+- `crates/vidact-compiler/tests/react_compiler_control_flow.rs` proves exact
+  multi-return and JSX instruction spans while guarding against callback,
+  expression-branch, and source-lookalike false positives.
 - Run `cargo test -p vidact-compiler`.

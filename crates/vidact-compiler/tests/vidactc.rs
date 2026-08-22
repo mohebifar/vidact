@@ -32,6 +32,7 @@ fn emits_versioned_analysis_json_for_supported_tsx() {
     let json = String::from_utf8(output.stdout).expect("analysis JSON is UTF-8");
     assert!(json.contains(r#""protocol":"vidact-analysis-v1""#));
     assert!(json.contains(r#""name":"Todos""#));
+    assert!(json.contains(r#""span":{"end":"#));
     assert!(json.contains(r#""kind":"keyed-list""#));
 }
 
@@ -43,4 +44,17 @@ fn exits_nonzero_and_reports_diagnostics_for_invalid_tsx() {
     let error = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
     assert!(error.contains("AnalysisFailed"));
     assert!(error.contains("fixture.tsx"));
+}
+
+#[test]
+fn reports_original_source_location_for_unsupported_component_forms() {
+    let output = analyze(include_str!(
+        "fixtures/compatibility/rejected/arrow-component.tsx"
+    ));
+
+    assert!(!output.status.success());
+    let error = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
+    assert!(error.contains("fixture.tsx:3:29"), "{error}");
+    assert!(error.contains("UnsupportedComponentForm"), "{error}");
+    assert!(error.contains("ArrowCounter"), "{error}");
 }

@@ -14,7 +14,7 @@ mod react_bindings;
 mod surgical_codegen;
 
 pub use browser_codegen::compile_spike_browser_module;
-pub use diagnostic::{Diagnostic, DiagnosticCode};
+pub use diagnostic::{Diagnostic, DiagnosticCode, SourceSpan};
 pub use ir::{ComponentIr, IrSource, IrUpdater, lower_component};
 pub use oxc_react::OxcReactAnalysisAdapter;
 pub use surgical_codegen::{

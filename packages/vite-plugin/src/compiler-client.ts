@@ -8,6 +8,10 @@ export interface VidactAnalysis {
 
 export interface VidactComponentAnalysis {
   readonly name: string
+  readonly span?: {
+    readonly start: number
+    readonly end: number
+  }
   readonly sources: readonly {
     readonly id: number
     readonly name: string

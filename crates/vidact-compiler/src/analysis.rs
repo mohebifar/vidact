@@ -1,4 +1,4 @@
-use crate::Diagnostic;
+use crate::{Diagnostic, SourceSpan};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SourceId(u32);
@@ -82,6 +82,90 @@ pub struct UpdaterFact {
     pub writes: Vec<SourceId>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ControlFlowBlockId(usize);
+
+impl ControlFlowBlockId {
+    #[must_use]
+    pub const fn new(value: usize) -> Self {
+        Self(value)
+    }
+
+    #[must_use]
+    pub const fn get(self) -> usize {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ControlFlowBlockKind {
+    Block,
+    Value,
+    Loop,
+    Sequence,
+    Catch,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ControlFlowReturnVariant {
+    Void,
+    Implicit,
+    Explicit,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ControlFlowGotoVariant {
+    Break,
+    Continue,
+    Try,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ControlFlowTerminalKind {
+    Unreachable,
+    Throw,
+    Return(ControlFlowReturnVariant),
+    Goto(ControlFlowGotoVariant),
+    If,
+    Branch,
+    Switch,
+    DoWhile,
+    While,
+    For,
+    ForOf,
+    ForIn,
+    Logical,
+    Ternary,
+    Optional,
+    Label,
+    Sequence,
+    MaybeThrow,
+    Try,
+    Scope,
+    PrunedScope,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ControlFlowTerminalFact {
+    pub order: usize,
+    pub kind: ControlFlowTerminalKind,
+    pub span: Option<SourceSpan>,
+    pub successors: Vec<ControlFlowBlockId>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ControlFlowBlockFact {
+    pub id: ControlFlowBlockId,
+    pub kind: ControlFlowBlockKind,
+    pub terminal: ControlFlowTerminalFact,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ControlFlowFacts {
+    pub entry: Option<ControlFlowBlockId>,
+    pub blocks: Vec<ControlFlowBlockFact>,
+}
+
 impl UpdaterFact {
     #[must_use]
     pub fn new(
@@ -102,6 +186,8 @@ impl UpdaterFact {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ComponentFacts {
     pub name: String,
+    pub span: Option<SourceSpan>,
+    pub control_flow: ControlFlowFacts,
     pub sources: Vec<SourceFact>,
     pub updaters: Vec<UpdaterFact>,
 }
@@ -115,9 +201,23 @@ impl ComponentFacts {
     ) -> Self {
         Self {
             name: name.into(),
+            span: None,
+            control_flow: ControlFlowFacts::default(),
             sources,
             updaters,
         }
+    }
+
+    #[must_use]
+    pub fn with_span(mut self, span: SourceSpan) -> Self {
+        self.span = Some(span);
+        self
+    }
+
+    #[must_use]
+    pub fn with_control_flow(mut self, control_flow: ControlFlowFacts) -> Self {
+        self.control_flow = control_flow;
+        self
     }
 }
 

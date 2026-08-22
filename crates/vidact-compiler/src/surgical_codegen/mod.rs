@@ -19,7 +19,7 @@ use oxc_span::{SPAN, SourceType};
 use oxc_syntax::{operator::LogicalOperator, scope::ScopeFlags, symbol::SymbolId};
 
 use crate::{
-    Diagnostic, DiagnosticCode,
+    Diagnostic, DiagnosticCode, SourceSpan,
     analysis::{ModuleInput, SourceId, SourceKind},
     ast_utils::is_event_attribute,
     ir::{ComponentIr, lower_component},
@@ -45,9 +45,10 @@ const ITEM_SCOPE: &str = "__vidactItemScope";
 const SOURCE: &str = "__vidactSource";
 const WHEN: &str = "__vidactWhen";
 
+#[derive(Debug)]
 pub struct SurgicalCompilation {
     pub code: String,
-    pub component: ComponentIr,
+    pub components: Vec<ComponentIr>,
 }
 
 pub fn compile_surgical_module(input: ModuleInput<'_>) -> Result<String, Vec<Diagnostic>> {
@@ -78,24 +79,27 @@ pub fn compile_surgical_module_with_ir(
         ))]);
     }
 
-    let mut components = analyze_program(input, &parsed.program, &semantic.semantic, &allocator)?;
-    let facts = components
-        .pop()
-        .ok_or_else(|| vec![unsupported("surgical codegen found no component")])?;
-    let ir = lower_component(facts).map_err(|diagnostic| vec![diagnostic])?;
+    let components = analyze_program(input, &parsed.program, &semantic.semantic, &allocator)?
+        .into_iter()
+        .map(lower_component)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|diagnostic| vec![diagnostic])?;
+    if components.is_empty() {
+        return Err(vec![unsupported("surgical codegen found no component")]);
+    }
     let scoping = semantic.semantic.into_scoping();
-    transform_program(&allocator, &scoping, &ir, &mut parsed.program)
+    transform_program(&allocator, &scoping, &components, &mut parsed.program)
         .map_err(|diagnostic| vec![diagnostic])?;
     Ok(SurgicalCompilation {
         code: Codegen::new().build(&parsed.program).code,
-        component: ir,
+        components,
     })
 }
 
 fn transform_program<'a>(
     allocator: &'a Allocator,
     scoping: &Scoping,
-    ir: &ComponentIr,
+    components: &[ComponentIr],
     program: &mut Program<'a>,
 ) -> Result<(), Diagnostic> {
     let ast = AstBuilder::new(allocator);
@@ -123,6 +127,21 @@ fn transform_program<'a>(
             )));
         }
     }
+    for component in components {
+        transform_component(allocator, scoping, component, program)
+            .map_err(|diagnostic| diagnostic.with_fallback_span(component.span))?;
+    }
+    program.body.insert(0, runtime_import(&ast));
+    Ok(())
+}
+
+fn transform_component<'a>(
+    allocator: &'a Allocator,
+    scoping: &Scoping,
+    ir: &ComponentIr,
+    program: &mut Program<'a>,
+) -> Result<(), Diagnostic> {
+    let ast = AstBuilder::new(allocator);
     let source_ids = ir
         .sources
         .iter()
@@ -135,7 +154,7 @@ fn transform_program<'a>(
         .map(|source| source.name.as_str())
         .collect::<BTreeSet<_>>();
     let react = ReactBindings::new(program, scoping);
-    let function = component_function_mut(program, &ir.name)
+    let function = component_function_mut(program, &ir.name, ir.span)
         .ok_or_else(|| unsupported(format!("could not find component function {}", ir.name)))?;
     let prop_bindings = prop_binding_symbols(function, &source_ids, &prop_sources, allocator)?;
     let body = function
@@ -284,7 +303,6 @@ fn transform_program<'a>(
     }
     .visit_function_body(body);
 
-    program.body.insert(0, runtime_import(&ast));
     Ok(())
 }
 
@@ -1102,19 +1120,26 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>) -> Statement<'a> {
 fn component_function_mut<'p, 'a>(
     program: &'p mut Program<'a>,
     name: &str,
+    span: Option<SourceSpan>,
 ) -> Option<&'p mut Function<'a>> {
     program
         .body
         .iter_mut()
         .find_map(|statement| match statement {
             Statement::FunctionDeclaration(function)
-                if function.id.as_ref().is_some_and(|id| id.name == name) =>
+                if function.id.as_ref().is_some_and(|id| id.name == name)
+                    && span.is_none_or(|span| {
+                        function.span.start == span.start && function.span.end == span.end
+                    }) =>
             {
                 Some(function.as_mut())
             }
             Statement::ExportDeclaration(export) => match &mut export.declaration {
                 Declaration::FunctionDeclaration(function)
-                    if function.id.as_ref().is_some_and(|id| id.name == name) =>
+                    if function.id.as_ref().is_some_and(|id| id.name == name)
+                        && span.is_none_or(|span| {
+                            function.span.start == span.start && function.span.end == span.end
+                        }) =>
                 {
                     Some(function.as_mut())
                 }

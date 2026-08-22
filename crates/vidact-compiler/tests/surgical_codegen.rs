@@ -58,6 +58,37 @@ fn compiles_namespace_react_state_imports() {
 }
 
 #[test]
+fn compiles_multiple_components_in_one_module_by_span() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "ParentAndChild.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function Child({ value }): Node {
+                return <output data-child="yes">{value}</output>;
+            }
+            export function Parent(): Node {
+                const [count, setCount] = useState(0);
+                return <button onClick={() => setCount(count + 1)}><Child value={count} /></button>;
+            }
+        "#,
+    })
+    .expect("same-module components must compile against their own analysis snapshots");
+
+    assert_eq!(
+        output.matches("__vidactCompiledRoot(").count(),
+        2,
+        "{output}"
+    );
+    assert_eq!(
+        output.matches("__vidactCreateScope()").count(),
+        2,
+        "{output}"
+    );
+    assert!(output.contains("function Child"), "{output}");
+    assert!(output.contains("function Parent"), "{output}");
+}
+
+#[test]
 fn rejects_user_bindings_that_collide_with_generated_names() {
     let diagnostics = compile_surgical_module(ModuleInput {
         filename: "Collision.tsx",
@@ -227,23 +258,31 @@ fn rejects_defaulted_prop_derivations_missing_from_data_flow_analysis() {
 
 #[test]
 fn rejects_component_returns_that_bypass_the_compiled_root() {
+    let source = r#"
+        import { useState } from 'react';
+        export function Early(): Node {
+            const [ready, setReady] = useState(false);
+            if (!ready) return <button onClick={() => setReady(true)}>load</button>;
+            return <p>ready</p>;
+        }
+    "#;
     let diagnostics = compile_surgical_module(ModuleInput {
         filename: "Early.tsx",
-        source: r#"
-            import { useState } from 'react';
-            export function Early(): Node {
-                const [ready, setReady] = useState(false);
-                if (!ready) return <button onClick={() => setReady(true)}>load</button>;
-                return <p>ready</p>;
-            }
-        "#,
+        source,
     })
     .expect_err("every accepted return path must pass through compiledRoot");
 
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == DiagnosticCode::UnsupportedSyntax
-            && diagnostic.message.contains("one top-level return")
-    }));
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == DiagnosticCode::UnsupportedControlFlow)
+        .expect("React Compiler CFG must identify the unsupported render return");
+    let span = diagnostic
+        .span
+        .expect("unsupported render control flow must retain its source span");
+    assert!(
+        source[span.start as usize..span.end as usize]
+            .contains("return <button onClick={() => setReady(true)}>load</button>")
+    );
 }
 
 #[test]

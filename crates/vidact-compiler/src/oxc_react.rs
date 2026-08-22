@@ -6,22 +6,28 @@ use std::{
 use oxc_allocator::Allocator;
 use oxc_ast::ast::Program;
 use oxc_parser::Parser;
-use oxc_react_compiler::{CompileResult, FunctionAnalysis, PluginOptions, compile};
+use oxc_react_compiler::{
+    BlockKindAnalysis, CompileResult, ControlFlowAnalysis, FunctionAnalysis, GotoVariantAnalysis,
+    PluginOptions, ReturnVariantAnalysis, TerminalKindAnalysis, compile,
+};
 use oxc_semantic::{Semantic, SemanticBuilder};
 use oxc_span::SourceType;
 use oxc_syntax::symbol::SymbolId;
 
 use crate::{
-    Diagnostic, DiagnosticCode,
+    Diagnostic, DiagnosticCode, SourceSpan,
     analysis::{
-        ComponentFacts, ModuleInput, ReactAnalysisAdapter, SourceFact, SourceId, UpdaterFact,
-        UpdaterId, UpdaterKind,
+        ComponentFacts, ControlFlowBlockFact, ControlFlowBlockId, ControlFlowBlockKind,
+        ControlFlowFacts, ControlFlowGotoVariant, ControlFlowReturnVariant,
+        ControlFlowTerminalFact, ControlFlowTerminalKind, ModuleInput, ReactAnalysisAdapter,
+        SourceFact, SourceId, UpdaterFact, UpdaterId, UpdaterKind,
     },
 };
 
 mod classifier;
 mod def_use;
 
+use crate::ast_utils::component_name_for_span;
 use classifier::{classify_component, render_updaters};
 use def_use::CompilerDefUse;
 
@@ -67,18 +73,28 @@ pub(crate) fn analyze_program(
     semantic: &Semantic<'_>,
     allocator: &Allocator,
 ) -> Result<Vec<ComponentFacts>, Vec<Diagnostic>> {
-    let analyses = run_react_analysis(input, program, semantic, allocator)?;
-    let [analysis] = analyses.as_slice() else {
+    let mut analyses = run_react_analysis(input, program, semantic, allocator)?;
+    if analyses.is_empty() {
         return Err(vec![analysis_error(format!(
-            "the analysis spike supports exactly one component per module; React Compiler found {} in {}",
-            analyses.len(),
-            input.filename
+            "React Compiler found no components in {}",
+            input.filename,
         ))]);
-    };
+    }
+    analyses.sort_by_key(|analysis| analysis.span.map_or(u32::MAX, |span| span.0));
 
-    lower_snapshot(program, semantic, analysis)
-        .map(|facts| vec![facts])
-        .map_err(|message| vec![analysis_error(message)])
+    let mut components = Vec::with_capacity(analyses.len());
+    let mut diagnostics = Vec::new();
+    for analysis in &analyses {
+        match lower_snapshot(program, semantic, analysis) {
+            Ok(component) => components.push(component),
+            Err(diagnostic) => diagnostics.push(diagnostic),
+        }
+    }
+    if diagnostics.is_empty() {
+        Ok(components)
+    } else {
+        Err(diagnostics)
+    }
 }
 
 fn run_react_analysis(
@@ -123,9 +139,31 @@ fn lower_snapshot(
     program: &Program<'_>,
     semantic: &Semantic<'_>,
     analysis: &FunctionAnalysis,
-) -> Result<ComponentFacts, String> {
-    let component_name = analysis.name.as_deref().unwrap_or("AnonymousComponent");
-    let mut syntax = classify_component(program, semantic.scoping(), component_name)?;
+) -> Result<ComponentFacts, Diagnostic> {
+    let component_span = analysis
+        .span
+        .map(|(start, end)| SourceSpan::new(start, end))
+        .ok_or_else(|| {
+            analysis_error("React Compiler did not provide a source span for a component")
+        })?;
+    let component_name = analysis
+        .name
+        .as_deref()
+        .or_else(|| component_name_for_span(program, component_span))
+        .unwrap_or("AnonymousComponent");
+    let control_flow = lower_control_flow(&analysis.control_flow);
+    validate_supported_control_flow(&control_flow, component_name, component_span)?;
+    let mut syntax =
+        classify_component(program, semantic.scoping(), component_name, component_span).map_err(
+            |message| {
+                let code = if message.contains("not a supported named function declaration") {
+                    DiagnosticCode::UnsupportedComponentForm
+                } else {
+                    DiagnosticCode::AnalysisFailed
+                };
+                Diagnostic::new(code, message).with_span(component_span)
+            },
+        )?;
     let def_use = CompilerDefUse::new(analysis);
 
     let provisional = syntax
@@ -248,14 +286,123 @@ fn lower_snapshot(
         push_updater(&mut updaters, UpdaterKind::Derived, reads, vec![write]);
     }
 
-    updaters.extend(render_updaters(
-        syntax.return_expression,
-        semantic.scoping(),
-        &source_symbols,
-        updaters.len(),
-    )?);
+    updaters.extend(
+        render_updaters(
+            syntax.return_expression,
+            semantic.scoping(),
+            &source_symbols,
+            updaters.len(),
+        )
+        .map_err(|message| analysis_error(message).with_span(component_span))?,
+    );
 
-    Ok(ComponentFacts::new(component_name, source_facts, updaters))
+    Ok(ComponentFacts::new(component_name, source_facts, updaters)
+        .with_span(component_span)
+        .with_control_flow(control_flow))
+}
+
+fn lower_control_flow(control_flow: &ControlFlowAnalysis) -> ControlFlowFacts {
+    ControlFlowFacts {
+        entry: Some(ControlFlowBlockId::new(control_flow.entry)),
+        blocks: control_flow
+            .blocks
+            .iter()
+            .map(|block| ControlFlowBlockFact {
+                id: ControlFlowBlockId::new(block.id),
+                kind: match block.kind {
+                    BlockKindAnalysis::Block => ControlFlowBlockKind::Block,
+                    BlockKindAnalysis::Value => ControlFlowBlockKind::Value,
+                    BlockKindAnalysis::Loop => ControlFlowBlockKind::Loop,
+                    BlockKindAnalysis::Sequence => ControlFlowBlockKind::Sequence,
+                    BlockKindAnalysis::Catch => ControlFlowBlockKind::Catch,
+                },
+                terminal: ControlFlowTerminalFact {
+                    order: block.terminal.id,
+                    kind: match block.terminal.kind {
+                        TerminalKindAnalysis::Unreachable => ControlFlowTerminalKind::Unreachable,
+                        TerminalKindAnalysis::Throw => ControlFlowTerminalKind::Throw,
+                        TerminalKindAnalysis::Return(variant) => {
+                            ControlFlowTerminalKind::Return(match variant {
+                                ReturnVariantAnalysis::Void => ControlFlowReturnVariant::Void,
+                                ReturnVariantAnalysis::Implicit => {
+                                    ControlFlowReturnVariant::Implicit
+                                }
+                                ReturnVariantAnalysis::Explicit => {
+                                    ControlFlowReturnVariant::Explicit
+                                }
+                            })
+                        }
+                        TerminalKindAnalysis::Goto(variant) => {
+                            ControlFlowTerminalKind::Goto(match variant {
+                                GotoVariantAnalysis::Break => ControlFlowGotoVariant::Break,
+                                GotoVariantAnalysis::Continue => ControlFlowGotoVariant::Continue,
+                                GotoVariantAnalysis::Try => ControlFlowGotoVariant::Try,
+                            })
+                        }
+                        TerminalKindAnalysis::If => ControlFlowTerminalKind::If,
+                        TerminalKindAnalysis::Branch => ControlFlowTerminalKind::Branch,
+                        TerminalKindAnalysis::Switch => ControlFlowTerminalKind::Switch,
+                        TerminalKindAnalysis::DoWhile => ControlFlowTerminalKind::DoWhile,
+                        TerminalKindAnalysis::While => ControlFlowTerminalKind::While,
+                        TerminalKindAnalysis::For => ControlFlowTerminalKind::For,
+                        TerminalKindAnalysis::ForOf => ControlFlowTerminalKind::ForOf,
+                        TerminalKindAnalysis::ForIn => ControlFlowTerminalKind::ForIn,
+                        TerminalKindAnalysis::Logical => ControlFlowTerminalKind::Logical,
+                        TerminalKindAnalysis::Ternary => ControlFlowTerminalKind::Ternary,
+                        TerminalKindAnalysis::Optional => ControlFlowTerminalKind::Optional,
+                        TerminalKindAnalysis::Label => ControlFlowTerminalKind::Label,
+                        TerminalKindAnalysis::Sequence => ControlFlowTerminalKind::Sequence,
+                        TerminalKindAnalysis::MaybeThrow => ControlFlowTerminalKind::MaybeThrow,
+                        TerminalKindAnalysis::Try => ControlFlowTerminalKind::Try,
+                        TerminalKindAnalysis::Scope => ControlFlowTerminalKind::Scope,
+                        TerminalKindAnalysis::PrunedScope => ControlFlowTerminalKind::PrunedScope,
+                    },
+                    span: block
+                        .terminal
+                        .span
+                        .map(|(start, end)| SourceSpan::new(start, end)),
+                    successors: block
+                        .terminal
+                        .successors
+                        .iter()
+                        .copied()
+                        .map(ControlFlowBlockId::new)
+                        .collect(),
+                },
+            })
+            .collect(),
+    }
+}
+
+fn validate_supported_control_flow(
+    control_flow: &ControlFlowFacts,
+    component_name: &str,
+    component_span: SourceSpan,
+) -> Result<(), Diagnostic> {
+    let explicit_returns = control_flow
+        .blocks
+        .iter()
+        .filter(|block| {
+            block.terminal.kind
+                == ControlFlowTerminalKind::Return(ControlFlowReturnVariant::Explicit)
+        })
+        .collect::<Vec<_>>();
+    if explicit_returns.len() <= 1 {
+        return Ok(());
+    }
+
+    let span = explicit_returns
+        .iter()
+        .filter_map(|block| block.terminal.span)
+        .min_by_key(|span| span.start)
+        .unwrap_or(component_span);
+    Err(Diagnostic::new(
+        DiagnosticCode::UnsupportedControlFlow,
+        format!(
+            "component {component_name} has multiple render returns; typed multi-return lowering is not implemented"
+        ),
+    )
+    .with_span(span))
 }
 
 fn push_updater(

@@ -98,8 +98,13 @@ AST, and delegates printing to `oxc_codegen`. TodoMVC proves the full
 TSX-to-browser path including array insertion, filtering, editing, removal, and
 surgical DOM identity. Vidact-specific source and render classification now
 uses OXC AST nodes and semantic binding identities; aliased and namespace React
-state imports work, while foreign hook-shaped calls fail closed. The next
-milestone is a source-located accepted/rejected compatibility corpus and
-per-component span analysis. The project is not production-ready until effects,
-complete component/DOM ownership semantics, original-TSX source maps,
+state imports work, while foreign hook-shaped calls fail closed. Exact function
+spans now isolate several same-module components, and the versioned compatibility
+manifest distinguishes accepted, rejected, and intentionally different syntax
+with source-located rejections. React Compiler's owned CFG now reaches Vidact's
+IR, and multiple render returns reject at the exact return site without callback
+or source-text false positives. The next milestone is DOM-range lowering for
+that typed control flow, narrower non-return feature diagnostics, original-TSX
+source maps, and the multi-root component-range ABI. The project is not
+production-ready until effects, complete component/DOM ownership semantics,
 SSR/hydration, and cross-browser gates exist.

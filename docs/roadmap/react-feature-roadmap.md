@@ -1,6 +1,6 @@
 # React feature roadmap
 
-Updated: 2026-08-21
+Updated: 2026-08-22
 Decision state: Proposed
 
 ## Product position
@@ -67,20 +67,24 @@ cancellation, and scheduler integration.
 
 **Goal:** no accepted program silently falls outside the updater model.
 
-Current baseline: named-function components, lexical React `useState` imports
-(including aliases and namespaces), direct props/state/derived declarations,
-returns, JSX binding sites, and keyed maps are now classified from OXC AST and
-semantic symbols. Multiple-component span matching, typed control-flow IR,
-source-located diagnostics, and the compatibility manifests remain.
+Current baseline: span-keyed named-function components (including several per
+module), lexical React `useState` imports (including aliases and namespaces),
+direct props/state/derived declarations, returns, JSX binding sites, and keyed
+maps are classified from OXC AST and semantic symbols. The first versioned
+compatibility manifest and source-located fallback diagnostics exist. Typed
+React Compiler CFG terminals now reach Vidact's stable IR, and multiple render
+returns reject at an exact terminal span without nested-callback or source-text
+false positives. DOM-range lowering of that graph, other narrow feature-site
+spans, arrow/default lowering, and composed source maps remain.
 
 Build:
 
 - OXC AST/semantic classification for components, lexical React imports, hook
   calls, props, declarations, returns, JSX sites, spreads, and list pipelines.
-- Per-component analysis keyed by semantic function span; support multiple
-  components per module without mixing facts.
-- A typed render/control-flow IR that represents every return path and owned
-  range before codegen.
+- Extend span-keyed lowering from named function declarations to supported arrow
+  and export forms without mixing facts.
+- Lower the captured typed return/branch graph into an owned-range render IR
+  before codegen.
 - Stable, source-located diagnostics with accepted/rejected/different fixtures.
 - Original-TSX source maps, compiler/runtime protocol versions, and transform
   order validation.
@@ -467,16 +471,20 @@ Every phase must preserve:
 
 ## Recommended next milestone
 
-Do not start with Suspense or `useImperativeHandle` in isolation. The next
-milestone should combine Phase 0 and the narrow foundation of Phase 1:
+Do not start with Suspense or `useImperativeHandle` in isolation. Span-keyed
+same-module components, direct prop slots, nested ownership, host refs,
+`useRef`, and compiled parent-to-child updates are now proven. The next
+milestone should finish the remaining soundness and component-range foundation:
 
-1. make component/hook/return/JSX classification AST- and symbol-based;
-2. reject every known silent-miscompile fixture;
-3. define the owned component range and stable reactive prop-store ABI;
-4. attach nested component disposal to the owner tree;
-5. add host refs and `useRef` as the first consumer of commit timing;
-6. prove `<Child value={state} />`, conditional child removal, and stateful keyed
-   children before adding effects or async features.
+1. represent early and conditional returns in typed control-flow/range IR;
+2. narrow fallback component diagnostics to the exact unsupported AST site;
+3. compose generated maps back to original TSX and version compiler/runtime
+   protocol inputs;
+4. make every component result an owned range so fragments and multi-root
+   components share one ABI;
+5. complete prop add/update/delete, rest, destructuring, and spread semantics;
+6. extend span-keyed lowering to supported arrow/export forms, then add
+   ref-as-prop and the layout phase required by imperative handles.
 
-That milestone turns the TodoMVC-specific composition trick into the general
-foundation required by nearly every React feature that follows.
+That milestone makes the declared subset sound before effects or async features
+expand the lifecycle surface.

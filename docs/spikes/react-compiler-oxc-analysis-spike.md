@@ -2,7 +2,7 @@
 
 Status: **proven for the bounded corpus; not production-ready**
 
-This spike answers one question: can Vidact reuse the Rust/OXC React Compiler analysis pipeline without adopting its code generator or runtime? Yes. A small fork can capture owned def-use and optimized-scope snapshots without applying React codegen.
+This spike answers one question: can Vidact reuse the Rust/OXC React Compiler analysis pipeline without adopting its code generator or runtime? Yes. A small fork can capture an owned analyzed CFG plus def-use and optimized-scope snapshots without applying React codegen.
 
 ## Decision
 
@@ -22,18 +22,20 @@ The Oxc submodule is pinned to upstream release commit `45a17c25d188bf1b28963848
 flowchart LR
     A["TSX source"] --> B["OXC parser + semantic model"]
     B --> C["React Compiler HIR + SSA + effects"]
-    C --> D["Optimized reactive scopes"]
-    D --> E["Owned pre-codegen snapshot"]
-    E --> F["Vidact DOM classification"]
-    F --> G["ComponentFacts"]
-    G --> H["Vidact static updater IR"]
-    H --> I["Direct DOM module"]
-    I --> J["Vitest Browser + Chromium"]
+    C --> D["Owned typed CFG snapshot"]
+    C --> E["Optimized reactive scopes"]
+    E --> F["Owned def-use + scope snapshot"]
+    D --> G["Vidact DOM classification"]
+    F --> G
+    G --> H["ComponentFacts + control flow"]
+    H --> I["Vidact static updater IR"]
+    I --> J["Direct DOM module"]
+    J --> K["Vitest Browser + Chromium"]
 ```
 
-The fork adds owned function, scope, dependency, instruction, and value records. No arena reference, React HIR node, or OXC AST node crosses the crate boundary. Local value IDs and declaration IDs are copied as plain integers, with source spans, so Vidact can follow unnamed SSA temporaries and distinguish shadowed bindings without depending on React Compiler's index types.
+The fork adds owned function, CFG block, typed terminal, instruction-kind, scope, dependency, and value records. No arena reference, React HIR node, or OXC AST node crosses the crate boundary. Block, evaluation, local value, and declaration IDs are copied as plain integers with source spans, so Vidact can retain control flow, follow unnamed SSA temporaries, and distinguish shadowed bindings without depending on React Compiler's index types.
 
-The seam has two capture moments. Def-use instructions are copied immediately before `prune_unused_lvalues`, because that optimization deliberately erases source binding lvalues that Vidact still needs to connect `count -> doubled`. Optimized reactive scopes are copied after pruning, merging, stable block IDs, renaming, and hoisted-context pruning. The two owned views are combined into one `FunctionAnalysis` before React codegen.
+The seam has three capture moments. The analyzed HIR CFG is copied after scope dependency propagation and before conversion to React Compiler's codegen-oriented reactive tree. Def-use instructions are copied immediately before `prune_unused_lvalues`, because that optimization deliberately erases source binding lvalues that Vidact still needs to connect `count -> doubled`. Optimized reactive scopes are copied after pruning, merging, stable block IDs, renaming, and hoisted-context pruning. The three owned views are combined into one `FunctionAnalysis` before React codegen.
 
 The final scope capture occurs after these important passes:
 
@@ -58,7 +60,7 @@ Four browser-oriented TSX shapes lower to the existing `ComponentFacts` contract
 | `Todos` | array state and keyed structural updater using `item.id` |
 | `AliasCounter` | `count -> direct -> alias -> doubled`, attribute and text updaters |
 
-The tests execute the real OXC parser, OXC semantic builder, and vendored React Compiler pipeline. The counter edges are recovered through React Compiler's def-use chain, including unnamed temporaries, rather than lexical identifier matching. Declaration identity prevents a shadowed parameter named `count` from becoming a false state dependency. A fixture rejected by any stage returns an `AnalysisFailed` diagnostic rather than silently falling back. The bounded adapter also fails closed when a module contains multiple components, until the DOM classifier is scoped using OXC function spans.
+The tests execute the real OXC parser, OXC semantic builder, and patched React Compiler pipeline. The counter edges are recovered through React Compiler's def-use chain, including unnamed temporaries, rather than lexical identifier matching. Declaration identity prevents a shadowed parameter named `count` from becoming a false state dependency. Owned function spans key each snapshot to its exact OXC function declaration, so several same-module components receive isolated facts. CFG tests prove two exact early-return sites while nested callback returns, expression branches, and source-text lookalikes do not become false component returns. Unsupported component forms fail with a source-located diagnostic rather than falling back to name matching.
 
 The `AliasCounter` fixture also crosses the full executable boundary. A Rust example regenerates the checked-in TypeScript module, and a Rust test requires that file to match current compiler output exactly before the browser suite runs. That module creates one stable button and text node, installs compiler-ordered static updaters, and imports only the small Vidact runtime. Vitest Browser then proves initial rendering, click updates, functional setters, batching, updater order, attribute/text writes, and DOM node identity in Chromium. The test never hand-writes the updater graph.
 
@@ -83,7 +85,7 @@ The Vidact analysis classifier remains intentionally narrow, but it now recogniz
 - JSX expression text and attributes;
 - direct `collection.map(...)` with a property key.
 
-It handles hook import aliases and namespaces, straight-line value aliases, and shadowed declarations. Foreign hook-shaped calls fail closed. It does not yet support multiple components, nested component scopes, computed keys, fragments with mixed update sites, arbitrary destructuring, multiple returns, optional chaining, or source transforms. A newer surgical codegen slice connects the analysis, state rewriting, conditional ranges, and keyed-list runtime for TodoMVC. Its browser test proves stable root identity and preservation of an unaffected keyed record. This is a vertical proof, not a declaration that arbitrary TSX is supported.
+It handles several named function components per module, hook import aliases and namespaces, straight-line value aliases, and shadowed declarations. Foreign hook-shaped calls fail closed. Multiple returns are recognized from React Compiler's CFG and reject at the first exact return span, but are not yet lowered to DOM ranges. The classifier also does not yet lower arrow/default component forms, computed keys, fragments with mixed update sites, arbitrary destructuring, optional chaining, or source transforms. A newer surgical codegen slice connects the analysis, state rewriting, conditional ranges, and keyed-list runtime for TodoMVC. Browser tests prove stable root identity, preservation of unaffected keyed records, and a surgical parent-to-child update between components declared in one file. This is a vertical proof, not a declaration that arbitrary TSX is supported.
 
 The executable emitter is deliberately narrower still: one numeric state tuple, numeric `const` derivations, one intrinsic root element, expression attributes, one text expression, and an optional inline setter-based click handler. Unlike the analysis classifier, its syntax path is OXC AST-backed. It clones source expressions with semantic IDs, rewrites only references resolved to the state tuple, constructs a fresh output AST, and prints with `oxc_codegen`. String literals are therefore preserved instead of being rejected or textually rewritten. Static attributes, mixed children, arrays, and other unsupported shapes return `UnsupportedSyntax`; they are never approximated with a partial render.
 

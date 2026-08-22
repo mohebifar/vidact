@@ -45,11 +45,11 @@ fn run() -> Result<Value, String> {
     };
     if command.as_deref() == Some("compile") {
         let compilation = compile_surgical_module_with_ir(input)
-            .map_err(|diagnostics| format_diagnostics(&filename, &diagnostics))?;
+            .map_err(|diagnostics| format_diagnostics(&filename, &source, &diagnostics))?;
         return Ok(json!({
             "protocol": "vidact-compile-v1",
             "code": compilation.code,
-            "analysis": analysis_json([compilation.component]),
+            "analysis": analysis_json(compilation.components),
         }));
     }
 
@@ -59,12 +59,12 @@ fn run() -> Result<Value, String> {
 fn analyze(input: ModuleInput<'_>) -> Result<Value, String> {
     let facts = OxcReactAnalysisAdapter
         .analyze(input)
-        .map_err(|diagnostics| format_diagnostics(input.filename, &diagnostics))?;
+        .map_err(|diagnostics| format_diagnostics(input.filename, input.source, &diagnostics))?;
     let components = facts
         .into_iter()
         .map(lower_component)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|diagnostic| format_diagnostics(input.filename, &[diagnostic]))?;
+        .map_err(|diagnostic| format_diagnostics(input.filename, input.source, &[diagnostic]))?;
 
     Ok(analysis_json(components))
 }
@@ -74,6 +74,10 @@ fn analysis_json(components: impl IntoIterator<Item = ComponentIr>) -> Value {
         "protocol": "vidact-analysis-v1",
         "components": components.into_iter().map(|component| json!({
             "name": component.name,
+            "span": component.span.map(|span| json!({
+                "start": span.start,
+                "end": span.end,
+            })),
             "sources": component.sources.into_iter().map(|source| json!({
                 "id": source.id.get(),
                 "name": source.name,
@@ -111,10 +115,33 @@ fn updater_kind(kind: &UpdaterKind) -> &'static str {
     }
 }
 
-fn format_diagnostics(filename: &str, diagnostics: &[Diagnostic]) -> String {
+fn format_diagnostics(filename: &str, source: &str, diagnostics: &[Diagnostic]) -> String {
     diagnostics
         .iter()
-        .map(|diagnostic| format!("{filename}: {:?}: {}", diagnostic.code, diagnostic.message))
+        .map(|diagnostic| {
+            let location = diagnostic.span.map_or_else(
+                || filename.to_string(),
+                |span| {
+                    let (line, column) = line_column(source, span.start);
+                    format!("{filename}:{line}:{column}")
+                },
+            );
+            format!("{location}: {:?}: {}", diagnostic.code, diagnostic.message)
+        })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn line_column(source: &str, offset: u32) -> (usize, usize) {
+    let prefix = &source[..usize::try_from(offset)
+        .unwrap_or(usize::MAX)
+        .min(source.len())];
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+    let column = prefix
+        .rsplit_once('\n')
+        .map_or(prefix, |(_, tail)| tail)
+        .chars()
+        .count()
+        + 1;
+    (line, column)
 }

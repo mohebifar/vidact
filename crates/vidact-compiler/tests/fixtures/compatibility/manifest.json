@@ -1,0 +1,34 @@
+{
+  "contract": "vidact-react-subset-v1",
+  "fixtures": [
+    {
+      "path": "accepted/multiple-components.tsx",
+      "expectation": "accepted",
+      "components": ["Child", "Parent"]
+    },
+    {
+      "path": "rejected/arrow-component.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedComponentForm",
+      "spanContains": "() =>"
+    },
+    {
+      "path": "rejected/early-return.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedControlFlow",
+      "spanContains": "return <button"
+    },
+    {
+      "path": "rejected/reactive-spread.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "function ReactiveSpread"
+    },
+    {
+      "path": "different/native-change-event.tsx",
+      "expectation": "different",
+      "components": ["NativeChangeEvent"],
+      "difference": "onChange currently follows the native change event instead of React input semantics"
+    }
+  ]
+}

@@ -4,20 +4,20 @@ Date: Sat, 22 Aug 2026 00:00:05 -0700
 Subject: [PATCH] feat(react-compiler): expose owned analysis snapshots
 
 ---
- crates/oxc_react_compiler/src/analysis.rs     | 193 ++++++++++++++++++
- crates/oxc_react_compiler/src/lib.rs          |   4 +
+ crates/oxc_react_compiler/src/analysis.rs     | 566 ++++++++++++++++++
+ crates/oxc_react_compiler/src/lib.rs          |   7 +
  .../src/react_compiler/entrypoint/imports.rs  |   4 +
- .../src/react_compiler/entrypoint/pipeline.rs |   6 +
+ .../src/react_compiler/entrypoint/pipeline.rs |   9 +
  .../src/react_compiler/entrypoint/program.rs  |   7 +
- 5 files changed, 214 insertions(+)
+ 5 files changed, 593 insertions(+)
  create mode 100644 crates/oxc_react_compiler/src/analysis.rs
 
 diff --git a/crates/oxc_react_compiler/src/analysis.rs b/crates/oxc_react_compiler/src/analysis.rs
 new file mode 100644
-index 00000000000000..7920c999907c41
+index 00000000000000..7db4c8763dd7fd
 --- /dev/null
 +++ b/crates/oxc_react_compiler/src/analysis.rs
-@@ -0,0 +1,193 @@
+@@ -0,0 +1,566 @@
 +//! Owned, pre-codegen analysis snapshots for compiler integrations.
 +//!
 +//! These types intentionally do not expose the arena-backed React Compiler HIR.
@@ -26,7 +26,8 @@ index 00000000000000..7920c999907c41
 +//! still available.
 +
 +use crate::react_compiler_hir::{
-+    ReactiveFunction, ReactiveInstruction, ReactiveScopeBlock, ReactiveValue,
++    BlockKind, GotoVariant, HirFunction, InstructionValue, ReactiveFunction, ReactiveInstruction,
++    ReactiveScopeBlock, ReactiveValue, ReturnVariant, Terminal,
 +    environment::Environment,
 +    visitors::{each_instruction_value_lvalue, each_instruction_value_operand},
 +};
@@ -37,8 +38,142 @@ index 00000000000000..7920c999907c41
 +#[derive(Clone, Debug, Eq, PartialEq)]
 +pub struct FunctionAnalysis {
 +    pub name: Option<String>,
++    /// Byte range of the original function in the compiler input.
++    pub span: Option<(u32, u32)>,
++    /// Owned snapshot of the analyzed HIR control-flow graph before it is
++    /// converted into React Compiler's codegen-oriented reactive tree.
++    pub control_flow: ControlFlowAnalysis,
 +    pub scopes: Vec<ScopeAnalysis>,
 +    pub instructions: Vec<InstructionAnalysis>,
++}
++
++#[derive(Clone, Debug, Eq, PartialEq)]
++pub struct ControlFlowAnalysis {
++    pub entry: usize,
++    pub blocks: Vec<BlockAnalysis>,
++}
++
++#[derive(Clone, Debug, Eq, PartialEq)]
++pub struct BlockAnalysis {
++    pub id: usize,
++    pub kind: BlockKindAnalysis,
++    pub instructions: Vec<ControlFlowInstructionAnalysis>,
++    pub terminal: TerminalAnalysis,
++}
++
++#[derive(Clone, Copy, Debug, Eq, PartialEq)]
++pub enum BlockKindAnalysis {
++    Block,
++    Value,
++    Loop,
++    Sequence,
++    Catch,
++}
++
++#[derive(Clone, Debug, Eq, PartialEq)]
++pub struct ControlFlowInstructionAnalysis {
++    pub id: usize,
++    pub kind: InstructionKindAnalysis,
++    pub span: Option<(u32, u32)>,
++    pub lvalues: Vec<ValueAnalysis>,
++    pub dependencies: Vec<ValueAnalysis>,
++}
++
++#[derive(Clone, Copy, Debug, Eq, PartialEq)]
++pub enum InstructionKindAnalysis {
++    LoadLocal,
++    LoadContext,
++    DeclareLocal,
++    DeclareContext,
++    StoreLocal,
++    StoreContext,
++    Destructure,
++    Primitive,
++    JsxText,
++    BinaryExpression,
++    NewExpression,
++    CallExpression,
++    MethodCall,
++    UnaryExpression,
++    TypeCastExpression,
++    JsxExpression,
++    ObjectExpression,
++    ObjectMethod,
++    ArrayExpression,
++    JsxFragment,
++    RegExpLiteral,
++    MetaProperty,
++    PropertyStore,
++    PropertyLoad,
++    PropertyDelete,
++    ComputedStore,
++    ComputedLoad,
++    ComputedDelete,
++    LoadGlobal,
++    StoreGlobal,
++    FunctionExpression,
++    TaggedTemplateExpression,
++    TemplateLiteral,
++    Await,
++    GetIterator,
++    IteratorNext,
++    NextPropertyOf,
++    PrefixUpdate,
++    PostfixUpdate,
++    Debugger,
++    StartMemoize,
++    FinishMemoize,
++}
++
++#[derive(Clone, Debug, Eq, PartialEq)]
++pub struct TerminalAnalysis {
++    pub id: usize,
++    pub kind: TerminalKindAnalysis,
++    pub span: Option<(u32, u32)>,
++    /// Value operands in terminal-defined order. For example, a return has one
++    /// value and an if has its test value.
++    pub operands: Vec<ValueAnalysis>,
++    /// Successor block ids in terminal-defined order.
++    pub successors: Vec<usize>,
++}
++
++#[derive(Clone, Copy, Debug, Eq, PartialEq)]
++pub enum TerminalKindAnalysis {
++    Unreachable,
++    Throw,
++    Return(ReturnVariantAnalysis),
++    Goto(GotoVariantAnalysis),
++    If,
++    Branch,
++    Switch,
++    DoWhile,
++    While,
++    For,
++    ForOf,
++    ForIn,
++    Logical,
++    Ternary,
++    Optional,
++    Label,
++    Sequence,
++    MaybeThrow,
++    Try,
++    Scope,
++    PrunedScope,
++}
++
++#[derive(Clone, Copy, Debug, Eq, PartialEq)]
++pub enum ReturnVariantAnalysis {
++    Void,
++    Implicit,
++    Explicit,
++}
++
++#[derive(Clone, Copy, Debug, Eq, PartialEq)]
++pub enum GotoVariantAnalysis {
++    Break,
++    Continue,
++    Try,
 +}
 +
 +#[derive(Clone, Debug, Eq, PartialEq)]
@@ -68,10 +203,62 @@ index 00000000000000..7920c999907c41
 +    pub span: Option<(u32, u32)>,
 +}
 +
++pub(crate) fn capture_control_flow(
++    function: &HirFunction<'_>,
++    environment: &Environment<'_>,
++) -> ControlFlowAnalysis {
++    let visitor = ScopeSnapshotVisitor { environment };
++    let blocks = function
++        .body
++        .blocks
++        .iter()
++        .map(|(_, block)| {
++            let instructions = block
++                .instructions
++                .iter()
++                .map(|instruction_id| {
++                    let instruction = &function.instructions[instruction_id.index()];
++                    let mut lvalues = vec![visitor.value_analysis(instruction.lvalue.identifier)];
++                    lvalues.extend(
++                        each_instruction_value_lvalue(&instruction.value)
++                            .into_iter()
++                            .map(|place| visitor.value_analysis(place.identifier)),
++                    );
++                    lvalues.sort_unstable_by_key(|value| value.id);
++                    lvalues.dedup_by_key(|value| value.id);
++                    let mut dependencies =
++                        each_instruction_value_operand(&instruction.value, environment)
++                            .into_iter()
++                            .map(|place| visitor.value_analysis(place.identifier))
++                            .collect::<Vec<_>>();
++                    dependencies.sort_unstable_by_key(|value| value.id);
++                    dependencies.dedup_by_key(|value| value.id);
++                    ControlFlowInstructionAnalysis {
++                        id: instruction.id.index(),
++                        kind: instruction_kind(&instruction.value),
++                        span: instruction.span.map(|span| (span.start, span.end)),
++                        lvalues,
++                        dependencies,
++                    }
++                })
++                .collect();
++            BlockAnalysis {
++                id: block.id.index(),
++                kind: block_kind(block.kind),
++                instructions,
++                terminal: terminal_analysis(&block.terminal, &visitor),
++            }
++        })
++        .collect();
++
++    ControlFlowAnalysis { entry: function.body.entry.index(), blocks }
++}
++
 +pub(crate) fn capture(
 +    function: &ReactiveFunction<'_>,
 +    environment: &Environment<'_>,
 +    instructions: Vec<InstructionAnalysis>,
++    control_flow: ControlFlowAnalysis,
 +) -> FunctionAnalysis {
 +    let visitor = ScopeSnapshotVisitor { environment };
 +    let mut state = SnapshotState::default();
@@ -79,6 +266,8 @@ index 00000000000000..7920c999907c41
 +
 +    FunctionAnalysis {
 +        name: function.id.or(function.name_hint).map(|name| name.as_str().to_owned()),
++        span: function.span.map(|span| (span.start, span.end)),
++        control_flow,
 +        scopes: state.scopes,
 +        instructions,
 +    }
@@ -211,8 +400,192 @@ index 00000000000000..7920c999907c41
 +        }
 +    }
 +}
++
++fn block_kind(kind: BlockKind) -> BlockKindAnalysis {
++    match kind {
++        BlockKind::Block => BlockKindAnalysis::Block,
++        BlockKind::Value => BlockKindAnalysis::Value,
++        BlockKind::Loop => BlockKindAnalysis::Loop,
++        BlockKind::Sequence => BlockKindAnalysis::Sequence,
++        BlockKind::Catch => BlockKindAnalysis::Catch,
++    }
++}
++
++fn instruction_kind(value: &InstructionValue<'_>) -> InstructionKindAnalysis {
++    match value {
++        InstructionValue::LoadLocal { .. } => InstructionKindAnalysis::LoadLocal,
++        InstructionValue::LoadContext { .. } => InstructionKindAnalysis::LoadContext,
++        InstructionValue::DeclareLocal { .. } => InstructionKindAnalysis::DeclareLocal,
++        InstructionValue::DeclareContext { .. } => InstructionKindAnalysis::DeclareContext,
++        InstructionValue::StoreLocal { .. } => InstructionKindAnalysis::StoreLocal,
++        InstructionValue::StoreContext { .. } => InstructionKindAnalysis::StoreContext,
++        InstructionValue::Destructure { .. } => InstructionKindAnalysis::Destructure,
++        InstructionValue::Primitive { .. } => InstructionKindAnalysis::Primitive,
++        InstructionValue::JSXText { .. } => InstructionKindAnalysis::JsxText,
++        InstructionValue::BinaryExpression { .. } => InstructionKindAnalysis::BinaryExpression,
++        InstructionValue::NewExpression { .. } => InstructionKindAnalysis::NewExpression,
++        InstructionValue::CallExpression { .. } => InstructionKindAnalysis::CallExpression,
++        InstructionValue::MethodCall { .. } => InstructionKindAnalysis::MethodCall,
++        InstructionValue::UnaryExpression { .. } => InstructionKindAnalysis::UnaryExpression,
++        InstructionValue::TypeCastExpression { .. } => InstructionKindAnalysis::TypeCastExpression,
++        InstructionValue::JsxExpression { .. } => InstructionKindAnalysis::JsxExpression,
++        InstructionValue::ObjectExpression { .. } => InstructionKindAnalysis::ObjectExpression,
++        InstructionValue::ObjectMethod { .. } => InstructionKindAnalysis::ObjectMethod,
++        InstructionValue::ArrayExpression { .. } => InstructionKindAnalysis::ArrayExpression,
++        InstructionValue::JsxFragment { .. } => InstructionKindAnalysis::JsxFragment,
++        InstructionValue::RegExpLiteral { .. } => InstructionKindAnalysis::RegExpLiteral,
++        InstructionValue::MetaProperty { .. } => InstructionKindAnalysis::MetaProperty,
++        InstructionValue::PropertyStore { .. } => InstructionKindAnalysis::PropertyStore,
++        InstructionValue::PropertyLoad { .. } => InstructionKindAnalysis::PropertyLoad,
++        InstructionValue::PropertyDelete { .. } => InstructionKindAnalysis::PropertyDelete,
++        InstructionValue::ComputedStore { .. } => InstructionKindAnalysis::ComputedStore,
++        InstructionValue::ComputedLoad { .. } => InstructionKindAnalysis::ComputedLoad,
++        InstructionValue::ComputedDelete { .. } => InstructionKindAnalysis::ComputedDelete,
++        InstructionValue::LoadGlobal { .. } => InstructionKindAnalysis::LoadGlobal,
++        InstructionValue::StoreGlobal { .. } => InstructionKindAnalysis::StoreGlobal,
++        InstructionValue::FunctionExpression { .. } => InstructionKindAnalysis::FunctionExpression,
++        InstructionValue::TaggedTemplateExpression { .. } => {
++            InstructionKindAnalysis::TaggedTemplateExpression
++        }
++        InstructionValue::TemplateLiteral { .. } => InstructionKindAnalysis::TemplateLiteral,
++        InstructionValue::Await { .. } => InstructionKindAnalysis::Await,
++        InstructionValue::GetIterator { .. } => InstructionKindAnalysis::GetIterator,
++        InstructionValue::IteratorNext { .. } => InstructionKindAnalysis::IteratorNext,
++        InstructionValue::NextPropertyOf { .. } => InstructionKindAnalysis::NextPropertyOf,
++        InstructionValue::PrefixUpdate { .. } => InstructionKindAnalysis::PrefixUpdate,
++        InstructionValue::PostfixUpdate { .. } => InstructionKindAnalysis::PostfixUpdate,
++        InstructionValue::Debugger { .. } => InstructionKindAnalysis::Debugger,
++        InstructionValue::StartMemoize { .. } => InstructionKindAnalysis::StartMemoize,
++        InstructionValue::FinishMemoize { .. } => InstructionKindAnalysis::FinishMemoize,
++    }
++}
++
++fn terminal_analysis(
++    terminal: &Terminal<'_>,
++    visitor: &ScopeSnapshotVisitor<'_, '_>,
++) -> TerminalAnalysis {
++    let kind = match terminal {
++        Terminal::Unreachable { .. } => TerminalKindAnalysis::Unreachable,
++        Terminal::Throw { .. } => TerminalKindAnalysis::Throw,
++        Terminal::Return { return_variant, .. } => {
++            TerminalKindAnalysis::Return(match return_variant {
++                ReturnVariant::Void => ReturnVariantAnalysis::Void,
++                ReturnVariant::Implicit => ReturnVariantAnalysis::Implicit,
++                ReturnVariant::Explicit => ReturnVariantAnalysis::Explicit,
++            })
++        }
++        Terminal::Goto { variant, .. } => TerminalKindAnalysis::Goto(match variant {
++            GotoVariant::Break => GotoVariantAnalysis::Break,
++            GotoVariant::Continue => GotoVariantAnalysis::Continue,
++            GotoVariant::Try => GotoVariantAnalysis::Try,
++        }),
++        Terminal::If { .. } => TerminalKindAnalysis::If,
++        Terminal::Branch { .. } => TerminalKindAnalysis::Branch,
++        Terminal::Switch { .. } => TerminalKindAnalysis::Switch,
++        Terminal::DoWhile { .. } => TerminalKindAnalysis::DoWhile,
++        Terminal::While { .. } => TerminalKindAnalysis::While,
++        Terminal::For { .. } => TerminalKindAnalysis::For,
++        Terminal::ForOf { .. } => TerminalKindAnalysis::ForOf,
++        Terminal::ForIn { .. } => TerminalKindAnalysis::ForIn,
++        Terminal::Logical { .. } => TerminalKindAnalysis::Logical,
++        Terminal::Ternary { .. } => TerminalKindAnalysis::Ternary,
++        Terminal::Optional { .. } => TerminalKindAnalysis::Optional,
++        Terminal::Label { .. } => TerminalKindAnalysis::Label,
++        Terminal::Sequence { .. } => TerminalKindAnalysis::Sequence,
++        Terminal::MaybeThrow { .. } => TerminalKindAnalysis::MaybeThrow,
++        Terminal::Try { .. } => TerminalKindAnalysis::Try,
++        Terminal::Scope { .. } => TerminalKindAnalysis::Scope,
++        Terminal::PrunedScope { .. } => TerminalKindAnalysis::PrunedScope,
++    };
++    let operands = match terminal {
++        Terminal::Throw { value, .. } | Terminal::Return { value, .. } => {
++            vec![visitor.value_analysis(value.identifier)]
++        }
++        Terminal::If { test, .. }
++        | Terminal::Branch { test, .. }
++        | Terminal::Switch { test, .. } => {
++            let mut values = vec![visitor.value_analysis(test.identifier)];
++            if let Terminal::Switch { cases, .. } = terminal {
++                values.extend(
++                    cases
++                        .iter()
++                        .filter_map(|case| case.test)
++                        .map(|place| visitor.value_analysis(place.identifier)),
++                );
++            }
++            values
++        }
++        Terminal::Try { handler_binding, .. } => {
++            handler_binding.iter().map(|place| visitor.value_analysis(place.identifier)).collect()
++        }
++        _ => Vec::new(),
++    };
++    let successors = match terminal {
++        Terminal::Unreachable { .. } | Terminal::Throw { .. } | Terminal::Return { .. } => {
++            Vec::new()
++        }
++        Terminal::Goto { block, .. } => vec![block.index()],
++        Terminal::If { consequent, alternate, fallthrough, .. }
++        | Terminal::Branch { consequent, alternate, fallthrough, .. } => {
++            vec![consequent.index(), alternate.index(), fallthrough.index()]
++        }
++        Terminal::Switch { cases, fallthrough, .. } => {
++            cases.iter().map(|case| case.block.index()).chain([fallthrough.index()]).collect()
++        }
++        Terminal::DoWhile { loop_block, test, fallthrough, .. } => {
++            vec![loop_block.index(), test.index(), fallthrough.index()]
++        }
++        Terminal::While { test, loop_block, fallthrough, .. } => {
++            vec![test.index(), loop_block.index(), fallthrough.index()]
++        }
++        Terminal::For { init, test, update, loop_block, fallthrough, .. } => [
++            Some(init.index()),
++            Some(test.index()),
++            update.map(|block| block.index()),
++            Some(loop_block.index()),
++            Some(fallthrough.index()),
++        ]
++        .into_iter()
++        .flatten()
++        .collect(),
++        Terminal::ForOf { init, test, loop_block, fallthrough, .. } => {
++            vec![init.index(), test.index(), loop_block.index(), fallthrough.index()]
++        }
++        Terminal::ForIn { init, loop_block, fallthrough, .. } => {
++            vec![init.index(), loop_block.index(), fallthrough.index()]
++        }
++        Terminal::Logical { test, fallthrough, .. }
++        | Terminal::Ternary { test, fallthrough, .. }
++        | Terminal::Optional { test, fallthrough, .. } => {
++            vec![test.index(), fallthrough.index()]
++        }
++        Terminal::Label { block, fallthrough, .. }
++        | Terminal::Sequence { block, fallthrough, .. }
++        | Terminal::Scope { block, fallthrough, .. }
++        | Terminal::PrunedScope { block, fallthrough, .. } => {
++            vec![block.index(), fallthrough.index()]
++        }
++        Terminal::MaybeThrow { continuation, handler, .. } => {
++            [Some(continuation.index()), handler.map(|block| block.index())]
++                .into_iter()
++                .flatten()
++                .collect()
++        }
++        Terminal::Try { block, handler, fallthrough, .. } => {
++            vec![block.index(), handler.index(), fallthrough.index()]
++        }
++    };
++
++    TerminalAnalysis {
++        id: terminal.evaluation_order().index(),
++        kind,
++        span: terminal.span().map(|span| (span.start, span.end)),
++        operands,
++        successors,
++    }
++}
 diff --git a/crates/oxc_react_compiler/src/lib.rs b/crates/oxc_react_compiler/src/lib.rs
-index 8a70ae4793897a..b3a7bbf1869953 100644
+index 8a70ae4793897a..34d3f6f18cae81 100644
 --- a/crates/oxc_react_compiler/src/lib.rs
 +++ b/crates/oxc_react_compiler/src/lib.rs
 @@ -1,5 +1,6 @@
@@ -222,12 +595,15 @@ index 8a70ae4793897a..b3a7bbf1869953 100644
  mod diagnostics;
  mod options;
  mod scope;
-@@ -22,6 +23,9 @@ use crate::react_compiler::entrypoint::program::compile_program;
+@@ -22,6 +23,12 @@ use crate::react_compiler::entrypoint::program::compile_program;
  
  pub use crate::react_compiler::entrypoint::compile_result::CompileResult;
  pub use crate::react_compiler::entrypoint::program::CompileOutput;
 +pub use analysis::{
-+    DependencyAnalysis, FunctionAnalysis, InstructionAnalysis, ScopeAnalysis, ValueAnalysis,
++    BlockAnalysis, BlockKindAnalysis, ControlFlowAnalysis, ControlFlowInstructionAnalysis,
++    DependencyAnalysis, FunctionAnalysis, GotoVariantAnalysis, InstructionAnalysis,
++    InstructionKindAnalysis, ReturnVariantAnalysis, ScopeAnalysis, TerminalAnalysis,
++    TerminalKindAnalysis, ValueAnalysis,
 +};
  
  // Re-exported so integrations needn't depend on the upstream `react_compiler` crates.
@@ -262,10 +638,19 @@ index c0b785a355cbb4..7a4a18ad868bd3 100644
              instrument_gating_name: None,
              hook_guard_name: None,
 diff --git a/crates/oxc_react_compiler/src/react_compiler/entrypoint/pipeline.rs b/crates/oxc_react_compiler/src/react_compiler/entrypoint/pipeline.rs
-index 8308dcf8dabbce..a346707fe9e28b 100644
+index 8308dcf8dabbce..1280dee30bd35e 100644
 --- a/crates/oxc_react_compiler/src/react_compiler/entrypoint/pipeline.rs
 +++ b/crates/oxc_react_compiler/src/react_compiler/entrypoint/pipeline.rs
-@@ -320,6 +320,8 @@ fn run_pipeline<'a>(
+@@ -300,6 +300,8 @@ fn run_pipeline<'a>(
+ 
+     propagate_scope_dependencies_hir(&mut hir, &mut env);
+ 
++    let control_flow = crate::analysis::capture_control_flow(&hir, &env);
++
+     let mut reactive_fn = build_reactive_function(&hir, &env)?;
+ 
+     assert_well_formed_break_targets(&reactive_fn, &env);
+@@ -320,6 +322,8 @@ fn run_pipeline<'a>(
  
      propagate_early_returns(&mut reactive_fn, &mut env);
  
@@ -274,16 +659,17 @@ index 8308dcf8dabbce..a346707fe9e28b 100644
      prune_unused_lvalues(&mut reactive_fn, &env);
  
      promote_used_temporaries(&mut reactive_fn, &mut env);
-@@ -336,6 +338,8 @@ fn run_pipeline<'a>(
+@@ -336,6 +340,9 @@ fn run_pipeline<'a>(
  
      prune_hoisted_contexts(&mut reactive_fn, &env)?;
  
-+    let analysis = crate::analysis::capture(&reactive_fn, &env, analysis_instructions);
++    let analysis =
++        crate::analysis::capture(&reactive_fn, &env, analysis_instructions, control_flow);
 +
      if env.config.enable_preserve_existing_memoization_guarantees
          || env.config.validate_preserve_existing_memoization_guarantees
      {
-@@ -415,6 +419,8 @@ fn run_pipeline<'a>(
+@@ -415,6 +422,8 @@ fn run_pipeline<'a>(
          context.merge_uid_known_names(&uid_names);
      }
  

@@ -6,14 +6,30 @@ pub enum DiagnosticCode {
     DuplicateUpdater,
     EmptyComponentName,
     MultipleSourceWriters,
+    UnsupportedComponentForm,
+    UnsupportedControlFlow,
     UnknownSource,
     UnsupportedSyntax,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SourceSpan {
+    pub start: u32,
+    pub end: u32,
+}
+
+impl SourceSpan {
+    #[must_use]
+    pub const fn new(start: u32, end: u32) -> Self {
+        Self { start, end }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Diagnostic {
     pub code: DiagnosticCode,
     pub message: String,
+    pub span: Option<SourceSpan>,
 }
 
 impl Diagnostic {
@@ -21,6 +37,19 @@ impl Diagnostic {
         Self {
             code,
             message: message.into(),
+            span: None,
         }
+    }
+
+    pub(crate) fn with_span(mut self, span: SourceSpan) -> Self {
+        self.span = Some(span);
+        self
+    }
+
+    pub(crate) fn with_fallback_span(mut self, span: Option<SourceSpan>) -> Self {
+        if self.span.is_none() {
+            self.span = span;
+        }
+        self
     }
 }

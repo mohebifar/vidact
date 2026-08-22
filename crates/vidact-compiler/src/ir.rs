@@ -1,8 +1,10 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::{
-    Diagnostic, DiagnosticCode,
-    analysis::{ComponentFacts, SourceId, SourceKind, UpdaterFact, UpdaterId, UpdaterKind},
+    Diagnostic, DiagnosticCode, SourceSpan,
+    analysis::{
+        ComponentFacts, ControlFlowFacts, SourceId, SourceKind, UpdaterFact, UpdaterId, UpdaterKind,
+    },
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -23,6 +25,8 @@ pub struct IrUpdater {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ComponentIr {
     pub name: String,
+    pub span: Option<SourceSpan>,
+    pub control_flow: ControlFlowFacts,
     pub sources: Vec<IrSource>,
     /// Compiler execution order. The runtime must not rediscover this graph.
     pub updaters: Vec<IrUpdater>,
@@ -73,6 +77,8 @@ pub fn lower_component(facts: ComponentFacts) -> Result<ComponentIr, Diagnostic>
 
     Ok(ComponentIr {
         name: facts.name,
+        span: facts.span,
+        control_flow: facts.control_flow,
         sources: facts
             .sources
             .into_iter()
