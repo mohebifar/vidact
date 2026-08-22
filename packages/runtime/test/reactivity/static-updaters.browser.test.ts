@@ -1,34 +1,37 @@
 import { describe, expect, it } from 'vitest'
 
-import { combineSources, createStateSlot, createUpdaterScope, source } from '../../src/index.ts'
+import {
+  combineSources,
+  createCompiledScope,
+  createCompiledState,
+  source,
+} from '../../src/index.ts'
 
-describe('static updater corpus', () => {
+describe('compiled updater corpus', () => {
   it('propagates state through compiler-ordered updaters without subscriptions', () => {
     const countSource = source(0)
     const doubledSource = source(1)
     const text = document.createTextNode('0')
     const trace: string[] = []
-    let count!: ReturnType<typeof createStateSlot<number>>
+    const scope = createCompiledScope()
+    const count = createCompiledState(scope, countSource, 0)
     let doubled = 0
 
-    const scope = createUpdaterScope([
-      {
-        reads: countSource,
-        writes: doubledSource,
-        run: () => {
-          doubled = count.get() * 2
-          trace.push('derive')
-        },
+    scope.add({
+      reads: countSource,
+      writes: doubledSource,
+      run: () => {
+        doubled = count.get() * 2
+        trace.push('derive')
       },
-      {
-        reads: doubledSource,
-        run: () => {
-          text.data = String(doubled)
-          trace.push('text')
-        },
+    })
+    scope.add({
+      reads: doubledSource,
+      run: () => {
+        text.data = String(doubled)
+        trace.push('text')
       },
-    ])
-    count = createStateSlot(scope, countSource, 0)
+    })
 
     count.set(3)
 
@@ -39,21 +42,18 @@ describe('static updater corpus', () => {
   it('batches multiple source writes into one updater execution', () => {
     const firstSource = source(0)
     const lastSource = source(1)
-    let first!: ReturnType<typeof createStateSlot<string>>
-    let last!: ReturnType<typeof createStateSlot<string>>
+    const scope = createCompiledScope()
+    const first = createCompiledState(scope, firstSource, 'Ada')
+    const last = createCompiledState(scope, lastSource, 'Lovelace')
     let runs = 0
     let fullName = ''
-    const scope = createUpdaterScope([
-      {
-        reads: combineSources(firstSource, lastSource),
-        run: () => {
-          runs += 1
-          fullName = `${first.get()} ${last.get()}`
-        },
+    scope.add({
+      reads: combineSources(firstSource, lastSource),
+      run: () => {
+        runs += 1
+        fullName = `${first.get()} ${last.get()}`
       },
-    ])
-    first = createStateSlot(scope, firstSource, 'Ada')
-    last = createStateSlot(scope, lastSource, 'Lovelace')
+    })
 
     scope.batch(() => {
       first.set('Grace')
@@ -66,17 +66,15 @@ describe('static updater corpus', () => {
 
   it('supports components with more than 32 reactive sources', () => {
     const wideSource = source(65)
-    let value!: ReturnType<typeof createStateSlot<number>>
+    const scope = createCompiledScope()
+    const value = createCompiledState(scope, wideSource, 0)
     let observed = 0
-    const scope = createUpdaterScope([
-      {
-        reads: wideSource,
-        run: () => {
-          observed = value.get()
-        },
+    scope.add({
+      reads: wideSource,
+      run: () => {
+        observed = value.get()
       },
-    ])
-    value = createStateSlot(scope, wideSource, 0)
+    })
 
     value.set(42)
 
@@ -87,12 +85,13 @@ describe('static updater corpus', () => {
     const indexes = [31, 32, 63, 64]
     const masks = indexes.map(source)
     const observed: number[] = []
-    const scope = createUpdaterScope(
-      masks.map((reads, index) => ({
+    const scope = createCompiledScope()
+    masks.forEach((reads, index) => {
+      scope.add({
         reads,
         run: () => observed.push(indexes[index]!),
-      })),
-    )
+      })
+    })
 
     scope.invalidate(combineSources(masks[1]!, masks[3]!))
 
@@ -101,15 +100,13 @@ describe('static updater corpus', () => {
 
   it('fails loudly when updater-triggered writes cannot stabilize', () => {
     const valueSource = source(0)
-    let value!: ReturnType<typeof createStateSlot<number>>
-    const scope = createUpdaterScope([
-      {
-        reads: valueSource,
-        run: () => value.set((previous) => previous + 1),
-      },
-    ])
-    value = createStateSlot(scope, valueSource, 0)
+    const scope = createCompiledScope()
+    const value = createCompiledState(scope, valueSource, 0)
+    scope.add({
+      reads: valueSource,
+      run: () => value.set((previous) => previous + 1),
+    })
 
-    expect(() => value.set(1)).toThrow(/stabilize/i)
+    expect(() => value.set(1)).toThrow(/did not stabilize/i)
   })
 })

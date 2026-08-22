@@ -10,7 +10,6 @@ import {
   type CompiledBinding,
   type StructuralBinding,
 } from './compiled.ts'
-import type { StateUpdate } from './state-slot.ts'
 
 export type DirectChild =
   | Node
@@ -26,25 +25,7 @@ export type DirectChild =
 export type DirectProps = Record<string, unknown> | null
 export type DirectComponent = (props: Record<string, unknown>) => DirectChild
 
-export interface MutableRef<T> {
-  current: T
-}
-
 export const Fragment = Symbol('Vidact.Fragment')
-
-interface StateHook {
-  value: unknown
-}
-
-interface ComponentInstance {
-  readonly hooks: StateHook[]
-  cursor: number
-  disposed: boolean
-  render: () => void
-}
-
-let activeInstance: ComponentInstance | null = null
-const MAX_RENDER_PASSES = 100
 
 export function h<Tag extends keyof HTMLElementTagNameMap>(
   type: Tag,
@@ -86,103 +67,6 @@ export function h(
   applyProps(element, props)
   appendChildren(element, children)
   return element
-}
-
-export function useState<T>(initialValue: T | (() => T)): [T, (update: StateUpdate<T>) => void] {
-  const instance = activeInstance
-  if (instance === null) throw new Error('useState must run while a Vidact component renders')
-
-  const index = instance.cursor
-  instance.cursor += 1
-  const existing = instance.hooks[index]
-  const hook: StateHook = existing ?? {
-    value: typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue,
-  }
-  if (existing === undefined) instance.hooks.push(hook)
-
-  const setValue = (update: StateUpdate<T>): void => {
-    if (instance.disposed) return
-    const previous = hook.value as T
-    const next = typeof update === 'function' ? (update as (value: T) => T)(previous) : update
-    if (Object.is(previous, next)) return
-    hook.value = next
-    instance.render()
-  }
-
-  return [hook.value as T, setValue]
-}
-
-export function useRef<T>(initialValue: T): MutableRef<T> {
-  const instance = activeInstance
-  if (instance === null) return { current: initialValue }
-
-  const index = instance.cursor
-  instance.cursor += 1
-  const existing = instance.hooks[index]
-  const hook: StateHook = existing ?? { value: { current: initialValue } }
-  if (existing === undefined) instance.hooks.push(hook)
-  return hook.value as MutableRef<T>
-}
-
-export function mount(component: () => Node, host: ParentNode): { dispose: () => void } {
-  let currentRoot: Node | null = null
-  let rendering = false
-  let pending = false
-  const instance: ComponentInstance = {
-    hooks: [],
-    cursor: 0,
-    disposed: false,
-    render: () => {},
-  }
-
-  instance.render = (): void => {
-    if (instance.disposed) return
-    if (rendering) {
-      pending = true
-      return
-    }
-
-    rendering = true
-    try {
-      let renderPasses = 0
-      do {
-        renderPasses += 1
-        if (renderPasses > MAX_RENDER_PASSES) {
-          throw new Error('Vidact component did not stabilize after 100 render passes')
-        }
-        pending = false
-        instance.cursor = 0
-        const previousInstance = activeInstance
-        activeInstance = instance
-        let nextRoot: Node
-        try {
-          nextRoot = component()
-        } finally {
-          activeInstance = previousInstance
-        }
-
-        if (currentRoot?.parentNode === host) {
-          host.replaceChild(nextRoot, currentRoot)
-        } else {
-          host.replaceChildren(nextRoot)
-        }
-        currentRoot = nextRoot
-      } while (pending)
-    } finally {
-      rendering = false
-    }
-  }
-
-  instance.render()
-  return {
-    dispose: () => {
-      if (instance.disposed) return
-      instance.disposed = true
-      host.replaceChildren()
-      currentRoot = null
-      instance.hooks.length = 0
-    },
-  }
 }
 
 function applyProps(element: HTMLElement, props: DirectProps): void {

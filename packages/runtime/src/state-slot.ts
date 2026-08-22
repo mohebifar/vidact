@@ -1,5 +1,4 @@
 import type { SourceMask } from './source-mask.ts'
-import type { UpdaterScope } from './updater-scope.ts'
 
 export type StateUpdate<T> = T | ((previous: T) => T)
 
@@ -8,8 +7,12 @@ export interface StateSlot<T> {
   readonly set: (update: StateUpdate<T>) => void
 }
 
+interface StateInvalidator {
+  readonly invalidate: (sources: SourceMask) => void
+}
+
 export function createStateSlot<T>(
-  scope: UpdaterScope,
+  scope: StateInvalidator,
   source: SourceMask,
   initialValue: T,
 ): StateSlot<T> {

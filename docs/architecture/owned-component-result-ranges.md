@@ -3,6 +3,7 @@
 - Decision state: Accepted
 - Decided: 2026-08-22
 - Supersedes: the single-root component-result ABI in [Compiled component props, live ranges, and refs](compiled-component-props-live-ranges-and-refs.md)
+- Superseded in part by: [Single client compiler and runtime path](compiled-only-client-runtime.md), which removes the separate rerendering compatibility path
 
 ## Context
 
@@ -40,9 +41,9 @@ removes exactly the nodes between its live markers plus the markers themselves,
 even when another cleanup throws.
 
 The compiled JSX declaration therefore defines `JSX.Element` as
-`CompiledComponentResult`. The legacy rerendering `mount` helper remains a
-separate Node-returning compatibility path; it is not the compiled component
-ABI.
+`CompiledComponentResult`. The temporary Node-returning compatibility path was
+subsequently removed; the public browser runtime now exposes only the compiled
+component ABI described in [Single client compiler and runtime path](compiled-only-client-runtime.md).
 
 ## Compiler and runtime contract
 

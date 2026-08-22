@@ -69,10 +69,13 @@ pnpm dev:todomvc
 
 Vite sends every TSX module to the Rust compiler before OXC lowers JSX through
 `@vidact/runtime/jsx-runtime`. For the supported `useState` subset, Rust rewrites
-state reads and writes by semantic identity and emits static bindings before
-OXC prints and lowers the module. Components construct their DOM once. State
-writes run only compiler-selected derivations, DOM bindings, conditional
-ranges, and keyed-list ranges; they do not rerun the component or diff a tree.
+state reads and writes by semantic identity, removes the lowered React state
+import, and emits static bindings before OXC prints and lowers the module.
+`mountCompiled` is the only public root renderer; there is no uncompiled
+component replay or runtime `useState` fallback. Components construct their DOM
+once. State writes run only compiler-selected derivations, DOM bindings,
+conditional ranges, and keyed-list ranges; they do not rerun the component or
+diff a tree.
 
 ## Current contract
 

@@ -154,9 +154,9 @@ for each non-scalar range value.
 The ABI is intentionally narrow. Prop additions/deletions through spreads,
 aliased and rest destructuring, foreign React element objects, component ranges
 with multiple top-level nodes, and ref identity updates require separate
-decisions. `useRef` is naturally stable under the compiled construct-once path;
-the legacy rerendering `mount` helper also retains its ref cell, but remains a
-compatibility path rather than the target for new compiled hook semantics.
+decisions. `useRef` is naturally stable under the compiled construct-once path.
+The former rerendering compatibility runtime was removed by
+[Single client compiler and runtime path](compiled-only-client-runtime.md).
 
 ## Verification
 

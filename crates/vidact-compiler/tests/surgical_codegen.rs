@@ -35,7 +35,74 @@ fn compiles_aliased_react_state_imports() {
 
     assert!(output.contains("__vidactCreateState("), "{output}");
     assert!(!output.contains("state(0)"), "{output}");
+    assert!(!output.contains("useState as state"), "{output}");
     assert!(output.contains("count.set(count.get() + 1)"), "{output}");
+}
+
+#[test]
+fn removes_lowered_state_imports_without_removing_live_react_imports() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "StateAndRef.tsx",
+        source: r#"
+            import { useRef, useState } from 'react';
+            export function StateAndRef(): Node {
+                const input = useRef(null);
+                const [count, setCount] = useState(0);
+                return <button ref={input} onClick={() => setCount(count + 1)}>{count}</button>;
+            }
+        "#,
+    })
+    .expect("lowered hooks must not leave a dependency on the replay runtime");
+
+    assert!(
+        output.contains("import { useRef } from \"react\";"),
+        "{output}"
+    );
+    assert!(!output.contains("useState"), "{output}");
+}
+
+#[test]
+fn preserves_type_only_state_imports() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "StateType.tsx",
+        source: r#"
+            import type { useState as ReactUseState } from 'react';
+            type StateHook = typeof ReactUseState;
+            export function StateType(): Node {
+                return <p>static</p>;
+            }
+        "#,
+    })
+    .expect("type-only React imports do not require a runtime state fallback");
+
+    assert!(
+        output.contains("import type { useState as ReactUseState } from \"react\";"),
+        "{output}"
+    );
+}
+
+#[test]
+fn preserves_mixed_type_state_and_live_ref_imports() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "MixedStateImports.tsx",
+        source: r#"
+            import { type useState as ReactUseState, useRef, useState } from 'react';
+            type StateHook = typeof ReactUseState;
+            export function MixedStateImports(): Node {
+                const input = useRef(null);
+                const [count, setCount] = useState(0);
+                return <button ref={input} onClick={() => setCount(count + 1)}>{count}</button>;
+            }
+        "#,
+    })
+    .expect("type imports and live runtime imports must survive state lowering");
+
+    assert!(
+        output.contains("type useState as ReactUseState"),
+        "{output}"
+    );
+    assert!(output.contains("useRef"), "{output}");
+    assert!(!output.contains("useRef, useState }"), "{output}");
 }
 
 #[test]
@@ -54,7 +121,56 @@ fn compiles_namespace_react_state_imports() {
 
     assert!(output.contains("__vidactCreateState("), "{output}");
     assert!(!output.contains("React.useState(0)"), "{output}");
+    assert!(!output.contains("from \"react\""), "{output}");
     assert!(output.contains("count.set(count.get() + 1)"), "{output}");
+}
+
+#[test]
+fn rejects_state_calls_left_outside_compiled_components() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "ResidualState.tsx",
+        source: r#"
+            import { useState } from 'react';
+            function unsupportedStateFactory() {
+                return useState(0);
+            }
+            export function StaticComponent(): Node {
+                return <p>static</p>;
+            }
+        "#,
+    })
+    .expect_err("the client runtime must not retain a replay-state fallback");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.span.is_some()
+            && diagnostic
+                .message
+                .contains("only supported in compiled component state declarations")
+    }));
+}
+
+#[test]
+fn rejects_live_state_import_references_left_after_lowering() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "StateReference.tsx",
+        source: r#"
+            import { useState } from 'react';
+            const stateFactory = useState;
+            export function StaticComponent(): Node {
+                return <p>{typeof stateFactory}</p>;
+            }
+        "#,
+    })
+    .expect_err("runtime state references cannot survive without the replay runtime");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.span.is_some()
+            && diagnostic
+                .message
+                .contains("remains after component lowering")
+    }));
 }
 
 #[test]

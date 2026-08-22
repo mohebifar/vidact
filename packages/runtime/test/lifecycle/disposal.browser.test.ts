@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { createStateSlot, createUpdaterScope, source } from '../../src/index.ts'
+import { createCompiledScope, createCompiledState, source } from '../../src/index.ts'
 
 describe('lifecycle corpus', () => {
   it('stops updater execution after a component scope is disposed', () => {
     const valueSource = source(0)
     let runs = 0
-    const scope = createUpdaterScope([{ reads: valueSource, run: () => runs++ }])
-    const value = createStateSlot(scope, valueSource, 0)
+    const scope = createCompiledScope()
+    scope.add({ reads: valueSource, run: () => runs++ })
+    const value = createCompiledState(scope, valueSource, 0)
 
     value.set(1)
     scope.dispose()

@@ -13,5 +13,7 @@ declare namespace JSX {
 declare module 'react' {
   export type ReactNode = import('@vidact/runtime').DirectChild
   export const useRef: typeof import('@vidact/runtime').useRef
-  export const useState: typeof import('@vidact/runtime').useState
+  export function useState<T>(
+    initialValue: T | (() => T),
+  ): [T, (update: import('@vidact/runtime').StateUpdate<T>) => void]
 }

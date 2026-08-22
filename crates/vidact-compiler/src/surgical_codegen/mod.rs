@@ -15,7 +15,7 @@ use oxc_ast_visit::{
 use oxc_codegen::Codegen;
 use oxc_parser::Parser;
 use oxc_semantic::{Scoping, SemanticBuilder};
-use oxc_span::{SPAN, SourceType};
+use oxc_span::{SPAN, SourceType, Span};
 use oxc_syntax::{operator::LogicalOperator, scope::ScopeFlags, symbol::SymbolId};
 
 use crate::{
@@ -140,9 +140,109 @@ fn transform_program<'a>(
         transform_component(allocator, scoping, component, program)
             .map_err(|diagnostic| diagnostic.with_fallback_span(component.span))?;
     }
+    remove_lowered_react_state_imports(scoping, program)?;
     let import = runtime_import(&ast, program);
     program.body.insert(0, import);
     Ok(())
+}
+
+fn remove_lowered_react_state_imports(
+    scoping: &Scoping,
+    program: &mut Program<'_>,
+) -> Result<(), Diagnostic> {
+    let react = ReactBindings::new(program, scoping);
+    let mut usage = PostTransformReactUsage {
+        react: &react,
+        scoping,
+        live_symbols: BTreeSet::new(),
+        remaining_state_call: None,
+    };
+    usage.visit_program(program);
+    if let Some(span) = usage.remaining_state_call {
+        return Err(unsupported(
+            "useState is only supported in compiled component state declarations",
+        )
+        .with_span(SourceSpan::new(span.start, span.end)));
+    }
+
+    let mut empty_imports = Vec::new();
+    for (index, statement) in program.body.iter_mut().enumerate() {
+        let Statement::ImportDeclaration(import) = statement else {
+            continue;
+        };
+        if import.source.value != "react" {
+            continue;
+        }
+        if import.import_kind == ImportOrExportKind::Type {
+            continue;
+        }
+        let Some(specifiers) = &mut import.specifiers else {
+            continue;
+        };
+        let mut live_state_import = None;
+        specifiers.retain(|specifier| match specifier {
+            ImportDeclarationSpecifier::ImportSpecifier(specifier) => {
+                if specifier.import_kind == ImportOrExportKind::Type {
+                    return true;
+                }
+                let is_use_state = matches!(
+                    &specifier.imported,
+                    ModuleExportName::IdentifierName(name) if name.name == "useState"
+                );
+                if !is_use_state {
+                    return true;
+                }
+                let symbol = specifier.local.symbol_id.get();
+                if symbol.is_some_and(|symbol| usage.live_symbols.contains(&symbol)) {
+                    live_state_import = Some((specifier.local.name.to_string(), specifier.span));
+                    return true;
+                }
+                false
+            }
+            ImportDeclarationSpecifier::ImportNamespaceSpecifier(specifier) => specifier
+                .local
+                .symbol_id
+                .get()
+                .is_some_and(|symbol| usage.live_symbols.contains(&symbol)),
+            ImportDeclarationSpecifier::ImportDefaultSpecifier(_) => true,
+        });
+        if let Some((name, span)) = live_state_import {
+            return Err(unsupported(format!(
+                "React state import {name} remains after component lowering; useState is only supported in compiled component state declarations"
+            ))
+            .with_span(SourceSpan::new(span.start, span.end)));
+        }
+        if specifiers.is_empty() {
+            empty_imports.push(index);
+        }
+    }
+    for index in empty_imports.into_iter().rev() {
+        program.body.remove(index);
+    }
+    Ok(())
+}
+
+struct PostTransformReactUsage<'r, 's> {
+    react: &'r ReactBindings<'s>,
+    scoping: &'s Scoping,
+    live_symbols: BTreeSet<SymbolId>,
+    remaining_state_call: Option<Span>,
+}
+
+impl<'a> Visit<'a> for PostTransformReactUsage<'_, '_> {
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if self.react.is_use_state_call(call) {
+            self.remaining_state_call.get_or_insert(call.span);
+            return;
+        }
+        walk_call_expression(self, call);
+    }
+
+    fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
+        if let Some(symbol) = crate::react_bindings::reference_symbol(identifier, self.scoping) {
+            self.live_symbols.insert(symbol);
+        }
+    }
 }
 
 fn transform_component<'a>(

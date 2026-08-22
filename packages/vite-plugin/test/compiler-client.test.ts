@@ -48,6 +48,7 @@ describe('vidact compiler client', () => {
     expect(compilation.code).toContain('createCompiledState')
     expect(compilation.code).toContain('__vidactCompiledRoot(')
     expect(compilation.code).toContain('__vidactKeyed(')
+    expect(compilation.code).not.toContain('useState')
     expect(compilation.code).not.toContain('async ()')
   })
 

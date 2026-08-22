@@ -32,7 +32,7 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       return source === 'react' ? REACT_MODULE : null
     },
     load(id) {
-      return id === REACT_MODULE ? 'export { useRef, useState } from "@vidact/runtime"' : null
+      return id === REACT_MODULE ? 'export { useRef } from "@vidact/runtime"' : null
     },
     async transform(source, id) {
       const filename = id.split('?', 1)[0] ?? id

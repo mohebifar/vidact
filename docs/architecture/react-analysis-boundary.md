@@ -140,8 +140,8 @@ their body and replacement semantics.
 The pinned adapter now captures the pre-reactive CFG, pre-pruning def-use facts,
 and optimized reactive-scope facts. Vidact carries the owned terminal graph into
 its stable IR and uses it for exact early-return rejection. Classification and
-both executable emitters use OXC AST and semantic identities; generated output
-is printed with `oxc_codegen`. A versioned compatibility manifest gates
+the surgical emitter use OXC AST and semantic identities; generated output is
+printed with `oxc_codegen`. A versioned compatibility manifest gates
 accepted, rejected, and intentionally different fixtures.
 
 Vidact now normalizes supported return/branch graphs and static type/key/position
@@ -158,10 +158,10 @@ source maps and additional per-pass drift fixtures remain follow-up work.
 - `crates/vidact-compiler/tests/oxc_react_adapter.rs` covers aliased and namespace
   React imports, foreign-hook rejection, shadowed bindings, source-text
   lookalikes, derived declaration order, and the normalized keyed-map subset.
-- `crates/vidact-compiler/tests/surgical_codegen.rs` and
-  `crates/vidact-compiler/tests/browser_codegen.rs` prove the executable paths
-  transform aliased and namespace hooks using the same semantic contract;
-  surgical codegen also proves unsupported key forms cannot bypass analysis.
+- `crates/vidact-compiler/tests/surgical_codegen.rs` proves the executable path
+  transforms aliased and namespace hooks through the semantic contract, removes
+  lowered state imports, and prevents unsupported key forms from bypassing
+  analysis.
 - `crates/vidact-compiler/tests/compatibility_corpus.rs` requires every fixture
   to be manifested and every rejection to carry its declared code and span.
 - `crates/vidact-compiler/tests/react_compiler_control_flow.rs` proves exact

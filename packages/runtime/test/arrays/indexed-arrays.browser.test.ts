@@ -1,7 +1,7 @@
 import { captureMutations } from '@vidact/test-support'
 import { describe, expect, it } from 'vitest'
 
-import { createIndexedList } from '../../src/index.ts'
+import { createIndexedList } from '../../src/indexed-list.ts'
 
 interface Row {
   readonly id: string

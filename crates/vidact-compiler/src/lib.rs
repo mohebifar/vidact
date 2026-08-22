@@ -6,7 +6,6 @@
 
 pub mod analysis;
 mod ast_utils;
-mod browser_codegen;
 mod diagnostic;
 pub mod ir;
 mod oxc_react;
@@ -15,7 +14,6 @@ pub mod reactive_flow;
 pub mod render_flow;
 mod surgical_codegen;
 
-pub use browser_codegen::compile_spike_browser_module;
 pub use diagnostic::{Diagnostic, DiagnosticCode, SourceSpan};
 pub use ir::{ComponentIr, IrSource, IrUpdater, lower_component};
 pub use oxc_react::OxcReactAnalysisAdapter;

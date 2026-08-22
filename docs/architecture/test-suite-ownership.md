@@ -37,8 +37,8 @@ than compilation.
   `react`, and is transformed by `@vidact/vite`.
 - Direct runtime construction is supporting coverage, not evidence that a React
   source construct compiles correctly.
-- Rust code-generation ordering remains asserted in Rust, without a generated
-  cross-suite fixture.
+- Surgical code-generation ordering remains asserted in Rust, without a
+  generated cross-suite fixture or a second executable emitter.
 - `pnpm test` runs both `test:runtime` and `test:browser`.
 
 ## Alternatives considered
@@ -64,13 +64,15 @@ contract.
 
 ## Verification
 
-- `packages/runtime/test/` covers direct state, updater, keyed-array, lifecycle,
-  and compiled-runtime primitives.
+- `packages/runtime/test/` covers compiled state/updater behavior, internal
+  keyed-array mechanics, lifecycle, direct DOM construction, and the public
+  compiled-runtime surface.
 - `packages/test-support/src/tests/mutations.browser.test.ts` covers the shared
   MutationObserver helpers through the runtime browser configuration.
 - `tests/browser/corpus/apps/counter/CounterApp.browser.test.ts` and
   `tests/browser/corpus/apps/roster/RosterApp.browser.test.ts` exercise TSX
   compiled by `@vidact/vite`.
-- `crates/vidact-compiler/tests/browser_codegen.rs` verifies alias updater order
-  and emitted operations within the compiler suite.
+- `crates/vidact-compiler/tests/surgical_codegen.rs` verifies state lowering,
+  updater bindings, import cleanup, and emitted operations within the sole
+  executable compiler path.
 - Run `pnpm check` to execute all layer-specific checks.
