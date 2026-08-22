@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
 import { Fragment, h, mount, useRef, useState } from '@vidact/runtime'
+import { describe, expect, it } from 'vitest'
 
 describe('direct DOM compatibility runtime', () => {
   it('flattens array children without constructing a virtual tree', () => {
@@ -61,7 +61,15 @@ describe('direct DOM compatibility runtime', () => {
 
   it('maps React double-click handlers to the native dblclick event', () => {
     let calls = 0
-    const button = h('button', { onDoubleClick: () => { calls += 1 } }, 'Edit')
+    const button = h(
+      'button',
+      {
+        onDoubleClick: () => {
+          calls += 1
+        },
+      },
+      'Edit',
+    )
 
     button.dispatchEvent(new MouseEvent('dblclick'))
 

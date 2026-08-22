@@ -1,10 +1,5 @@
+import { combineSources, createStateSlot, createUpdaterScope, source } from '@vidact/runtime'
 import { describe, expect, it } from 'vitest'
-import {
-  combineSources,
-  createStateSlot,
-  createUpdaterScope,
-  source,
-} from '@vidact/runtime'
 
 describe('static updater corpus', () => {
   it('propagates state through compiler-ordered updaters without subscriptions', () => {

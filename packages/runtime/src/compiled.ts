@@ -1,3 +1,4 @@
+import { createKeyedList } from './keyed-list.ts'
 import {
   intersectsSources,
   isEmptySources,
@@ -6,7 +7,6 @@ import {
   type SourceMask,
 } from './source-mask.ts'
 import { createStateSlot, type StateSlot } from './state-slot.ts'
-import { createKeyedList } from './keyed-list.ts'
 
 const MAX_FLUSH_PASSES = 100
 const BINDING = Symbol('Vidact.Binding')
@@ -112,10 +112,10 @@ export function createCompiledScope(): CompiledScope {
         for (let index = 0; index < updaterCount; index += 1) {
           const updater = updaters[index]
           if (
-            updater === undefined
-            || addedDuringFlush.has(updater)
-            || !updater.active
-            || !intersectsSources(active, updater.reads)
+            updater === undefined ||
+            addedDuringFlush.has(updater) ||
+            !updater.active ||
+            !intersectsSources(active, updater.reads)
           ) {
             continue
           }
@@ -189,9 +189,7 @@ export function createCompiledState<T>(
   source: SourceMask,
   initialValue: T | (() => T),
 ): StateSlot<T> {
-  const value = typeof initialValue === 'function'
-    ? (initialValue as () => T)()
-    : initialValue
+  const value = typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue
   return createStateSlot(scope, source, value)
 }
 
@@ -203,14 +201,10 @@ export function createCompiledProp<T>(
 ): StateSlot<T> {
   const upstream = isCompiledBinding(input) ? input : undefined
   const read = (): T => {
-    const value = upstream === undefined ? input as T : upstream.evaluate()
+    const value = upstream === undefined ? (input as T) : upstream.evaluate()
     return value === undefined && fallback !== undefined ? fallback() : value
   }
-  const slot = createStateSlot<T>(
-    scope,
-    source,
-    read(),
-  )
+  const slot = createStateSlot<T>(scope, source, read())
   if (upstream !== undefined) {
     const remove = subscribe(upstream, () => slot.set(read()))
     const owner = scopeOwners.get(scope)
@@ -227,9 +221,10 @@ export function binding<T>(
   additionalScope?: CompiledScope,
   additionalReads?: SourceMask,
 ): CompiledBinding<T> {
-  const additional = additionalScope === undefined || additionalReads === undefined
-    ? undefined
-    : { scope: additionalScope, reads: additionalReads }
+  const additional =
+    additionalScope === undefined || additionalReads === undefined
+      ? undefined
+      : { scope: additionalScope, reads: additionalReads }
   return { [BINDING]: true, evaluate, reads, scope, additional }
 }
 
@@ -278,9 +273,14 @@ export function when(
 
     update()
     const removeUpdater = subscribe(
-      { scope, reads, additional: additionalScope === undefined || additionalReads === undefined
-        ? undefined
-        : { scope: additionalScope, reads: additionalReads } },
+      {
+        scope,
+        reads,
+        additional:
+          additionalScope === undefined || additionalReads === undefined
+            ? undefined
+            : { scope: additionalScope, reads: additionalReads },
+      },
       update,
     )
     onCleanup(() => {
@@ -300,44 +300,44 @@ export function keyed<T, K>(
   reads: SourceMask,
   values: () => readonly T[],
   key: (value: T, index: number) => K,
-  render: (
-    value: StateSlot<T>,
-    index: StateSlot<number>,
-    itemScope: CompiledScope,
-  ) => RenderValue,
+  render: (value: StateSlot<T>, index: StateSlot<number>, itemScope: CompiledScope) => RenderValue,
 ): StructuralBinding {
   return structural((parent, before) => {
     const itemSource = source(0)
     const indexSource = source(1)
-    const list = createKeyedList(parent, {
-      key,
-      render(value, index) {
-        const owner = createOwner()
-        const itemScope = createCompiledScope()
-        const valueSlot = createCompiledState(itemScope, itemSource, value)
-        const indexSlot = createCompiledState(itemScope, indexSource, index)
-        try {
-          const nodes = withOwner(owner, () => {
-            onCleanup(itemScope.dispose)
-            return materialize(render(valueSlot, indexSlot, itemScope))
-          })
-          return {
-            nodes,
-            update(nextValue: T, nextIndex: number) {
-              itemScope.batch(() => {
-                valueSlot.set(nextValue)
-                indexSlot.set(nextIndex)
-              })
-            },
-            dispose: () => disposeOwner(owner),
+    const list = createKeyedList(
+      parent,
+      {
+        key,
+        render(value, index) {
+          const owner = createOwner()
+          const itemScope = createCompiledScope()
+          const valueSlot = createCompiledState(itemScope, itemSource, value)
+          const indexSlot = createCompiledState(itemScope, indexSource, index)
+          try {
+            const nodes = withOwner(owner, () => {
+              onCleanup(itemScope.dispose)
+              return materialize(render(valueSlot, indexSlot, itemScope))
+            })
+            return {
+              nodes,
+              update(nextValue: T, nextIndex: number) {
+                itemScope.batch(() => {
+                  valueSlot.set(nextValue)
+                  indexSlot.set(nextIndex)
+                })
+              },
+              dispose: () => disposeOwner(owner),
+            }
+          } catch (error) {
+            disposeOwner(owner)
+            itemScope.dispose()
+            throw error
           }
-        } catch (error) {
-          disposeOwner(owner)
-          itemScope.dispose()
-          throw error
-        }
+        },
       },
-    }, before)
+      before,
+    )
     const update = (): void => {
       try {
         for (const node of list.update(values())) commitPendingRefs(node)
@@ -436,10 +436,10 @@ export function mountCompiledProp(
   let current = value.evaluate()
   apply(current)
   const removeUpdater = subscribe(value, () => {
-      const next = value.evaluate()
-      if (Object.is(next, current)) return
-      current = next
-      apply(next)
+    const next = value.evaluate()
+    if (Object.is(next, current)) return
+    current = next
+    apply(next)
   })
   onCleanup(removeUpdater)
 }
@@ -619,6 +619,7 @@ function insertValue(
     return
   }
   if (value instanceof DocumentFragment) {
+    // oxlint-disable-next-line unicorn/no-useless-spread -- Snapshot the live NodeList before moving nodes.
     for (const child of [...value.childNodes]) insertValue(parent, child, before, moves)
     return
   }
@@ -644,9 +645,8 @@ function restoreNodePositions(positions: readonly NodePosition[]): void {
       position.node.parentNode?.removeChild(position.node)
       continue
     }
-    const before = position.nextSibling?.parentNode === position.parent
-      ? position.nextSibling
-      : null
+    const before =
+      position.nextSibling?.parentNode === position.parent ? position.nextSibling : null
     position.parent.insertBefore(position.node, before)
   }
 }
@@ -683,17 +683,21 @@ function toText(value: unknown): string {
 function isScalarRenderValue(
   value: unknown,
 ): value is string | number | bigint | boolean | null | undefined {
-  return value === null
-    || value === undefined
-    || typeof value === 'string'
-    || typeof value === 'number'
-    || typeof value === 'bigint'
-    || typeof value === 'boolean'
+  return (
+    value === null ||
+    value === undefined ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'bigint' ||
+    typeof value === 'boolean'
+  )
 }
 
 function isRefValue(value: unknown): value is RefValue {
-  return typeof value === 'function'
-    || (typeof value === 'object' && value !== null && 'current' in value)
+  return (
+    typeof value === 'function' ||
+    (typeof value === 'object' && value !== null && 'current' in value)
+  )
 }
 
 function claimPendingRefOwners(root: Node): void {

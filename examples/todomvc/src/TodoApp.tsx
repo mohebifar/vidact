@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+
 import { TodoList } from './TodoList.tsx'
 
 interface Todo {
@@ -29,18 +30,15 @@ export function TodoApp(): Node {
     const input = newTodoRef.current
     const title = input?.value.trim() ?? ''
     if (title === '') return
-    setTodos((current) => [
-      ...current,
-      { id: crypto.randomUUID(), title, completed: false },
-    ])
+    setTodos((current) => [...current, { id: crypto.randomUUID(), title, completed: false }])
     if (input !== null) input.value = ''
     queueMicrotask(() => input?.focus())
   }
 
   const toggleTodo = (id: string): void => {
-    setTodos((current) => current.map((todo) => (
-      todo.id === id ? { ...todo, completed: !todo.completed } : todo
-    )))
+    setTodos((current) =>
+      current.map((todo) => (todo.id === id ? { ...todo, completed: !todo.completed } : todo)),
+    )
   }
 
   const removeTodo = (id: string): void => {
@@ -61,9 +59,7 @@ export function TodoApp(): Node {
     if (title === '') {
       removeTodo(id)
     } else {
-      setTodos((current) => current.map((todo) => (
-        todo.id === id ? { ...todo, title } : todo
-      )))
+      setTodos((current) => current.map((todo) => (todo.id === id ? { ...todo, title } : todo)))
     }
     setEditingId(null)
   }
@@ -91,10 +87,14 @@ export function TodoApp(): Node {
             className="toggle-all"
             type="checkbox"
             checked={activeCount === 0}
-            onChange={() => setTodos((current) => current.map((todo) => ({
-              ...todo,
-              completed: activeCount > 0,
-            })))}
+            onChange={() =>
+              setTodos((current) =>
+                current.map((todo) => ({
+                  ...todo,
+                  completed: activeCount > 0,
+                })),
+              )
+            }
           />
           <label htmlFor="toggle-all">Mark all as complete</label>
           <TodoList
@@ -113,10 +113,13 @@ export function TodoApp(): Node {
                     aria-label={`Toggle ${todo.title}`}
                     onChange={() => toggleTodo(todo.id)}
                   />
-                  <label onDoubleClick={(event: MouseEvent) => beginEdit(
-                    todo.id,
-                    event.currentTarget as HTMLLabelElement,
-                  )}>{todo.title}</label>
+                  <label
+                    onDoubleClick={(event: MouseEvent) =>
+                      beginEdit(todo.id, event.currentTarget as HTMLLabelElement)
+                    }
+                  >
+                    {todo.title}
+                  </label>
                   <button
                     className="destroy"
                     aria-label={`Delete ${todo.title}`}
@@ -128,10 +131,9 @@ export function TodoApp(): Node {
                     className="edit"
                     value={todo.title}
                     aria-label={`Edit ${todo.title}`}
-                    onBlur={(event: FocusEvent) => commitEdit(
-                      todo.id,
-                      (event.currentTarget as HTMLInputElement).value,
-                    )}
+                    onBlur={(event: FocusEvent) =>
+                      commitEdit(todo.id, (event.currentTarget as HTMLInputElement).value)
+                    }
                     onKeyDown={(event: KeyboardEvent) => {
                       const input = event.currentTarget as HTMLInputElement
                       if (event.key === 'Enter') commitEdit(todo.id, input.value)
@@ -158,7 +160,8 @@ export function TodoApp(): Node {
                   data-filter={name}
                   onClick={() => setFilter(name)}
                 >
-                  {name[0]?.toUpperCase()}{name.slice(1)}
+                  {name[0]?.toUpperCase()}
+                  {name.slice(1)}
                 </button>
               </li>
             ))}

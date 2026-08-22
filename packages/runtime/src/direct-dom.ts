@@ -1,4 +1,3 @@
-import type { StateUpdate } from './state-slot.ts'
 import {
   isCompiledBinding,
   isStructuralBinding,
@@ -10,6 +9,7 @@ import {
   type CompiledBinding,
   type StructuralBinding,
 } from './compiled.ts'
+import type { StateUpdate } from './state-slot.ts'
 
 export type DirectChild =
   | Node
@@ -66,7 +66,7 @@ export function h(
     return fragment
   }
   if (typeof type === 'function') {
-    const root = constructCompiledComponent(() => type({ ...(props ?? {}), children }))
+    const root = constructCompiledComponent(() => type({ ...props, children }))
     adoptCompiledRoot(root)
     return root
   }
@@ -92,9 +92,7 @@ export function useState<T>(initialValue: T | (() => T)): [T, (update: StateUpda
   const setValue = (update: StateUpdate<T>): void => {
     if (instance.disposed) return
     const previous = hook.value as T
-    const next = typeof update === 'function'
-      ? (update as (value: T) => T)(previous)
-      : update
+    const next = typeof update === 'function' ? (update as (value: T) => T)(previous) : update
     if (Object.is(previous, next)) return
     hook.value = next
     instance.render()

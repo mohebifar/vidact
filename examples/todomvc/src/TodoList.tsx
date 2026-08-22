@@ -6,5 +6,9 @@ interface TodoListProps {
 }
 
 export function TodoList({ rows, visibleCount }: TodoListProps): Node {
-  return <ul className="todo-list" data-visible-count={visibleCount}>{rows}</ul>
+  return (
+    <ul className="todo-list" data-visible-count={visibleCount}>
+      {rows}
+    </ul>
+  )
 }

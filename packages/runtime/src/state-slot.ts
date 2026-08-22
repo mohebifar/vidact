@@ -18,10 +18,7 @@ export function createStateSlot<T>(
   return {
     get: () => value,
     set: (update) => {
-      const next =
-        typeof update === 'function'
-          ? (update as (previous: T) => T)(value)
-          : update
+      const next = typeof update === 'function' ? (update as (previous: T) => T)(value) : update
       if (Object.is(value, next)) return
 
       value = next

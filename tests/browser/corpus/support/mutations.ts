@@ -79,10 +79,12 @@ export function assertMutationEnvelope(
   )
   if (unexpected.length === 0) return
 
-  throw new Error([
-    `${label} produced ${unexpected.length} unexpected DOM mutation(s):`,
-    ...describeMutations(unexpected).map((description) => `- ${description}`),
-  ].join('\n'))
+  throw new Error(
+    [
+      `${label} produced ${unexpected.length} unexpected DOM mutation(s):`,
+      ...describeMutations(unexpected).map((description) => `- ${description}`),
+    ].join('\n'),
+  )
 }
 
 export function describeMutations(records: readonly MutationRecord[]): string[] {
@@ -99,8 +101,7 @@ export function describeMutations(records: readonly MutationRecord[]): string[] 
 }
 
 export function requireSingleDirectText(parent: Node, label = describeNode(parent)): Text {
-  const texts = [...parent.childNodes]
-    .filter((node): node is Text => node instanceof Text)
+  const texts = [...parent.childNodes].filter((node): node is Text => node instanceof Text)
   if (texts.length === 1) return texts[0]!
   throw new Error(`${label} must contain exactly one direct text node; found ${texts.length}`)
 }

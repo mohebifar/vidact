@@ -17,10 +17,7 @@ export function source(index: number): SourceMask {
 }
 
 export function combineSources(...masks: readonly SourceMask[]): SourceMask {
-  const length = masks.reduce<number>(
-    (maximum, mask) => Math.max(maximum, wordLength(mask)),
-    1,
-  )
+  const length = masks.reduce<number>((maximum, mask) => Math.max(maximum, wordLength(mask)), 1)
   if (length === 1) {
     let combined = 0
     for (const mask of masks) combined = (combined | wordAt(mask, 0)) >>> 0
@@ -38,14 +35,14 @@ export function combineSources(...masks: readonly SourceMask[]): SourceMask {
 
 export function intersectsSources(left: SourceMask, right: SourceMask): boolean {
   if (typeof left === 'number' && typeof right === 'number') {
-    return ((left & right) >>> 0) !== 0
+    return (left & right) >>> 0 !== 0
   }
 
   const leftLength = wordLength(left)
   const rightLength = wordLength(right)
   const length = Math.min(leftLength, rightLength)
   for (let index = 0; index < length; index += 1) {
-    if (((wordAt(left, index) & wordAt(right, index)) >>> 0) !== 0) return true
+    if ((wordAt(left, index) & wordAt(right, index)) >>> 0 !== 0) return true
   }
   return false
 }

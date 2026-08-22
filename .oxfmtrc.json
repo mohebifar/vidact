@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 100,
+  "semi": false,
+  "singleQuote": true,
+  "trailingComma": "all",
+  "sortImports": true,
+  "sortPackageJson": {
+    "sortScripts": true
+  },
+  "ignorePatterns": [".pnpm-store/**", "crates/**", "tests/browser/generated/**", "vendor/**"]
+}

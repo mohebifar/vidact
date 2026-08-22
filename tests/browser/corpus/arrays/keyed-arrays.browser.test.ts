@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
 import { createKeyedList } from '@vidact/runtime'
+import { describe, expect, it } from 'vitest'
+
 import { captureMutations, startMutationCapture } from '../support/mutations.ts'
 
 interface Todo {
@@ -38,10 +39,7 @@ describe('keyed array corpus', () => {
       { id: 3, label: 'three' },
     ])
 
-    expect([...host.querySelectorAll('span')].map((node) => node.dataset.key)).toEqual([
-      '2',
-      '3',
-    ])
+    expect([...host.querySelectorAll('span')].map((node) => node.dataset.key)).toEqual(['2', '3'])
     expect(host.querySelector('[data-key="2"]')).toBe(originalTwo)
     expect(originalTwo?.textContent).toBe('TWO')
     expect(disposed).toEqual([1])

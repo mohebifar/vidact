@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest'
 import { mountCompiled } from '@vidact/runtime'
+import { afterEach, describe, expect, it } from 'vitest'
+
 import { TodoApp } from './TodoApp.tsx'
 
 let dispose: (() => void) | undefined
@@ -43,9 +44,9 @@ describe('Vidact TodoMVC', () => {
     expect(labels(host)).toEqual(['Study React Compiler'])
     expect(host.querySelector('.todo-list')?.getAttribute('data-visible-count')).toBe('1')
 
-    host.querySelector('.todo-list label')?.dispatchEvent(
-      new MouseEvent('dblclick', { bubbles: true }),
-    )
+    host
+      .querySelector('.todo-list label')
+      ?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
     const edit = host.querySelector<HTMLInputElement>('.edit')
     expect(edit).not.toBeNull()
     if (edit !== null) {

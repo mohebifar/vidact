@@ -2,12 +2,15 @@
   "name": "vidact",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@10.19.0",
   "scripts": {
     "build:examples": "pnpm --filter @vidact/example-todomvc build",
-    "check": "pnpm typecheck && pnpm test",
+    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test",
     "dev:todomvc": "pnpm --filter @vidact/example-todomvc dev",
+    "format": "oxfmt \"**/*.{js,jsx,ts,tsx,json,jsonc,css}\" --write",
+    "format:check": "oxfmt \"**/*.{js,jsx,ts,tsx,json,jsonc,css}\" --check",
     "format:rust": "cargo fmt -p vidact-compiler --check",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
     "test": "pnpm test:rust && pnpm test:tools && pnpm test:browser && pnpm test:examples",
     "test:browser": "pnpm --filter @vidact/browser-corpus test",
     "test:examples": "pnpm --filter @vidact/example-todomvc test",
@@ -15,7 +18,12 @@
     "test:tools": "pnpm --filter @vidact/vite test",
     "typecheck": "pnpm --recursive typecheck"
   },
+  "devDependencies": {
+    "oxfmt": "^0.64.0",
+    "oxlint": "^1.79.0"
+  },
   "engines": {
     "node": ">=24"
-  }
+  },
+  "packageManager": "pnpm@10.19.0"
 }

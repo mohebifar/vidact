@@ -1,5 +1,7 @@
 import { mountCompiled } from '@vidact/runtime'
+
 import { TodoApp } from './TodoApp.tsx'
+
 import './style.css'
 
 const host = document.querySelector<HTMLElement>('#app')

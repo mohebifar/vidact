@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+
 import { mountAliasCounter } from '../../generated/alias-counter.ts'
 import {
   assertMutationEnvelope,
@@ -30,16 +31,24 @@ describe('Rust-generated alias reactivity corpus', () => {
       'text',
     ])
     expect(clickCapture.records).toHaveLength(2)
-    expect(() => assertMutationEnvelope(clickCapture.records, [
-      { type: 'attributes', target: element, attributeName: 'data-count' },
-      { type: 'characterData', target: text },
-    ], 'generated counter click')).not.toThrow()
+    expect(() =>
+      assertMutationEnvelope(
+        clickCapture.records,
+        [
+          { type: 'attributes', target: element, attributeName: 'data-count' },
+          { type: 'characterData', target: text },
+        ],
+        'generated counter click',
+      ),
+    ).not.toThrow()
 
     component.trace.length = 0
-    const batchCapture = await captureMutations(host, () => component.batch(() => {
-      component.setCount((previous) => previous + 1)
-      component.setCount((previous) => previous + 2)
-    }))
+    const batchCapture = await captureMutations(host, () =>
+      component.batch(() => {
+        component.setCount((previous) => previous + 1)
+        component.setCount((previous) => previous + 2)
+      }),
+    )
 
     expect(host.firstChild).toBe(element)
     expect(element.textContent?.trim()).toBe('10')
@@ -52,10 +61,16 @@ describe('Rust-generated alias reactivity corpus', () => {
       'text',
     ])
     expect(batchCapture.records).toHaveLength(2)
-    expect(() => assertMutationEnvelope(batchCapture.records, [
-      { type: 'attributes', target: element, attributeName: 'data-count' },
-      { type: 'characterData', target: text },
-    ], 'generated counter batch')).not.toThrow()
+    expect(() =>
+      assertMutationEnvelope(
+        batchCapture.records,
+        [
+          { type: 'attributes', target: element, attributeName: 'data-count' },
+          { type: 'characterData', target: text },
+        ],
+        'generated counter batch',
+      ),
+    ).not.toThrow()
 
     component.trace.length = 0
     component.dispose()

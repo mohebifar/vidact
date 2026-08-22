@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+
 import {
   assertMutationEnvelope,
   captureMutations,
@@ -28,11 +29,13 @@ describe('DOM mutation test helpers', () => {
       'attributes',
       'childList',
     ])
-    expect(() => assertMutationEnvelope(capture.records, [
-      { type: 'characterData', target: text },
-      { type: 'attributes', target: element, attributeName: 'data-state' },
-      { type: 'childList', target: element },
-    ])).not.toThrow()
+    expect(() =>
+      assertMutationEnvelope(capture.records, [
+        { type: 'characterData', target: text },
+        { type: 'attributes', target: element, attributeName: 'data-state' },
+        { type: 'childList', target: element },
+      ]),
+    ).not.toThrow()
   })
 
   it('waits for asynchronous actions before draining records', async () => {
@@ -56,7 +59,9 @@ describe('DOM mutation test helpers', () => {
 
     const capture = await captureMutations(host, () => undefined, {
       observe: { attributes: false, childList: false },
-      settle: () => { text.data = 'settled' },
+      settle: () => {
+        text.data = 'settled'
+      },
     })
 
     expect(capture.records).toHaveLength(1)
@@ -71,9 +76,7 @@ describe('DOM mutation test helpers', () => {
       text.data = 'after'
     })
 
-    expect(describeMutations(records)).toEqual([
-      'characterData #text("after") (was "before")',
-    ])
+    expect(describeMutations(records)).toEqual(['characterData #text("after") (was "before")'])
     expect(() => assertMutationEnvelope(records, [], 'scalar update')).toThrow(
       /scalar update.*characterData #text\("after"\)/s,
     )
@@ -92,9 +95,9 @@ describe('DOM mutation test helpers', () => {
       foreign.setAttribute('title', 'foreign')
     })
 
-    expect(() => assertMutationEnvelope(records, [
-      { type: 'attributes', within: owned },
-    ])).toThrow(/<aside>/)
+    expect(() => assertMutationEnvelope(records, [{ type: 'attributes', within: owned }])).toThrow(
+      /<aside>/,
+    )
   })
 
   it('records mutations around actions that throw', () => {

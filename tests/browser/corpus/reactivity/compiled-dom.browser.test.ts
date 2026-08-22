@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest'
 import {
   binding,
   combineSources,
@@ -15,6 +14,8 @@ import {
   source,
   when,
 } from '@vidact/runtime'
+import { describe, expect, it } from 'vitest'
+
 import {
   assertMutationEnvelope,
   captureMutations,
@@ -47,27 +48,35 @@ describe('compiled DOM corpus', () => {
       setCount = count.set
       setItems = items.set
 
-      return compiledRoot(scope, () => h(
-        'section',
-        null,
-        h('strong', { 'data-count': true }, binding(scope, countSource, count.get)),
-        when(scope, countSource, () => count.get() > 0, () => h('p', null, 'visible')),
+      return compiledRoot(scope, () =>
         h(
-          'ul',
+          'section',
           null,
-          keyed(
+          h('strong', { 'data-count': true }, binding(scope, countSource, count.get)),
+          when(
             scope,
-            itemsSource,
-            items.get,
-            (item) => item.id,
-            (item, _index, itemScope) => h(
-              'li',
-              { 'data-id': item.get().id },
-              binding(itemScope, source(0), () => item.get().label),
+            countSource,
+            () => count.get() > 0,
+            () => h('p', null, 'visible'),
+          ),
+          h(
+            'ul',
+            null,
+            keyed(
+              scope,
+              itemsSource,
+              items.get,
+              (item) => item.id,
+              (item, _index, itemScope) =>
+                h(
+                  'li',
+                  { 'data-id': item.get().id },
+                  binding(itemScope, source(0), () => item.get().label),
+                ),
             ),
           ),
         ),
-      ))
+      )
     }
 
     const host = document.createElement('div')
@@ -90,13 +99,23 @@ describe('compiled DOM corpus', () => {
     expect(host.querySelector('p')?.textContent).toBe('visible')
     expect(host.querySelector('[data-id="1"]')?.textContent).toBe('ONE')
     expect(host.querySelector('[data-id="2"]')).toBe(untouched)
-    expect(() => assertMutationEnvelope(countCapture.records, [
-      { type: 'characterData', target: countText },
-      { type: 'childList', target: section },
-    ], 'compiled scalar and branch update')).not.toThrow()
-    expect(() => assertMutationEnvelope(itemsCapture.records, [
-      { type: 'characterData', target: itemText },
-    ], 'compiled keyed item update')).not.toThrow()
+    expect(() =>
+      assertMutationEnvelope(
+        countCapture.records,
+        [
+          { type: 'characterData', target: countText },
+          { type: 'childList', target: section },
+        ],
+        'compiled scalar and branch update',
+      ),
+    ).not.toThrow()
+    expect(() =>
+      assertMutationEnvelope(
+        itemsCapture.records,
+        [{ type: 'characterData', target: itemText }],
+        'compiled keyed item update',
+      ),
+    ).not.toThrow()
     expect(itemsCapture.records).toHaveLength(1)
 
     mounted.dispose()
@@ -114,29 +133,34 @@ describe('compiled DOM corpus', () => {
         { id: 2, label: 'two' },
       ])
       setItems = items.set
-      return compiledRoot(scope, () => h(
-        'ul',
-        null,
-        keyed(
-          scope,
-          itemsSource,
-          items.get,
-          (item) => item.id,
-          (item, _index, itemScope) => h(
-            'li',
-            null,
-            binding(itemScope, source(0), () => item.get().label),
+      return compiledRoot(scope, () =>
+        h(
+          'ul',
+          null,
+          keyed(
+            scope,
+            itemsSource,
+            items.get,
+            (item) => item.id,
+            (item, _index, itemScope) =>
+              h(
+                'li',
+                null,
+                binding(itemScope, source(0), () => item.get().label),
+              ),
           ),
         ),
-      ))
+      )
     }, host)
     const before = host.innerHTML
     const mutations = startMutationCapture(host)
 
-    expect(() => setItems([
-      { id: 2, label: 'two' },
-      { id: 2, label: 'duplicate' },
-    ])).toThrow(/duplicate key/i)
+    expect(() =>
+      setItems([
+        { id: 2, label: 'two' },
+        { id: 2, label: 'duplicate' },
+      ]),
+    ).toThrow(/duplicate key/i)
     expect(mutations.stop()).toEqual([])
     expect(host.innerHTML).toBe(before)
 
@@ -154,23 +178,35 @@ describe('compiled DOM corpus', () => {
         { id: 2, label: 'two' },
       ])
       setItems = items.set
-      return compiledRoot(scope, () => h('ul', null, keyed(
-        scope,
-        itemsSource,
-        items.get,
-        (item) => item.id,
-        (item, _index, itemScope) => {
-          if (item.get().label === 'broken') throw new Error('render failed')
-          return h('li', null, binding(itemScope, source(0), () => item.get().label))
-        },
-      )))
+      return compiledRoot(scope, () =>
+        h(
+          'ul',
+          null,
+          keyed(
+            scope,
+            itemsSource,
+            items.get,
+            (item) => item.id,
+            (item, _index, itemScope) => {
+              if (item.get().label === 'broken') throw new Error('render failed')
+              return h(
+                'li',
+                null,
+                binding(itemScope, source(0), () => item.get().label),
+              )
+            },
+          ),
+        ),
+      )
     }, host)
     const before = host.innerHTML
 
-    expect(() => setItems([
-      { id: 1, label: 'ONE' },
-      { id: 3, label: 'broken' },
-    ])).toThrow('render failed')
+    expect(() =>
+      setItems([
+        { id: 1, label: 'ONE' },
+        { id: 3, label: 'broken' },
+      ]),
+    ).toThrow('render failed')
     expect(host.innerHTML).toBe(before)
 
     mounted.dispose()
@@ -188,12 +224,14 @@ describe('compiled DOM corpus', () => {
         return 1
       })
       setValue = value.set
-      return compiledRoot(scope, () => h(
-        Fragment,
-        null,
-        h('span', null, binding(scope, valueSource, value.get)),
-        h('span', null, 'tail'),
-      ))
+      return compiledRoot(scope, () =>
+        h(
+          Fragment,
+          null,
+          h('span', null, binding(scope, valueSource, value.get)),
+          h('span', null, 'tail'),
+        ),
+      )
     }, host)
 
     expect(initializations).toBe(1)
@@ -214,14 +252,22 @@ describe('compiled DOM corpus', () => {
       const second = createCompiledState(scope, secondSource, 0)
       scope.add({
         reads: combineSources(firstSource, secondSource),
-        run: () => { updaterRuns += 1 },
+        run: () => {
+          updaterRuns += 1
+        },
       })
-      return compiledRoot(scope, () => h('button', {
-        onClick: compiledEvent(scope, () => {
-          first.set(1)
-          second.set(2)
-        }),
-      }, 'update'))
+      return compiledRoot(scope, () =>
+        h(
+          'button',
+          {
+            onClick: compiledEvent(scope, () => {
+              first.set(1)
+              second.set(2)
+            }),
+          },
+          'update',
+        ),
+      )
     }, host)
 
     host.querySelector('button')?.click()
@@ -268,62 +314,79 @@ describe('compiled DOM corpus', () => {
       const prefix = createCompiledState(scope, prefixSource, 'row')
       setItems = items.set
       setPrefix = prefix.set
-      return compiledRoot(scope, () => h('ul', null, keyed(
-        scope,
-        itemsSource,
-        items.get,
-        (item) => item.id,
-        (item, index, itemScope) => h(
-          'li',
-          {
-            'data-id': binding(
-              itemScope,
-              itemSource,
-              () => item.get().id,
-            ),
-            className: binding(
-              scope,
-              prefixSource,
-              () => `${prefix.get()}-${item.get().id}`,
-              itemScope,
-              itemSource,
-            ),
-          },
-          binding(
-            itemScope,
-            combineSources(itemSource, indexSource),
-            () => `${index.get()}:${item.get().label}`,
+      return compiledRoot(scope, () =>
+        h(
+          'ul',
+          null,
+          keyed(
+            scope,
+            itemsSource,
+            items.get,
+            (item) => item.id,
+            (item, index, itemScope) =>
+              h(
+                'li',
+                {
+                  'data-id': binding(itemScope, itemSource, () => item.get().id),
+                  className: binding(
+                    scope,
+                    prefixSource,
+                    () => `${prefix.get()}-${item.get().id}`,
+                    itemScope,
+                    itemSource,
+                  ),
+                },
+                binding(
+                  itemScope,
+                  combineSources(itemSource, indexSource),
+                  () => `${index.get()}:${item.get().label}`,
+                ),
+              ),
           ),
         ),
-      )))
+      )
     }, host)
     const first = host.querySelector('[data-id="1"]')
     const second = host.querySelector('[data-id="2"]')
     const list = host.querySelector('ul')!
 
-    const reorderCapture = await captureMutations(host, () => setItems([
-      { id: 2, label: 'TWO' },
-      { id: 1, label: 'ONE' },
-    ]))
+    const reorderCapture = await captureMutations(host, () =>
+      setItems([
+        { id: 2, label: 'TWO' },
+        { id: 1, label: 'ONE' },
+      ]),
+    )
 
     expect(host.querySelector('[data-id="1"]')).toBe(first)
     expect(host.querySelector('[data-id="2"]')).toBe(second)
     expect(host.querySelectorAll('li')[0]).toBe(second)
     expect(host.querySelectorAll('li')[1]).toBe(first)
     expect(host.textContent).toBe('0:TWO1:ONE')
-    expect(() => assertMutationEnvelope(reorderCapture.records, [
-      { type: 'characterData', within: list },
-      { type: 'childList', target: list },
-    ], 'compiled keyed reorder')).not.toThrow()
+    expect(() =>
+      assertMutationEnvelope(
+        reorderCapture.records,
+        [
+          { type: 'characterData', within: list },
+          { type: 'childList', target: list },
+        ],
+        'compiled keyed reorder',
+      ),
+    ).not.toThrow()
 
     const prefixCapture = await captureMutations(host, () => setPrefix('item'))
     expect(first?.className).toBe('item-1')
     expect(second?.className).toBe('item-2')
     expect(prefixCapture.records).toHaveLength(2)
-    expect(() => assertMutationEnvelope(prefixCapture.records, [
-      { type: 'attributes', target: first!, attributeName: 'class' },
-      { type: 'attributes', target: second!, attributeName: 'class' },
-    ], 'compiled shared attribute update')).not.toThrow()
+    expect(() =>
+      assertMutationEnvelope(
+        prefixCapture.records,
+        [
+          { type: 'attributes', target: first!, attributeName: 'class' },
+          { type: 'attributes', target: second!, attributeName: 'class' },
+        ],
+        'compiled shared attribute update',
+      ),
+    ).not.toThrow()
 
     mounted.dispose()
   })
@@ -337,11 +400,7 @@ describe('compiled DOM corpus', () => {
     const List: DirectComponent = (props): Node => {
       const scope = createCompiledScope()
       const rows = createCompiledProp(scope, rowsSource, props.rows)
-      return compiledRoot(scope, () => h(
-        'ul',
-        null,
-        binding(scope, rowsSource, rows.get),
-      ))
+      return compiledRoot(scope, () => h('ul', null, binding(scope, rowsSource, rows.get)))
     }
     const mounted = mountCompiled(() => {
       const scope = createCompiledScope()
@@ -354,11 +413,12 @@ describe('compiled DOM corpus', () => {
         itemsSource,
         items.get,
         (item) => item.id,
-        (item, _index, itemScope) => h(
-          'li',
-          null,
-          binding(itemScope, itemSource, () => item.get().label),
-        ),
+        (item, _index, itemScope) =>
+          h(
+            'li',
+            null,
+            binding(itemScope, itemSource, () => item.get().label),
+          ),
       )
       return compiledRoot(scope, () => h(List, { rows }))
     }, host)
@@ -398,22 +458,34 @@ describe('compiled DOM corpus', () => {
         { id: 2, label: 'two' },
       ])
       setItems = items.set
-      return compiledRoot(scope, () => h('ul', null, keyed(
-        scope,
-        itemsSource,
-        items.get,
-        (item) => item.id,
-        (item, _index, itemScope) => {
-          if (item.get().id === 1) {
-            removedItem = item
-            itemScope.add({
-              reads: itemSource,
-              run: () => { removedUpdaterRuns += 1 },
-            })
-          }
-          return h('li', null, binding(itemScope, itemSource, () => item.get().label))
-        },
-      )))
+      return compiledRoot(scope, () =>
+        h(
+          'ul',
+          null,
+          keyed(
+            scope,
+            itemsSource,
+            items.get,
+            (item) => item.id,
+            (item, _index, itemScope) => {
+              if (item.get().id === 1) {
+                removedItem = item
+                itemScope.add({
+                  reads: itemSource,
+                  run: () => {
+                    removedUpdaterRuns += 1
+                  },
+                })
+              }
+              return h(
+                'li',
+                null,
+                binding(itemScope, itemSource, () => item.get().label),
+              )
+            },
+          ),
+        ),
+      )
     }, host)
 
     setItems([{ id: 2, label: 'two' }])
@@ -438,13 +510,21 @@ describe('compiled DOM corpus', () => {
       const label = createCompiledProp(scope, childLabelSource, props.label)
       scope.add({
         reads: childLabelSource,
-        run: () => { childUpdates += 1 },
+        run: () => {
+          childUpdates += 1
+        },
       })
-      return compiledRoot(scope, () => h(
-        'strong',
-        { ref: () => () => { childRefCleanups += 1 } },
-        binding(scope, childLabelSource, label.get),
-      ))
+      return compiledRoot(scope, () =>
+        h(
+          'strong',
+          {
+            ref: () => () => {
+              childRefCleanups += 1
+            },
+          },
+          binding(scope, childLabelSource, label.get),
+        ),
+      )
     }
     const mounted = mountCompiled(() => {
       const scope = createCompiledScope()
@@ -452,13 +532,17 @@ describe('compiled DOM corpus', () => {
       const visible = createCompiledState(scope, visibleSource, true)
       setLabel = label.set
       setVisible = visible.set
-      return compiledRoot(scope, () => h(
-        'section',
-        null,
-        when(scope, visibleSource, visible.get, () => h(Child, {
-          label: binding(scope, labelSource, label.get),
-        })),
-      ))
+      return compiledRoot(scope, () =>
+        h(
+          'section',
+          null,
+          when(scope, visibleSource, visible.get, () =>
+            h(Child, {
+              label: binding(scope, labelSource, label.get),
+            }),
+          ),
+        ),
+      )
     }, host)
     const section = host.querySelector('section')!
     const child = host.querySelector('strong')!
@@ -469,19 +553,29 @@ describe('compiled DOM corpus', () => {
     expect(childUpdates).toBe(1)
     expect(host.querySelector('strong')).toBe(child)
     expect(labelCapture.records).toHaveLength(1)
-    expect(() => assertMutationEnvelope(labelCapture.records, [
-      { type: 'characterData', target: childText },
-    ], 'compiled child prop update')).not.toThrow()
+    expect(() =>
+      assertMutationEnvelope(
+        labelCapture.records,
+        [{ type: 'characterData', target: childText }],
+        'compiled child prop update',
+      ),
+    ).not.toThrow()
 
     const branchCapture = await captureMutations(host, () => setVisible(false))
     setLabel('three')
     expect(host.querySelector('strong')).toBeNull()
     expect(childUpdates).toBe(1)
     expect(childRefCleanups).toBe(1)
-    expect(() => assertMutationEnvelope(branchCapture.records, [
-      { type: 'childList', within: child },
-      { type: 'childList', target: section },
-    ], 'compiled child branch removal')).not.toThrow()
+    expect(() =>
+      assertMutationEnvelope(
+        branchCapture.records,
+        [
+          { type: 'childList', within: child },
+          { type: 'childList', target: section },
+        ],
+        'compiled child branch removal',
+      ),
+    ).not.toThrow()
 
     mounted.dispose()
   })
@@ -505,9 +599,11 @@ describe('compiled DOM corpus', () => {
       const scope = createCompiledScope()
       const label = createCompiledState<string | undefined>(scope, parentSource, undefined)
       setLabel = label.set
-      return compiledRoot(scope, () => h(Child, {
-        label: binding(scope, parentSource, label.get),
-      }))
+      return compiledRoot(scope, () =>
+        h(Child, {
+          label: binding(scope, parentSource, label.get),
+        }),
+      )
     }, host)
 
     expect(host.textContent).toBe('fallback')
@@ -533,30 +629,37 @@ describe('compiled DOM corpus', () => {
       const second = createCompiledProp(scope, secondChildSource, props.second)
       scope.add({
         reads: combineSources(firstChildSource, secondChildSource),
-        run: () => { observed.push(`${first.get()}:${second.get()}`) },
+        run: () => {
+          observed.push(`${first.get()}:${second.get()}`)
+        },
       })
-      return compiledRoot(scope, () => h(
-        'p',
-        null,
-        binding(
-          scope,
-          combineSources(firstChildSource, secondChildSource),
-          () => `${first.get()}:${second.get()}`,
+      return compiledRoot(scope, () =>
+        h(
+          'p',
+          null,
+          binding(
+            scope,
+            combineSources(firstChildSource, secondChildSource),
+            () => `${first.get()}:${second.get()}`,
+          ),
         ),
-      ))
+      )
     }
     const mounted = mountCompiled(() => {
       const scope = createCompiledScope()
       const first = createCompiledState(scope, firstParentSource, 'one')
       const second = createCompiledState(scope, secondParentSource, 'two')
-      setBoth = (nextFirst, nextSecond) => scope.batch(() => {
-        first.set(nextFirst)
-        second.set(nextSecond)
-      })
-      return compiledRoot(scope, () => h(Child, {
-        first: binding(scope, firstParentSource, first.get),
-        second: binding(scope, secondParentSource, second.get),
-      }))
+      setBoth = (nextFirst, nextSecond) =>
+        scope.batch(() => {
+          first.set(nextFirst)
+          second.set(nextSecond)
+        })
+      return compiledRoot(scope, () =>
+        h(Child, {
+          first: binding(scope, firstParentSource, first.get),
+          second: binding(scope, secondParentSource, second.get),
+        }),
+      )
     }, host)
 
     setBoth('ONE', 'TWO')
@@ -579,9 +682,13 @@ describe('compiled DOM corpus', () => {
       createCompiledProp(scope, childLabelSource, props.label)
       scope.add({
         reads: childLabelSource,
-        run: () => { leakedUpdates += 1 },
+        run: () => {
+          leakedUpdates += 1
+        },
       })
-      return compiledRoot(scope, () => { throw new Error('child failed') })
+      return compiledRoot(scope, () => {
+        throw new Error('child failed')
+      })
     }
     const mounted = mountCompiled(() => {
       const scope = createCompiledScope()
@@ -589,12 +696,15 @@ describe('compiled DOM corpus', () => {
       const visible = createCompiledState(scope, visibleSource, false)
       setLabel = label.set
       setVisible = visible.set
-      return compiledRoot(scope, () => h('section', null, when(
-        scope,
-        visibleSource,
-        visible.get,
-        () => h(BrokenChild, { label: binding(scope, labelSource, label.get) }),
-      )))
+      return compiledRoot(scope, () =>
+        h(
+          'section',
+          null,
+          when(scope, visibleSource, visible.get, () =>
+            h(BrokenChild, { label: binding(scope, labelSource, label.get) }),
+          ),
+        ),
+      )
     }, host)
 
     expect(() => setVisible(true)).toThrow('child failed')
@@ -613,13 +723,15 @@ describe('compiled DOM corpus', () => {
       const scope = createCompiledScope()
       const value = createCompiledState<unknown>(scope, valueSource, 0)
       setValue = value.set
-      return compiledRoot(scope, () => h(
-        'div',
-        null,
-        h('i', null, 'before'),
-        binding(scope, valueSource, value.get),
-        h('i', null, 'after'),
-      ))
+      return compiledRoot(scope, () =>
+        h(
+          'div',
+          null,
+          h('i', null, 'before'),
+          binding(scope, valueSource, value.get),
+          h('i', null, 'after'),
+        ),
+      )
     }, host)
 
     setValue(['a', 0, null, false, ['b']])
@@ -657,20 +769,34 @@ describe('compiled DOM corpus', () => {
       const scope = createCompiledScope()
       const items = createCompiledState<readonly number[]>(scope, itemsSource, [1])
       setItems = items.set
-      return compiledRoot(scope, () => h('div', null, keyed(
-        scope,
-        itemsSource,
-        items.get,
-        (item) => item,
-        (item) => h('button', {
-          'data-id': item.get(),
-          ref: item.get() === 1
-            ? () => () => { throw new Error('row cleanup failed') }
-            : (element: Element | null) => {
-                if (element !== null) secondAttachments += 1
-              },
-        }, item.get()),
-      )))
+      return compiledRoot(scope, () =>
+        h(
+          'div',
+          null,
+          keyed(
+            scope,
+            itemsSource,
+            items.get,
+            (item) => item,
+            (item) =>
+              h(
+                'button',
+                {
+                  'data-id': item.get(),
+                  ref:
+                    item.get() === 1
+                      ? () => () => {
+                          throw new Error('row cleanup failed')
+                        }
+                      : (element: Element | null) => {
+                          if (element !== null) secondAttachments += 1
+                        },
+                },
+                item.get(),
+              ),
+          ),
+        ),
+      )
     }, host)
 
     expect(() => setItems([2])).toThrow('row cleanup failed')
@@ -687,17 +813,25 @@ describe('compiled DOM corpus', () => {
     const host = document.createElement('div')
     const mounted = mountCompiled(() => {
       const scope = createCompiledScope()
-      return compiledRoot(scope, () => h(
-        'section',
-        null,
-        h('input', { ref: objectRef }),
-        h('button', {
-          ref: (node: HTMLButtonElement) => {
-            attached = node
-            return () => { callbackCleanups += 1 }
-          },
-        }, 'action'),
-      ))
+      return compiledRoot(scope, () =>
+        h(
+          'section',
+          null,
+          h('input', { ref: objectRef }),
+          h(
+            'button',
+            {
+              ref: (node: HTMLButtonElement) => {
+                attached = node
+                return () => {
+                  callbackCleanups += 1
+                }
+              },
+            },
+            'action',
+          ),
+        ),
+      )
     }, host)
 
     expect(objectRef.current).toBe(host.querySelector('input'))
@@ -712,9 +846,17 @@ describe('compiled DOM corpus', () => {
     const host = document.createElement('div')
     const mounted = mountCompiled(() => {
       const scope = createCompiledScope()
-      return compiledRoot(scope, () => h('button', {
-        ref: () => () => { throw new Error('cleanup failed') },
-      }, 'action'))
+      return compiledRoot(scope, () =>
+        h(
+          'button',
+          {
+            ref: () => () => {
+              throw new Error('cleanup failed')
+            },
+          },
+          'action',
+        ),
+      )
     }, host)
 
     expect(() => mounted.dispose()).toThrow('cleanup failed')

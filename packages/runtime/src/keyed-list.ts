@@ -94,9 +94,10 @@ export function createKeyedList<T, K>(
     if (disposed) return
     disposed = true
     const currentParent = end.parentNode
-    const cleanup = currentParent === null
-      ? { error: undefined, failed: false }
-      : disposeRecords(currentParent, records)
+    const cleanup =
+      currentParent === null
+        ? { error: undefined, failed: false }
+        : disposeRecords(currentParent, records)
     records = []
     start.remove()
     end.remove()

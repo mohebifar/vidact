@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "import", "vitest"],
+  "rules": {
+    "import/no-unassigned-import": [
+      "warn",
+      {
+        "allow": ["**/*.css"]
+      }
+    ]
+  },
+  "ignorePatterns": [".pnpm-store/**", "crates/**", "tests/browser/generated/**", "vendor/**"]
+}

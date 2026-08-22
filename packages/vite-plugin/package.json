@@ -11,13 +11,13 @@
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"
   },
-  "peerDependencies": {
-    "vite": "^8.0.0"
-  },
   "devDependencies": {
     "@types/node": "^24.13.3",
     "typescript": "7.0.2",
     "vite": "8.2.2",
     "vitest": "4.1.11"
+  },
+  "peerDependencies": {
+    "vite": "^8.0.0"
   }
 }

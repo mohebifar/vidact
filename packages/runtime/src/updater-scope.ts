@@ -1,9 +1,4 @@
-import {
-  intersectsSources,
-  isEmptySources,
-  type SourceMask,
-  unionSources,
-} from './source-mask.ts'
+import { intersectsSources, isEmptySources, type SourceMask, unionSources } from './source-mask.ts'
 
 const MAX_FLUSH_PASSES = 100
 

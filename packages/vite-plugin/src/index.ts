@@ -1,6 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
+
 import { transformWithOxc, type Plugin } from 'vite'
+
 import { compileWithCompiler, type VidactAnalysis } from './compiler-client.ts'
 
 const REACT_MODULE = '\0vidact:react'
@@ -21,9 +23,10 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
     name: 'vidact',
     enforce: 'pre',
     configResolved(config) {
-      manifestPath = options.manifestPath === undefined
-        ? findWorkspaceManifest(config.root)
-        : path.resolve(config.root, options.manifestPath)
+      manifestPath =
+        options.manifestPath === undefined
+          ? findWorkspaceManifest(config.root)
+          : path.resolve(config.root, options.manifestPath)
     },
     resolveId(source) {
       return source === 'react' ? REACT_MODULE : null

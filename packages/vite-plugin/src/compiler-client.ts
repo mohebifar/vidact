@@ -49,9 +49,9 @@ export function compileWithCompiler(
   return runCompiler('compile', source, filename, manifestPath).then((result) => {
     const compilation = result as Partial<VidactCompilation>
     if (
-      compilation.protocol !== 'vidact-compile-v1'
-      || typeof compilation.code !== 'string'
-      || compilation.analysis?.protocol !== 'vidact-analysis-v1'
+      compilation.protocol !== 'vidact-compile-v1' ||
+      typeof compilation.code !== 'string' ||
+      compilation.analysis?.protocol !== 'vidact-analysis-v1'
     ) {
       throw new Error('vidactc returned an unsupported compilation protocol')
     }
