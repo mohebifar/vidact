@@ -1314,6 +1314,34 @@ fn prop_binding_symbols<'a>(
     let mut bindings = Vec::new();
     for parameter in &params.items {
         let BindingPattern::ObjectPattern(pattern) = &parameter.pattern else {
+            if let BindingPattern::BindingIdentifier(identifier) = &parameter.pattern
+                && prop_sources.contains(identifier.name.as_str())
+            {
+                let source = sources
+                    .get(identifier.name.as_str())
+                    .copied()
+                    .ok_or_else(|| {
+                        analysis_error(format!(
+                            "props object binding {} is absent from analysis",
+                            identifier.name
+                        ))
+                    })?;
+                let symbol = identifier.symbol_id.get().ok_or_else(|| {
+                    analysis_error(format!(
+                        "props object {} has no semantic symbol",
+                        identifier.name
+                    ))
+                })?;
+                bindings.push(PropBinding {
+                    name: identifier.name.to_string(),
+                    public_name: None,
+                    symbol,
+                    source,
+                    default: None,
+                    rest: true,
+                    rest_exclusions: Vec::new(),
+                });
+            }
             continue;
         };
         let mut rest_exclusions = Vec::with_capacity(pattern.properties.len());
@@ -1418,7 +1446,10 @@ fn rewrite_component_props_parameter<'a>(
         return;
     }
     for parameter in &mut params.items {
-        if matches!(parameter.pattern, BindingPattern::ObjectPattern(_)) {
+        if matches!(
+            parameter.pattern,
+            BindingPattern::BindingIdentifier(_) | BindingPattern::ObjectPattern(_)
+        ) {
             parameter.pattern = BindingPattern::new_binding_identifier(SPAN, atom(ast, PROPS), ast);
             return;
         }

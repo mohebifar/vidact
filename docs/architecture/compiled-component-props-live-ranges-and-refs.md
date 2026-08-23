@@ -117,18 +117,22 @@ React state updater entry point. Function-valued callbacks and component types
 therefore remain values and are never invoked merely because an upstream binding
 changed.
 
-The current compiler accepts direct object destructuring and binds each public
-property to its resolved local semantic symbol, so `{ value: displayed }`
-reads `__vidactProps["value"]` and updates `displayed` without reinvoking the
-component. Rest props resolve from the full props object through one reactive
-object slot with the compiler-recorded destructured public names excluded, and
+The current compiler accepts either a props-object identifier or direct object
+destructuring. A props-object identifier becomes one live resolved-object slot,
+so direct member reads, computed member reads, and forwarding spreads share the
+same statically tracked source. A destructured public property binds to its
+resolved local semantic symbol, so `{ value: displayed }` reads
+`__vidactProps["value"]` and updates `displayed` without reinvoking the component.
+Rest props resolve from the full props object through the same object-slot
+primitive with the compiler-recorded destructured public names excluded, and
 can feed the deletion-aware intrinsic spread path
 defined in [Deletion-aware reactive spreads and rest props](deletion-aware-reactive-spreads-and-rest-props.md).
 One reactive component spread that precedes explicit props can feed a mutable
 component prop view. Direct prop slots receive stable per-key compiled bindings;
 the rest slot observes the spread's live enumerable key set. Computed or nested
-patterns, multiple or interleaved reactive component spreads, and reactive local
-derivations absent from data-flow facts remain fail-closed.
+patterns, destructuring a props object later in the body, multiple or interleaved
+reactive component spreads, and reactive local derivations absent from data-flow
+facts remain fail-closed.
 
 Each dynamic value range owns the resources created by its current non-scalar
 value. Replacing the value disposes that owner and removes only the nodes between
@@ -156,6 +160,8 @@ back.
   child component.
 - Public prop names and local destructuring aliases remain distinct in generated
   code, and rest exclusion follows public names rather than local symbols.
+- A props-object parameter remains live as one child-local slot; direct,
+  computed, and forwarding reads participate in the updater graph.
 - A reactive component spread can add, replace, or delete a direct or rest prop
   without reinvoking the child; an explicit following prop remains authoritative.
 - A retained state setter fails before evaluating its update after the owning

@@ -1105,6 +1105,36 @@ fn compiles_rest_props_into_a_resolved_object_slot() {
 }
 
 #[test]
+fn compiles_props_object_reads_and_forwarding_into_a_live_object_slot() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "PropsObject.tsx",
+        source: r#"
+            export function PropsObject(props): Node {
+                const key = 'title';
+                return <section {...props}>{props.label}:{props[key]}</section>;
+            }
+        "#,
+    })
+    .expect("whole props objects should remain live without component reinvocation");
+
+    assert!(
+        output.contains("function PropsObject(__vidactProps)"),
+        "{output}"
+    );
+    assert!(
+        output
+            .contains("const props = __vidactCreateRestProp(__vidactScope, 1, __vidactProps, [])"),
+        "{output}"
+    );
+    assert!(output.contains("props.get().label"), "{output}");
+    assert!(output.contains("props.get()[key]"), "{output}");
+    assert!(
+        output.contains("__vidactSpread(__vidactBinding("),
+        "{output}"
+    );
+}
+
+#[test]
 fn defers_component_children_until_the_child_namespace_is_active() {
     let output = compile_surgical_module(ModuleInput {
         filename: "NamespaceChildren.tsx",

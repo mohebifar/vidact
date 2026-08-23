@@ -99,6 +99,11 @@
       "components": ["RestProps"]
     },
     {
+      "path": "accepted/props-object.tsx",
+      "expectation": "accepted",
+      "components": ["PropsObject"]
+    },
+    {
       "path": "rejected/foreign-array-call.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",

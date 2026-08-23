@@ -86,6 +86,7 @@ describe('compiled DOM semantics app', () => {
     const clicks = host.querySelector<HTMLOutputElement>('[data-spread-clicks]')!
     const rest = host.querySelector<HTMLElement>('[data-rest]')!
     const direct = host.querySelector<HTMLOutputElement>('[data-direct-spread]')!
+    const propsObject = host.querySelector<HTMLElement>('[data-props-object]')!
     const toggle = host.querySelector<HTMLButtonElement>('[data-toggle-spread]')!
 
     expect(target.title).toBe('first spread')
@@ -100,6 +101,9 @@ describe('compiled DOM semantics app', () => {
     expect(rest.hidden).toBe(false)
     expect(rest.textContent).toBe('rest one')
     expect(direct.textContent).toBe('first spread')
+    expect(propsObject.title).toBe('first spread')
+    expect(propsObject.dataset.spread).toBe('one')
+    expect(propsObject.textContent).toBe('first spread:one')
 
     await captureMutations(host, () => toggle.click())
 
@@ -119,6 +123,10 @@ describe('compiled DOM semantics app', () => {
     expect(rest.textContent).toBe('rest two')
     expect(host.querySelector('[data-direct-spread]')).toBe(direct)
     expect(direct.textContent).toBe('missing')
+    expect(host.querySelector('[data-props-object]')).toBe(propsObject)
+    expect(propsObject.hasAttribute('title')).toBe(false)
+    expect(propsObject.dataset.spread).toBe('two')
+    expect(propsObject.textContent).toBe('missing:two')
     rest.click()
     expect(clicks.textContent).toBe('21')
   })

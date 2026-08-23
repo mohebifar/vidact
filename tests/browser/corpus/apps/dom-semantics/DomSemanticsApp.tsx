@@ -29,6 +29,18 @@ function DirectSpread({ title = 'missing' }: { title?: string }): JSX.Element {
   return <output data-direct-spread>{title}</output>
 }
 
+function PropsObject(props: {
+  title?: string
+  'data-spread'?: string
+  onClick?: () => void
+}): JSX.Element {
+  return (
+    <article {...props} data-props-object>
+      {props.title ?? 'missing'}:{props['data-spread']}
+    </article>
+  )
+}
+
 function DeferredSvg({ visible }: { visible: boolean }): JSX.Element {
   return <>{visible && <circle data-deferred-svg cx="3" cy="3" r="2" tabIndex={0} />}</>
 }
@@ -104,6 +116,7 @@ export function DomSemanticsApp(): JSX.Element {
         data-rest={spreadProps['data-spread']}
       />
       <DirectSpread {...spreadProps} />
+      <PropsObject {...spreadProps} />
 
       <section
         data-boolean={active}

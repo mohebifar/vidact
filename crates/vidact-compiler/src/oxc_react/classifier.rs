@@ -54,8 +54,26 @@ pub(super) fn classify_component<'a>(
 
     for parameter in &params.items {
         let BindingPattern::ObjectPattern(pattern) = &parameter.pattern else {
+            if let BindingPattern::BindingIdentifier(identifier) = &parameter.pattern {
+                let symbol = identifier.symbol_id.get().ok_or_else(|| {
+                    Diagnostic::new(
+                        DiagnosticCode::AnalysisFailed,
+                        "semantic analysis did not resolve the props object binding",
+                    )
+                    .with_span(SourceSpan::from_oxc(identifier.span))
+                })?;
+                sources.insert(
+                    identifier.name.to_string(),
+                    SourceSyntax {
+                        kind: SourceKind::Prop,
+                        symbol,
+                        declaration_start: identifier.span.start,
+                    },
+                );
+                continue;
+            }
             return Err(unsupported_at(
-                "compiled props require direct object destructuring in the component parameter",
+                "compiled props require an identifier or object-destructured component parameter",
                 parameter.pattern.span(),
             ));
         };

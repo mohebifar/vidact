@@ -20,6 +20,9 @@ public key, and resolves each remaining upstream compiled binding. Bridge
 subscriptions replace the object slot whenever any included value changes.
 Direct destructured props keep their existing independent slots, addressed by
 public key even when their child-local binding is aliased.
+The same object-slot primitive represents an identifier-form props parameter
+with no exclusions, preserving reactive direct/computed reads and forwarding
+spreads without exposing upstream binding descriptors.
 
 One reactive intrinsic JSX spread lowers to a capability-imported directive.
 The directive owns the currently visible property set, diffs names and values,
