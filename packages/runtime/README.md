@@ -11,3 +11,7 @@ primitives directly.
 
 The compiler and runtime validate the `vidact-runtime-v1` protocol. Server and
 hydration builds must use matching package versions.
+
+`mountHotRoot(import.meta.hot, host, application)` provides owner-safe Vite HMR.
+Local compiled state resets when the module changes; stable external stores are
+the supported state-preservation boundary.

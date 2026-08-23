@@ -15,8 +15,10 @@ import {
   Fragment,
   h,
   keyed,
+  mountHotRoot,
   source,
   useLayoutEffect,
+  type HotContext,
 } from '../../src/index.ts'
 import {
   Fragment as ServerFragment,
@@ -56,6 +58,59 @@ describe('compiled client roots', () => {
     expect(() => setCount(1)).toThrow('cannot update state after disposal')
     expect(() => root.mount(application)).toThrow('cannot mount an unmounted root')
     expect(() => root.unmount()).not.toThrow()
+  })
+
+  it('replaces hot roots with owner cleanup and an explicit local-state reset boundary', () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    const data: Record<string, unknown> = {}
+    const cleanups: string[] = []
+    let disposeHot = (_data: Record<string, unknown>): void => {}
+    let pruneHot = (): void => {}
+    let accepted = 0
+    const hot = (): HotContext => ({
+      data,
+      accept: () => {
+        accepted += 1
+      },
+      dispose: (callback) => {
+        disposeHot = callback
+      },
+      prune: (callback) => {
+        pruneHot = callback
+      },
+    })
+    let setCount!: ReturnType<typeof createCompiledState<number>>['set']
+    const application = (label: string) => () => {
+      const scope = createCompiledScope()
+      const count = createCompiledState(scope, source(0), 0)
+      setCount = count.set
+      useLayoutEffect(
+        () => () => {
+          cleanups.push(label)
+        },
+        [],
+      )
+      return compiledRoot(scope, () =>
+        h('button', null, label, ':', binding(scope, source(0), count.get)),
+      )
+    }
+
+    mountHotRoot(hot(), host, application('first'))
+    const firstButton = host.querySelector('button')
+    setCount(1)
+    expect(firstButton?.textContent).toBe('first:1')
+    disposeHot(data)
+
+    mountHotRoot(hot(), host, application('second'))
+    expect(host.querySelector('button')).not.toBe(firstButton)
+    expect(host.textContent).toBe('second:0')
+    expect(cleanups).toEqual(['first'])
+    expect(accepted).toBe(2)
+
+    pruneHot()
+    expect(host.childNodes).toHaveLength(0)
+    expect(cleanups).toEqual(['first', 'second'])
   })
 
   it('hydrates matching versioned markup without replacing elements or text', async () => {
