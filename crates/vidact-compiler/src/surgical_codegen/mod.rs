@@ -24,7 +24,7 @@ use crate::{
     analysis::{ModuleInput, SourceId, SourceKind},
     ast_utils::{
         component_function_parts_mut, is_event_attribute, is_supported_react_event_attribute,
-        normalize_expression_bodied_component_arrows,
+        normalize_expression_bodied_component_arrows, restore_anonymous_default_component_names,
     },
     ir::{ComponentIr, lower_component},
     options::{CompilationOptions, CompilerFeature},
@@ -99,7 +99,8 @@ pub fn compile_surgical_module_with_ir_and_options(
             input.filename, parsed.diagnostics
         ))]);
     }
-    normalize_expression_bodied_component_arrows(&allocator, &mut parsed.program);
+    let anonymous_defaults =
+        normalize_expression_bodied_component_arrows(&allocator, &mut parsed.program);
     let semantic = SemanticBuilder::new()
         .with_build_nodes(true)
         .with_check_syntax_error(true)
@@ -128,6 +129,7 @@ pub fn compile_surgical_module_with_ir_and_options(
         &mut parsed.program,
     )
     .map_err(|diagnostic| vec![diagnostic])?;
+    restore_anonymous_default_component_names(&mut parsed.program, &anonymous_defaults);
     let generated = Codegen::new()
         .with_options(CodegenOptions {
             source_map_path: Some(Path::new(input.filename).to_path_buf()),

@@ -107,12 +107,13 @@ app compiled through the Vite plugin.
 Ordinary parent/child modules can now compile without splitting components into
 files, and diagnostics can point back to original TSX. The Oxc patch now
 includes an owned control-flow snapshot as well as the function span.
-Anonymous default component declarations and precise spans for internal analysis
-failures without a single source construct remain follow-up work. Named default
-exports, both ordinary arrow body forms, DOM-range lowering for multi-return
-control flow, and original-TSX source maps are complete. Adding a compatibility
-fixture requires an explicit contract classification, which is intentional
-maintenance overhead.
+Precise spans for internal analysis failures without a single source construct
+remain follow-up work. Named and anonymous default function exports, both
+ordinary arrow body forms, DOM-range lowering for multi-return control flow, and
+original-TSX source maps are complete. Anonymous defaults receive a temporary,
+span-derived analysis name that is removed before code generation. Adding a
+compatibility fixture requires an explicit contract classification, which is
+intentional maintenance overhead.
 
 ## Verification
 

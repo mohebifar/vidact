@@ -56,7 +56,7 @@ impl ReactAnalysisAdapter for OxcReactAnalysisAdapter {
                 input.filename, parsed.diagnostics
             ))]);
         }
-        normalize_expression_bodied_component_arrows(&allocator, &mut parsed.program);
+        let _ = normalize_expression_bodied_component_arrows(&allocator, &mut parsed.program);
 
         let semantic = SemanticBuilder::new()
             .with_build_nodes(true)

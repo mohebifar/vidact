@@ -134,8 +134,11 @@ function declarations; a module may contain several of these. Expression-bodied
 component arrows normalize to a return body before semantic analysis. Each owned
 React Compiler snapshot still carries the original function span, and Vidact
 joins it only to the declaration or source binding with that exact span.
-Anonymous default forms fail closed until their upstream analysis semantics are
-modeled.
+Anonymous default functions receive a span-derived internal name only for
+semantic analysis and lowering; surgical codegen removes it so the emitted
+export preserves the source-level anonymous form. Anonymous default arrows still
+fail closed because they require a synthetic declaration rather than only an
+analysis name.
 
 ## Next integration step
 

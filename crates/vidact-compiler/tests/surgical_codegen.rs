@@ -608,6 +608,15 @@ fn compiles_function_expressions_and_default_exports_by_span() {
             "export default function DefaultFunction({ label })",
         ),
         (
+            "AnonymousDefaultFunction.tsx",
+            r#"
+                export default function ({ label }) {
+                    return <p>{label}</p>;
+                }
+            "#,
+            "export default function({ label })",
+        ),
+        (
             "DefaultArrow.tsx",
             r#"
                 const DefaultArrow = ({ label }) => {

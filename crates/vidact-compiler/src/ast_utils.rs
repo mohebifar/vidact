@@ -14,8 +14,9 @@ use crate::SourceSpan;
 pub(crate) fn normalize_expression_bodied_component_arrows<'a>(
     allocator: &'a Allocator,
     program: &mut Program<'a>,
-) {
+) -> Vec<SourceSpan> {
     let ast = AstBuilder::new(allocator);
+    let mut anonymous_defaults = Vec::new();
     for statement in &mut program.body {
         match statement {
             Statement::VariableDeclaration(declaration) => {
@@ -26,7 +27,42 @@ pub(crate) fn normalize_expression_bodied_component_arrows<'a>(
                     normalize_variable_arrows(&ast, declaration);
                 }
             }
+            Statement::ExportDefaultDeclaration(export) => {
+                if let ExportDefaultDeclarationKind::FunctionDeclaration(function) =
+                    &mut export.declaration
+                    && function.id.is_none()
+                {
+                    let span = SourceSpan::from_oxc(function.span);
+                    let name = allocator
+                        .alloc_str(&format!("VidactDefaultComponent{}", function.span.start));
+                    function.id = Some(oxc_ast::ast::BindingIdentifier::new(
+                        oxc_span::SPAN,
+                        name,
+                        &ast,
+                    ));
+                    anonymous_defaults.push(span);
+                }
+            }
             _ => {}
+        }
+    }
+    anonymous_defaults
+}
+
+pub(crate) fn restore_anonymous_default_component_names(
+    program: &mut Program<'_>,
+    spans: &[SourceSpan],
+) {
+    for statement in &mut program.body {
+        let Statement::ExportDefaultDeclaration(export) = statement else {
+            continue;
+        };
+        let ExportDefaultDeclarationKind::FunctionDeclaration(function) = &mut export.declaration
+        else {
+            continue;
+        };
+        if spans.contains(&SourceSpan::from_oxc(function.span)) {
+            function.id = None;
         }
     }
 }

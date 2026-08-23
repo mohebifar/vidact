@@ -44,6 +44,11 @@
       "components": ["DefaultFunction"]
     },
     {
+      "path": "accepted/anonymous-default-function.tsx",
+      "expectation": "accepted",
+      "components": ["VidactDefaultComponent15"]
+    },
+    {
       "path": "accepted/function-expression-component.tsx",
       "expectation": "accepted",
       "components": ["FunctionExpression"]
