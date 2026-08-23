@@ -7,6 +7,7 @@ import {
   KeyedControlFlowApp,
   LogicalFlowApp,
   ReactiveRefApp,
+  SlotTypeApp,
   SwitchFlowApp,
   takeReactiveRefTrace,
 } from './ControlFlowApp.tsx'
@@ -253,5 +254,31 @@ describe('compiled render control flow', () => {
     dispose()
     dispose = undefined
     expect(takeReactiveRefTrace()).toEqual(['clear:second'])
+  })
+
+  it('dispatches a component type carried through a reactive prop slot', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    dispose = mountCompiled(SlotTypeApp, host).dispose
+
+    const root = host.querySelector<HTMLElement>('[data-slot-type-app]')!
+    const first = host.querySelector<HTMLElement>('[data-slot-choice="first"]')!
+    const forward = await captureMutations(host, () =>
+      host.querySelector<HTMLButtonElement>('[data-slot-toggle]')!.click(),
+    )
+
+    expect(host.querySelector('[data-slot-type-app]')).toBe(root)
+    expect(host.querySelector('[data-slot-choice="first"]')).toBeNull()
+    expect(host.querySelector('[data-slot-choice="second"]')).not.toBe(first)
+    expect(forward.records.some((record) => record.type === 'childList')).toBe(true)
+
+    const second = host.querySelector<HTMLElement>('[data-slot-choice="second"]')!
+    await captureMutations(host, () =>
+      host.querySelector<HTMLButtonElement>('[data-slot-toggle]')!.click(),
+    )
+    expect(host.querySelector('[data-slot-type-app]')).toBe(root)
+    expect(host.querySelector('[data-slot-choice="first"]')).not.toBe(first)
+    expect(host.querySelector('[data-slot-choice="second"]')).toBeNull()
+    expect(second.isConnected).toBe(false)
   })
 })

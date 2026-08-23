@@ -86,6 +86,11 @@ that started a flush runs all of its bridge updaters before queued child scopes
 drain. Multiple prop slots changed by one parent batch therefore become one
 child invalidation set, rather than a sequence of torn child snapshots.
 
+Prop bridges use the slot's exact-value replacement entry point rather than its
+React state updater entry point. Function-valued callbacks and component types
+therefore remain values and are never invoked merely because an upstream binding
+changed.
+
 The current compiler accepts direct object destructuring and binds each public
 property to its resolved local semantic symbol, so `{ value: displayed }`
 updates `displayed` without reinvoking the component. It rejects rest props,
@@ -117,6 +122,8 @@ the next ref.
   component has been disposed; the dead slot cannot mutate silently.
 - One parent batch that changes several props runs a dependent child updater
   once with the complete next prop set.
+- A function-valued prop crosses the bridge by identity without being mistaken
+  for a functional state update.
 - Disposing a parent branch or keyed record stops all adopted child prop
   updates and runs nested cleanup once.
 - A component that throws during construction leaves no created scope or prop

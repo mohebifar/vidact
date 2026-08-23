@@ -786,8 +786,8 @@ fn dispatches_dynamic_component_keys_without_remounting_stable_identity() {
 }
 
 #[test]
-fn rejects_slot_valued_component_types_until_call_site_lowering_exists() {
-    let diagnostics = compile_surgical_module(ModuleInput {
+fn compiles_slot_valued_component_types_through_identity_dispatch() {
+    let output = compile_surgical_module(ModuleInput {
         filename: "PropType.tsx",
         source: r#"
             export function PropType({ Type }) {
@@ -795,12 +795,11 @@ fn rejects_slot_valued_component_types_until_call_site_lowering_exists() {
             }
         "#,
     })
-    .expect_err("a slot-valued JSX callee cannot be emitted as a plain identifier");
+    .expect("a slot-valued JSX callee should evaluate inside the identity dispatcher");
 
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == DiagnosticCode::UnsupportedSyntax
-            && diagnostic.message.contains("callable slot lowering")
-    }));
+    assert!(output.contains("dispatch as __vidactDispatch"), "{output}");
+    assert!(output.contains("() => Type.get()"), "{output}");
+    assert!(output.contains("(VidactType) => <VidactType"), "{output}");
 }
 
 #[test]

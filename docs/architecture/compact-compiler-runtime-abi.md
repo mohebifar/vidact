@@ -97,6 +97,17 @@ the following measured cost while staying below every accepted ceiling:
 | Keyed list | 8,070 B | 8,213 B | +143 B |
 | TodoMVC | 9,671 B | 9,802 B | +131 B |
 
+Exact replacement for function-valued prop slots prevents callable props from
+entering `useState` updater semantics. The extra private slot entry point has a
+small default-core cost:
+
+| Fixture | Reactive-ref gzip | Exact prop replacement gzip | Change |
+| --- | ---: | ---: | ---: |
+| Counter | 7,080 B | 7,095 B | +15 B |
+| Control flow | 7,415 B | 7,432 B | +17 B |
+| Keyed list | 8,213 B | 8,236 B | +23 B |
+| TodoMVC | 9,802 B | 9,822 B | +20 B |
+
 ## Consequences
 
 - Compiler and runtime changes that touch tuple positions must land together.

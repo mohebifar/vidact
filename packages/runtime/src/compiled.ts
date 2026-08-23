@@ -285,7 +285,7 @@ export function createCompiledProp<T>(
   }
   const slot = createStateSlot<T>(scope[1], sourceMask, read(), assertWritable)
   if (upstream !== undefined) {
-    const remove = subscribeBinding(upstream, () => slot.set(read()))
+    const remove = subscribeBinding(upstream, () => slot.replace(read()))
     const owner = scopeOwners.get(scope)
     if (owner === undefined) {
       throw new Error(DEV ? 'createCompiledProp received an unknown scope' : 'V003')

@@ -44,14 +44,17 @@ write during the same flush.
 Branch-varying refs on an aligned host lower to a compiled ref binding. The
 runtime attaches the next ref before clearing the previous one, rolls back a
 failed attachment, and retains the host throughout. Slot-valued JSX component
-callees remain deferred until codegen can lower both the identity read and the
-callable JSX site; emitting `<Type>` while `Type` is a state/prop slot would be
-unsound.
+callees lower through the same dispatcher: codegen reads the state/prop slot for
+identity and invokes it through a generated local JSX binding inside the staged
+render factory. Function-valued prop bridges use exact replacement so the
+callable is not invoked until that render factory runs.
 
 ## Invariants
 
 - Equal position/type/key retains the exact host and component-owned nodes.
 - A key or type change creates one new owner and disposes one previous owner.
+- A component type carried through a state or prop slot retains its subtree when
+  identity is stable and remounts exactly that dispatched range when it changes.
 - A retained branch updates through static bindings; the dispatcher does not
   rerun its render factory for ordinary prop or child changes.
 - Event replacement and removal leave at most one active listener, and owner
@@ -80,8 +83,7 @@ unsound.
 Common conditional prop and event changes are surgical and pay no child-list
 mutation. True identity changes pay for one small pair of range markers and one
 feature-level dispatcher. The compiler must keep expanding explicit DOM reset
-semantics and callable component-type lowering rather than treating arbitrary
-JSX objects as reconcilable values.
+semantics rather than treating arbitrary JSX objects as reconcilable values.
 
 ## Verification
 

@@ -15,9 +15,11 @@ use crate::{
 };
 
 use super::{
-    BINDING, CHOOSE, DISPATCH, ITEM_SCOPE, SCOPE, arrow_expression, call_name, dependencies,
+    BINDING, CHOOSE, DISPATCH, ITEM_SCOPE, SCOPE, arrow_expression, call, call_name, dependencies,
     dependency_mask, ident,
 };
+
+const DYNAMIC_TYPE: &str = "VidactType";
 
 pub(super) fn lower_component_render<'a>(
     ast: &AstBuilder<'a>,
@@ -222,7 +224,7 @@ impl<'a> RenderLowerer<'a, '_> {
         &self,
         element: oxc_allocator::Box<'a, JSXElement<'a>>,
     ) -> Result<Expression<'a>, Diagnostic> {
-        let type_identity = self.type_identity(&element.opening_element.name)?;
+        let (type_identity, callable_slot) = self.type_identity(&element.opening_element.name)?;
         let key = element.opening_element.attributes.iter().find(|item| {
             let JSXAttributeItem::Attribute(attribute) = item else {
                 return false;
@@ -247,12 +249,20 @@ impl<'a> RenderLowerer<'a, '_> {
         if reads.parent.is_empty() && reads.item.is_empty() {
             return Ok(Expression::JSXElement(element));
         }
+        let render = if callable_slot {
+            self.callable_slot_render(
+                element,
+                type_identity.clone_in_with_semantic_ids(self.ast.allocator()),
+            )
+        } else {
+            Expression::JSXElement(element)
+        };
         let mut arguments = vec![
             ident(self.ast, SCOPE),
             dependency_mask(self.ast, &reads.parent),
             arrow_expression(self.ast, [], type_identity),
             arrow_expression(self.ast, [], key_identity),
-            arrow_expression(self.ast, [], Expression::JSXElement(element)),
+            arrow_expression(self.ast, [], render),
         ];
         if !reads.item.is_empty() {
             arguments.push(ident(self.ast, ITEM_SCOPE));
@@ -261,39 +271,22 @@ impl<'a> RenderLowerer<'a, '_> {
         Ok(call_name(self.ast, DISPATCH, arguments))
     }
 
-    fn type_identity(&self, name: &JSXElementName<'a>) -> Result<Expression<'a>, Diagnostic> {
+    fn type_identity(
+        &self,
+        name: &JSXElementName<'a>,
+    ) -> Result<(Expression<'a>, bool), Diagnostic> {
         let JSXElementName::IdentifierReference(identifier) = name else {
             let name = jsx_name(name).unwrap_or_else(|| "<unknown>".to_string());
-            return Ok(Expression::new_string_literal(
-                SPAN,
-                self.ast.allocator().alloc_str(&name),
-                None,
-                self.ast,
-            ));
+            return Ok((self.string_identity(&name), false));
         };
         let Some(reference) = identifier.reference_id.get() else {
-            return Ok(Expression::new_string_literal(
-                SPAN,
-                identifier.name.as_str(),
-                None,
-                self.ast,
-            ));
+            return Ok((self.string_identity(identifier.name.as_str()), false));
         };
         let Some(symbol) = self.scoping.get_reference(reference).symbol_id() else {
-            return Ok(Expression::new_string_literal(
-                SPAN,
-                identifier.name.as_str(),
-                None,
-                self.ast,
-            ));
+            return Ok((self.string_identity(identifier.name.as_str()), false));
         };
         let Some(source_id) = self.source_symbols.get(&symbol) else {
-            return Ok(Expression::new_string_literal(
-                SPAN,
-                identifier.name.as_str(),
-                None,
-                self.ast,
-            ));
+            return Ok((self.string_identity(identifier.name.as_str()), false));
         };
         let source = self
             .ir
@@ -302,18 +295,40 @@ impl<'a> RenderLowerer<'a, '_> {
             .find(|source| source.id == *source_id)
             .ok_or_else(|| super::analysis_error("component type references an unknown source"))?;
         match source.kind {
-            SourceKind::Derived => Ok(Expression::Identifier(
-                identifier.clone_in_with_semantic_ids(self.ast.allocator()),
+            SourceKind::Derived => Ok((
+                Expression::Identifier(identifier.clone_in_with_semantic_ids(self.ast.allocator())),
+                false,
             )),
-            SourceKind::Prop | SourceKind::State => Err(super::unsupported(
-                "state- or prop-valued component types require callable slot lowering",
-            )
-            .with_span(SourceSpan::from_oxc(identifier.span))),
+            SourceKind::Prop | SourceKind::State => Ok((
+                Expression::Identifier(identifier.clone_in_with_semantic_ids(self.ast.allocator())),
+                true,
+            )),
             SourceKind::Context | SourceKind::External => Err(super::unsupported(
                 "context- or external-valued component types require an explicit reactive source",
             )
             .with_span(SourceSpan::from_oxc(identifier.span))),
         }
+    }
+
+    fn string_identity(&self, name: &str) -> Expression<'a> {
+        Expression::new_string_literal(SPAN, self.ast.allocator().alloc_str(name), None, self.ast)
+    }
+
+    fn callable_slot_render(
+        &self,
+        mut element: oxc_allocator::Box<'a, JSXElement<'a>>,
+        type_identity: Expression<'a>,
+    ) -> Expression<'a> {
+        element.opening_element.name =
+            JSXElementName::new_identifier_reference(SPAN, DYNAMIC_TYPE, self.ast);
+        if let Some(closing) = &mut element.closing_element {
+            closing.name = JSXElementName::new_identifier_reference(SPAN, DYNAMIC_TYPE, self.ast);
+        }
+        call(
+            self.ast,
+            arrow_expression(self.ast, [DYNAMIC_TYPE], Expression::JSXElement(element)),
+            [type_identity],
+        )
     }
 
     fn expression(&self, start: u32, end: u32) -> Result<Expression<'a>, Diagnostic> {

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useReducer, useRef, useState } from 'react'
 
 function Counter({ label }: { label: string }): JSX.Element {
   const [count, setCount] = useState(0)
@@ -146,5 +146,35 @@ export function ReactiveRefApp(): JSX.Element {
     <input data-reactive-ref ref={firstRef} onClick={() => setFirst(false)} />
   ) : (
     <input data-reactive-ref ref={secondRef} onClick={() => setFirst(true)} />
+  )
+}
+
+function FirstChoice(): JSX.Element {
+  return <p data-slot-choice="first">first</p>
+}
+
+function SecondChoice(): JSX.Element {
+  return <p data-slot-choice="second">second</p>
+}
+
+function ComponentSlot({ Type }: { Type: () => JSX.Element }): JSX.Element {
+  return <Type />
+}
+
+export function SlotTypeApp(): JSX.Element {
+  const [Type, setType] = useReducer(
+    (_current: () => JSX.Element, next: () => JSX.Element) => next,
+    FirstChoice,
+  )
+  return (
+    <section data-slot-type-app>
+      <ComponentSlot Type={Type} />
+      <button
+        data-slot-toggle
+        onClick={() => setType(Type === FirstChoice ? SecondChoice : FirstChoice)}
+      >
+        toggle
+      </button>
+    </section>
   )
 }

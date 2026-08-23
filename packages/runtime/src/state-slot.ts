@@ -5,6 +5,7 @@ export type StateUpdate<T> = T | ((previous: T) => T)
 export interface StateSlot<T> {
   readonly get: () => T
   readonly set: (update: StateUpdate<T>) => void
+  readonly replace: (value: T) => void
 }
 
 export function createStateSlot<T>(
@@ -15,15 +16,24 @@ export function createStateSlot<T>(
 ): StateSlot<T> {
   let value = initialValue
 
+  const commit = (next: T): void => {
+    if (Object.is(value, next)) return
+
+    value = next
+    invalidate(source)
+  }
+  const replace = (next: T): void => {
+    assertWritable?.()
+    commit(next)
+  }
+
   return {
     get: () => value,
     set: (update) => {
       assertWritable?.()
       const next = typeof update === 'function' ? (update as (previous: T) => T)(value) : update
-      if (Object.is(value, next)) return
-
-      value = next
-      invalidate(source)
+      commit(next)
     },
+    replace,
   }
 }

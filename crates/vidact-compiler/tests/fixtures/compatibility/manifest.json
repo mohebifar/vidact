@@ -119,10 +119,9 @@
       "spanContains": "<div />"
     },
     {
-      "path": "rejected/slot-component-type.tsx",
-      "expectation": "rejected",
-      "code": "UnsupportedSyntax",
-      "spanContains": "Type"
+      "path": "accepted/slot-component-type.tsx",
+      "expectation": "accepted",
+      "components": ["One", "SlotComponentType", "App"]
     },
     {
       "path": "rejected/prop-object-mutation.tsx",
