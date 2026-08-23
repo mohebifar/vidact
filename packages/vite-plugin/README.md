@@ -21,5 +21,9 @@ vidact({
 })
 ```
 
+For production installs, pass `compilerPath` to a version-matched `vidactc`
+artifact. Workspace development builds `target/debug/vidactc` once per process
+and invokes that executable directly for subsequent transforms.
+
 The cache fingerprint includes compiler/runtime protocols, filename, source,
 target, features, and Vite environment.

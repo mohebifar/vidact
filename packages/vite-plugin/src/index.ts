@@ -22,6 +22,8 @@ const REACT_DOM_MODULE = '\0vidact:react-dom'
 export interface VidactPluginOptions {
   /** Path to the Rust workspace Cargo.toml. Relative paths resolve from Vite's root. */
   readonly manifestPath?: string
+  /** Prebuilt vidactc executable. Relative paths resolve from Vite's root. */
+  readonly compilerPath?: string
   /** Compiler target. Server and hydration targets use separate entry points. */
   readonly target?: VidactTarget
   /** Opt-in semantic feature families. */
@@ -36,6 +38,7 @@ export interface CompilationCacheInput extends VidactCompilerConfiguration {
   readonly source: string
   readonly filename: string
   readonly manifestPath: string
+  readonly compilerPath?: string
   readonly environment: string
 }
 
@@ -45,6 +48,7 @@ export function compilationCacheKey(input: CompilationCacheInput): string {
     compilerProtocol: VIDACT_COMPILE_PROTOCOL,
     runtimeProtocol: VIDACT_RUNTIME_PROTOCOL,
     manifestPath: input.manifestPath,
+    compilerPath: input.compilerPath,
     filename: input.filename,
     environment: input.environment,
     target: configuration.target,
@@ -55,6 +59,7 @@ export function compilationCacheKey(input: CompilationCacheInput): string {
 
 export function vidact(options: VidactPluginOptions = {}): Plugin {
   let manifestPath = ''
+  let compilerPath: string | undefined
   const configuration = normalizeConfiguration({
     target: options.target ?? 'client',
     features: options.features ?? [],
@@ -92,6 +97,10 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
         options.manifestPath === undefined
           ? findWorkspaceManifest(config.root)
           : path.resolve(config.root, options.manifestPath)
+      compilerPath =
+        options.compilerPath === undefined
+          ? undefined
+          : path.resolve(config.root, options.compilerPath)
     },
     resolveId(source) {
       if (source === 'react') return REACT_MODULE
@@ -124,11 +133,18 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
         filename,
         manifestPath,
         environment: this.environment.name,
+        ...(compilerPath === undefined ? {} : { compilerPath }),
         ...configuration,
       })
       let compilation = compilationCache.get(cacheKey)
       if (compilation === undefined) {
-        const result = await compileWithCompiler(source, filename, manifestPath, configuration)
+        const result = await compileWithCompiler(
+          source,
+          filename,
+          manifestPath,
+          configuration,
+          compilerPath === undefined ? {} : { compilerPath },
+        )
         compilation = {
           code: result.code,
           sourceMap: result.sourceMap,

@@ -132,6 +132,22 @@ describe('vidact compiler client', () => {
     expect(compilationCacheKey(base)).not.toBe(
       compilationCacheKey({ ...base, source: `${base.source}\n` }),
     )
+    expect(compilationCacheKey(base)).not.toBe(
+      compilationCacheKey({ ...base, compilerPath: '/opt/vidact/vidactc' }),
+    )
+  })
+
+  it('accepts an explicit prebuilt compiler artifact', async () => {
+    const compilerPath = path.resolve(packageDirectory, '../../../target/debug/vidactc')
+    await expect(
+      compileWithCompiler(
+        'export function Ready() { return <p>ready</p> }',
+        'ready.tsx',
+        manifestPath,
+        { target: 'client', features: [] },
+        { compilerPath },
+      ),
+    ).resolves.toMatchObject({ protocol: 'vidact-compile-v2' })
   })
 
   it('rejects invalid modules with the compiler diagnostic', async () => {

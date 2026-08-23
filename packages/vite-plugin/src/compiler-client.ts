@@ -22,6 +22,10 @@ export interface VidactCompilerConfiguration {
   readonly features: readonly VidactFeature[]
 }
 
+export interface VidactCompilerExecution {
+  readonly compilerPath?: string
+}
+
 export interface VidactAnalysis {
   readonly protocol: 'vidact-analysis-v1'
   readonly components: readonly VidactComponentAnalysis[]
@@ -60,14 +64,17 @@ export function analyzeWithCompiler(
   filename: string,
   manifestPath: string,
   configuration: VidactCompilerConfiguration = { target: 'client', features: [] },
+  execution: VidactCompilerExecution = {},
 ): Promise<VidactAnalysis> {
-  return runCompiler('analyze', source, filename, manifestPath, configuration).then((result) => {
-    const analysis = result as Partial<VidactAnalysis>
-    if (analysis.protocol !== 'vidact-analysis-v1' || !Array.isArray(analysis.components)) {
-      throw new Error('vidactc returned an unsupported analysis protocol')
-    }
-    return analysis as VidactAnalysis
-  })
+  return runCompiler('analyze', source, filename, manifestPath, configuration, execution).then(
+    (result) => {
+      const analysis = result as Partial<VidactAnalysis>
+      if (analysis.protocol !== 'vidact-analysis-v1' || !Array.isArray(analysis.components)) {
+        throw new Error('vidactc returned an unsupported analysis protocol')
+      }
+      return analysis as VidactAnalysis
+    },
+  )
 }
 
 export function compileWithCompiler(
@@ -75,31 +82,37 @@ export function compileWithCompiler(
   filename: string,
   manifestPath: string,
   configuration: VidactCompilerConfiguration = { target: 'client', features: [] },
+  execution: VidactCompilerExecution = {},
 ): Promise<VidactCompilation> {
   const normalizedConfiguration = normalizeConfiguration(configuration)
-  return runCompiler('compile', source, filename, manifestPath, normalizedConfiguration).then(
-    (result) => {
-      const compilation = result as Partial<VidactCompilation>
-      if (
-        compilation.protocol !== VIDACT_COMPILE_PROTOCOL ||
-        compilation.runtimeProtocol !== VIDACT_RUNTIME_PROTOCOL ||
-        typeof compilation.code !== 'string' ||
-        compilation.sourceMap === null ||
-        typeof compilation.sourceMap !== 'object' ||
-        compilation.analysis?.protocol !== 'vidact-analysis-v1'
-      ) {
-        throw new Error('vidactc returned an unsupported compilation protocol')
-      }
-      if (
-        compilation.configuration?.target !== normalizedConfiguration.target ||
-        JSON.stringify(compilation.configuration.features) !==
-          JSON.stringify(normalizedConfiguration.features)
-      ) {
-        throw new Error('vidactc returned a compilation for different target or feature options')
-      }
-      return compilation as VidactCompilation
-    },
-  )
+  return runCompiler(
+    'compile',
+    source,
+    filename,
+    manifestPath,
+    normalizedConfiguration,
+    execution,
+  ).then((result) => {
+    const compilation = result as Partial<VidactCompilation>
+    if (
+      compilation.protocol !== VIDACT_COMPILE_PROTOCOL ||
+      compilation.runtimeProtocol !== VIDACT_RUNTIME_PROTOCOL ||
+      typeof compilation.code !== 'string' ||
+      compilation.sourceMap === null ||
+      typeof compilation.sourceMap !== 'object' ||
+      compilation.analysis?.protocol !== 'vidact-analysis-v1'
+    ) {
+      throw new Error('vidactc returned an unsupported compilation protocol')
+    }
+    if (
+      compilation.configuration?.target !== normalizedConfiguration.target ||
+      JSON.stringify(compilation.configuration.features) !==
+        JSON.stringify(normalizedConfiguration.features)
+    ) {
+      throw new Error('vidactc returned a compilation for different target or feature options')
+    }
+    return compilation as VidactCompilation
+  })
 }
 
 export function normalizeConfiguration(
@@ -111,27 +124,25 @@ export function normalizeConfiguration(
   }
 }
 
-function runCompiler(
+const compilerBuilds = new Map<string, Promise<string>>()
+
+async function runCompiler(
   command: 'analyze' | 'compile',
   source: string,
   filename: string,
   manifestPath: string,
   configuration: VidactCompilerConfiguration,
+  execution: VidactCompilerExecution,
 ): Promise<unknown> {
+  const compilerPath =
+    execution.compilerPath === undefined
+      ? await workspaceCompiler(manifestPath)
+      : path.resolve(execution.compilerPath)
   return new Promise((resolve, reject) => {
     let settled = false
     const child = spawn(
-      'cargo',
+      compilerPath,
       [
-        'run',
-        '--quiet',
-        '--manifest-path',
-        manifestPath,
-        '-p',
-        'vidact-compiler',
-        '--bin',
-        'vidactc',
-        '--',
         command,
         '--filename',
         filename,
@@ -176,4 +187,46 @@ function runCompiler(
     })
     child.stdin.end(source)
   })
+}
+
+function workspaceCompiler(manifestPath: string): Promise<string> {
+  const workspace = path.dirname(manifestPath)
+  const configuredTarget = process.env.CARGO_TARGET_DIR
+  const target =
+    configuredTarget === undefined ? path.join(workspace, 'target') : path.resolve(configuredTarget)
+  const executable = path.join(
+    target,
+    'debug',
+    process.platform === 'win32' ? 'vidactc.exe' : 'vidactc',
+  )
+  let build = compilerBuilds.get(manifestPath)
+  if (build !== undefined) return build
+  build = new Promise((resolve, reject) => {
+    const child = spawn(
+      'cargo',
+      [
+        'build',
+        '--quiet',
+        '--manifest-path',
+        manifestPath,
+        '-p',
+        'vidact-compiler',
+        '--bin',
+        'vidactc',
+      ],
+      { cwd: workspace, stdio: ['ignore', 'ignore', 'pipe'] },
+    )
+    const stderr: Buffer[] = []
+    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk))
+    child.on('error', reject)
+    child.on('close', (code) => {
+      if (code === 0) resolve(executable)
+      else {
+        const diagnostic = Buffer.concat(stderr).toString('utf8').trim()
+        reject(new Error(diagnostic || `cargo build exited with status ${String(code)}`))
+      }
+    })
+  })
+  compilerBuilds.set(manifestPath, build)
+  return build
 }
