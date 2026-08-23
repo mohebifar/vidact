@@ -88,7 +88,7 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
     },
     load(id) {
       return id === REACT_MODULE
-        ? 'export { useEffect, useImperativeHandle, useLayoutEffect, useRef } from "@vidact/runtime"'
+        ? 'export { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef } from "@vidact/runtime"'
         : null
     },
     async transform(source, id) {

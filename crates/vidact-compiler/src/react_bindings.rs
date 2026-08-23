@@ -24,6 +24,12 @@ pub(crate) enum EffectHook {
     Passive,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum MemoHook {
+    Callback,
+    Memo,
+}
+
 impl StateHook {
     pub(crate) const fn name(self) -> &'static str {
         match self {
@@ -92,6 +98,16 @@ impl<'s> ReactBindings<'s> {
             Some(EffectHook::Layout)
         } else if self.is_named_call(call, "useEffect") {
             Some(EffectHook::Passive)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn memo_hook_call(&self, call: &CallExpression<'_>) -> Option<MemoHook> {
+        if self.is_named_call(call, "useMemo") {
+            Some(MemoHook::Memo)
+        } else if self.is_named_call(call, "useCallback") {
+            Some(MemoHook::Callback)
         } else {
             None
         }

@@ -280,6 +280,38 @@ export function createCompiledReducer<State, Action, Initial>(
   }
 }
 
+export function createCompiledMemo<T>(
+  scope: CompiledScope,
+  reads: SourceMask,
+  writes: SourceMask,
+  evaluate: () => T,
+  readDependencies: () => readonly unknown[],
+): StateSlot<T> {
+  let currentDependencies = readDependencies()
+  const slot = createStateSlot(scope[1], writes, evaluate(), stateWriteGuard(scope))
+  const removeUpdater = scope[0](reads, () => {
+    const nextDependencies = readDependencies()
+    if (equalDependencies(nextDependencies, currentDependencies)) return
+    slot.replace(evaluate())
+    currentDependencies = nextDependencies
+  })
+  const owner = scopeOwners.get(scope)
+  if (owner === undefined) {
+    removeUpdater()
+    throw new Error(DEV ? 'createCompiledMemo received an unknown scope' : 'V003')
+  }
+  owner[1].add(removeUpdater)
+  return slot
+}
+
+export function useMemo<T>(factory: () => T, _dependencies: readonly unknown[]): T {
+  return factory()
+}
+
+export function useCallback<T extends Function>(callback: T, _dependencies: readonly unknown[]): T {
+  return callback
+}
+
 export function createCompiledProp<T>(
   scope: CompiledScope,
   sourceMask: SourceMask,

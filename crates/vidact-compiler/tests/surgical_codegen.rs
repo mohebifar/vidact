@@ -853,6 +853,36 @@ fn compiles_layout_and_passive_effect_dependencies_into_owner_resources() {
 }
 
 #[test]
+fn compiles_memo_and_callback_dependencies_into_cached_slots() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "MemoCounter.tsx",
+        source: r#"
+            import { useCallback, useMemo, useState } from 'react';
+            export function MemoCounter(): Node {
+                const [count, setCount] = useState(0);
+                const doubled = useMemo(() => count * 2, [count]);
+                const increment = useCallback(() => setCount(count + 1), [count]);
+                return <button onClick={increment}>{doubled}</button>;
+            }
+        "#,
+    })
+    .expect("memoized values and callbacks should lower through semantic React imports");
+
+    assert_eq!(output.matches("__vidactCreateMemo(").count(), 2, "{output}");
+    assert!(
+        output.contains("createCompiledMemo as __vidactCreateMemo"),
+        "{output}"
+    );
+    assert!(output.contains("() => [count.get()]"), "{output}");
+    assert!(output.contains("() => doubled.get()"), "{output}");
+    assert!(output.contains("increment.get()"), "{output}");
+    assert!(output.contains("count.set(__vidactSnapshot"), "{output}");
+    assert!(!output.contains("__vidactSnapshot0.set("), "{output}");
+    assert!(!output.contains("useMemo("), "{output}");
+    assert!(!output.contains("useCallback("), "{output}");
+}
+
+#[test]
 fn compiles_aliased_props_into_local_updater_slots() {
     let output = compile_surgical_module(ModuleInput {
         filename: "AliasedProp.tsx",

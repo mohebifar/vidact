@@ -29,7 +29,7 @@ use crate::{
     ir::{ComponentIr, lower_component},
     options::{CompilationOptions, CompilerFeature},
     oxc_react::analyze_program,
-    react_bindings::{EffectHook, ReactBindings, StateHook},
+    react_bindings::{EffectHook, MemoHook, ReactBindings, StateHook},
 };
 
 mod ast;
@@ -58,6 +58,7 @@ const CREATE_REDUCER: &str = "__vidactCreateReducer";
 const CREATE_SCOPE: &str = "__vidactCreateScope";
 const CREATE_NARROW_SCOPE: &str = "__vidactCreateNarrowScope";
 const CREATE_STATE: &str = "__vidactCreateState";
+const CREATE_MEMO: &str = "__vidactCreateMemo";
 const DEFERRED: &str = "__vidactDeferred";
 const DISPATCH: &str = "__vidactDispatch";
 const INDEXED: &str = "__vidactIndexed";
@@ -183,6 +184,7 @@ fn transform_program<'a>(
         CREATE_SCOPE,
         CREATE_NARROW_SCOPE,
         CREATE_STATE,
+        CREATE_MEMO,
         DEFERRED,
         DISPATCH,
         INDEXED,
@@ -341,6 +343,7 @@ fn transform_component<'a>(
     let mut render_start = render_suffix_start(body)?;
     let mut source_symbols = BTreeMap::<SymbolId, SourceId>::new();
     let mut state_symbols = BTreeMap::<SymbolId, StateReference<'a>>::new();
+    let mut memo_sources = BTreeSet::<SourceId>::new();
     let iterative_plans = iterative::collect(&ast, body, scoping)?;
     let (mut item_source_symbols, mut item_state_symbols) = item_parameters(body, &ast);
     iterative::register_item_sources(
@@ -387,6 +390,17 @@ fn transform_component<'a>(
                         path: Vec::new(),
                     },
                 );
+            } else if let Some((_, value)) = memo_binding_symbol(declarator, &source_ids, &react)? {
+                memo_sources.insert(value.source);
+                source_symbols.insert(value.symbol, value.source);
+                state_symbols.insert(
+                    value.symbol,
+                    StateReference {
+                        state_name: ast.allocator().alloc_str(value.name),
+                        setter: false,
+                        path: Vec::new(),
+                    },
+                );
             } else if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
                 && let Some(source) = source_ids.get(identifier.name.as_str())
                 && let Some(symbol) = identifier.symbol_id.get()
@@ -430,9 +444,20 @@ fn transform_component<'a>(
         let mut contains_derived = false;
         for declarator in &mut declaration.declarations {
             transform_state_declarator(&ast, declarator, &source_ids, &react)?;
+            transform_memo_declarator(
+                &ast,
+                declarator,
+                &source_ids,
+                &react,
+                scoping,
+                &source_symbols,
+                &item_source_symbols,
+            )?;
             if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
                 && ir.sources.iter().any(|source| {
-                    source.kind == SourceKind::Derived && source.name == identifier.name.as_str()
+                    source.kind == SourceKind::Derived
+                        && source.name == identifier.name.as_str()
+                        && !memo_sources.contains(&source.id)
                 })
             {
                 declarator.kind = VariableDeclarationKind::Let;
@@ -560,6 +585,9 @@ fn transform_component<'a>(
         let [write] = updater.writes.as_slice() else {
             return Err(unsupported("derived updater must write exactly one source"));
         };
+        if memo_sources.contains(write) {
+            continue;
+        }
         let source = ir
             .sources
             .iter()
@@ -757,6 +785,40 @@ fn state_binding_symbols<'a>(
     )))
 }
 
+fn memo_binding_symbol<'a>(
+    declarator: &'a VariableDeclarator<'a>,
+    sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
+) -> Result<Option<(MemoHook, StateBinding<'a>)>, Diagnostic> {
+    let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+        return Ok(None);
+    };
+    let Some(Expression::CallExpression(call)) = &declarator.init else {
+        return Ok(None);
+    };
+    let Some(hook) = react.memo_hook_call(call) else {
+        return Ok(None);
+    };
+    let source = sources
+        .get(identifier.name.as_str())
+        .copied()
+        .ok_or_else(|| {
+            unsupported(format!("memo {} is absent from analysis", identifier.name))
+                .with_span(SourceSpan::new(identifier.span.start, identifier.span.end))
+        })?;
+    let symbol = identifier.symbol_id.get().ok_or_else(|| {
+        analysis_error(format!("memo {} has no semantic symbol", identifier.name))
+    })?;
+    Ok(Some((
+        hook,
+        StateBinding {
+            name: identifier.name.as_str(),
+            symbol,
+            source,
+        },
+    )))
+}
+
 fn transform_state_declarator<'a>(
     ast: &AstBuilder<'a>,
     declarator: &mut VariableDeclarator<'a>,
@@ -809,6 +871,88 @@ fn transform_state_declarator<'a>(
             CREATE_REDUCER
         },
         runtime_arguments,
+    ));
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn transform_memo_declarator<'a>(
+    ast: &AstBuilder<'a>,
+    declarator: &mut VariableDeclarator<'a>,
+    sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
+    scoping: &Scoping,
+    source_symbols: &BTreeMap<SymbolId, SourceId>,
+    item_source_symbols: &BTreeMap<SymbolId, SourceId>,
+) -> Result<(), Diagnostic> {
+    let Some((hook, value)) = memo_binding_symbol(declarator, sources, react)? else {
+        return Ok(());
+    };
+    let Some(Expression::CallExpression(hook_call)) = &declarator.init else {
+        unreachable!();
+    };
+    if hook_call.arguments.len() != 2 || hook_call.arguments.iter().any(Argument::is_spread) {
+        return Err(unsupported(
+            "useMemo and useCallback require a value factory and inline dependency array",
+        )
+        .with_span(SourceSpan::new(hook_call.span.start, hook_call.span.end)));
+    }
+    let factory = hook_call.arguments[0]
+        .as_expression()
+        .expect("spread arguments were rejected");
+    let dependency_expression = hook_call.arguments[1]
+        .as_expression()
+        .expect("spread arguments were rejected");
+    let Expression::ArrayExpression(dependency_array) = dependency_expression.without_parentheses()
+    else {
+        return Err(unsupported("memo dependencies must be an inline array")
+            .with_span(SourceSpan::from_oxc(dependency_expression.span())));
+    };
+    if dependency_array.elements.iter().any(|element| {
+        matches!(
+            element,
+            ArrayExpressionElement::SpreadElement(_) | ArrayExpressionElement::Elision(_)
+        )
+    }) {
+        return Err(unsupported("memo dependencies must have a static length")
+            .with_span(SourceSpan::from_oxc(dependency_expression.span())));
+    }
+    let reads = dependencies(
+        dependency_expression,
+        scoping,
+        source_symbols,
+        item_source_symbols,
+    );
+    if !reads.item.is_empty() {
+        return Err(
+            unsupported("component memo values cannot capture keyed item slots")
+                .with_span(SourceSpan::new(hook_call.span.start, hook_call.span.end)),
+        );
+    }
+    let snapshot = snapshot_effect_create(ast, factory, scoping, source_symbols);
+    let evaluate = arrow_expression(
+        ast,
+        [],
+        match hook {
+            MemoHook::Callback => snapshot,
+            MemoHook::Memo => call(ast, snapshot, []),
+        },
+    );
+    let read_dependencies = arrow_expression(
+        ast,
+        [],
+        dependency_expression.clone_in_with_semantic_ids(ast.allocator()),
+    );
+    declarator.init = Some(call_name(
+        ast,
+        CREATE_MEMO,
+        [
+            ident(ast, SCOPE),
+            dependency_mask(ast, &reads.parent),
+            mask(ast, &[value.source]),
+            evaluate,
+            read_dependencies,
+        ],
     ));
     Ok(())
 }
@@ -2149,10 +2293,10 @@ impl<'a> VisitMut<'a> for EffectSnapshotRewriter<'a, '_, '_> {
         let Some(symbol) = self.scoping.get_reference(reference).symbol_id() else {
             return;
         };
-        if !self.source_symbols.contains_key(&symbol) {
+        let Some(source) = self.source_symbols.get(&symbol) else {
             return;
-        }
-        let name = identifier.name.to_string();
+        };
+        let name = format!("__vidactSnapshot{}", source.get());
         self.captures.entry(symbol).or_insert_with(|| {
             (
                 name.clone(),
@@ -2425,6 +2569,7 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>, program: &Program<'a>) -> Statement<
         ("compiledSpread", COMPILED_SPREAD),
         ("compiledRoot", COMPILED_ROOT),
         ("choose", CHOOSE),
+        ("createCompiledMemo", CREATE_MEMO),
         ("createCompiledProp", CREATE_PROP),
         ("createCompiledRestProp", CREATE_REST_PROP),
         ("createCompiledReducer", CREATE_REDUCER),

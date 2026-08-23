@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   combineSources,
+  createCompiledMemo,
   createCompiledReducer,
   createCompiledScope,
   createCompiledState,
@@ -88,6 +89,39 @@ describe('compiled updater corpus', () => {
     expect(value.set).toBe(value.set)
     scope[3]()
     expect(() => value.set(1)).toThrow('cannot update state after disposal')
+  })
+
+  it('publishes cached values only when memo dependencies change', () => {
+    const countSource = source(0)
+    const memoSource = source(1)
+    const unrelatedSource = source(2)
+    const scope = createCompiledScope()
+    const count = createCompiledState(scope, countSource, 0)
+    const unrelated = createCompiledState(scope, unrelatedSource, 0)
+    let evaluations = 0
+    const memo = createCompiledMemo(
+      scope,
+      countSource,
+      memoSource,
+      () => ({ count: count.get(), evaluation: ++evaluations }),
+      () => [count.get() % 2],
+    )
+    const initial = memo.get()
+    const observed: object[] = []
+    scope[0](memoSource, () => observed.push(memo.get()))
+
+    unrelated.set(1)
+    count.set(2)
+
+    expect(memo.get()).toBe(initial)
+    expect(evaluations).toBe(1)
+    expect(observed).toEqual([])
+
+    count.set(3)
+
+    expect(memo.get()).not.toBe(initial)
+    expect(memo.get()).toEqual({ count: 3, evaluation: 2 })
+    expect(observed).toEqual([memo.get()])
   })
 
   it('supports components with more than 32 reactive sources', () => {

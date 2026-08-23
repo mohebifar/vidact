@@ -119,6 +119,11 @@
       "components": ["Effects"]
     },
     {
+      "path": "accepted/memo-callback.tsx",
+      "expectation": "accepted",
+      "components": ["MemoCallback"]
+    },
+    {
       "path": "rejected/foreign-array-call.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",
