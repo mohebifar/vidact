@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { createCompiledScope, createCompiledState, source } from '../../src/index.ts'
 
 describe('lifecycle corpus', () => {
-  it('stops updater execution after a component scope is disposed', () => {
+  it('rejects retained state setters after a component scope is disposed', () => {
     const valueSource = source(0)
     let runs = 0
     const scope = createCompiledScope()
@@ -12,8 +12,17 @@ describe('lifecycle corpus', () => {
 
     value.set(1)
     scope[3]()
-    value.set(2)
+    let functionalUpdateRan = false
 
     expect(runs).toBe(1)
+    expect(() => value.set(2)).toThrow('cannot update state after disposal')
+    expect(() =>
+      value.set(() => {
+        functionalUpdateRan = true
+        return 3
+      }),
+    ).toThrow('cannot update state after disposal')
+    expect(functionalUpdateRan).toBe(false)
+    expect(value.get()).toBe(1)
   })
 })

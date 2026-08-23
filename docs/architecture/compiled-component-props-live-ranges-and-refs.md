@@ -28,12 +28,13 @@ they belong to Vidact's lowering and runtime ABI.
 
 ## Decision
 
-Each destructured prop accepted by surgical lowering becomes a child-local
-state slot with a compiler-assigned source mask. A reactive value passed by the
-parent is a `CompiledBinding` descriptor: it contains an evaluator, static read
-masks, and its originating scopes. `createCompiledProp` evaluates that
-descriptor into the child slot and subscribes a generated bridge updater. A
-static value initializes the same slot without an upstream subscription.
+Each direct destructured prop accepted by surgical lowering, including an
+aliased local binding, becomes a child-local state slot with a compiler-assigned
+source mask. A reactive value passed by the parent is a `CompiledBinding`
+descriptor: it contains an evaluator, static read masks, and its originating
+scopes. `createCompiledProp` evaluates that descriptor into the child slot and
+subscribes a generated bridge updater. A static value initializes the same slot
+without an upstream subscription.
 
 The child owns removal of the bridge subscription. When `h` invokes a compiled
 child, it adopts the child's compiled scope into the currently active parent,
@@ -83,11 +84,13 @@ that started a flush runs all of its bridge updaters before queued child scopes
 drain. Multiple prop slots changed by one parent batch therefore become one
 child invalidation set, rather than a sequence of torn child snapshots.
 
-The current compiler accepts only direct, non-aliased object destructuring. It
-rejects rest props, computed or nested patterns, early/nested component returns,
-reactive JSX spreads, and reactive local derivations absent from its data-flow
-facts. These fail-closed checks prevent known mount-time snapshots while the AST
-classifier and diagnostics are still incomplete.
+The current compiler accepts direct object destructuring and binds each public
+property to its resolved local semantic symbol, so `{ value: displayed }`
+updates `displayed` without reinvoking the component. It rejects rest props,
+computed or nested patterns, reactive JSX spreads, and reactive local
+derivations absent from its data-flow facts. These fail-closed checks prevent
+known mount-time snapshots while the AST classifier and diagnostics are still
+incomplete.
 
 Each dynamic value range owns the resources created by its current non-scalar
 value. Replacing the value disposes that owner and removes only the nodes between
@@ -105,6 +108,8 @@ element being disposed.
 
 - A reactive parent prop invalidates a child-local slot without reinvoking the
   child component.
+- A retained state setter fails before evaluating its update after the owning
+  component has been disposed; the dead slot cannot mutate silently.
 - One parent batch that changes several props runs a dependent child updater
   once with the complete next prop set.
 - Disposing a parent branch or keyed record stops all adopted child prop
@@ -151,10 +156,11 @@ resource lifecycle. The cost is one child slot and one bridge updater per
 reactive prop, comment markers for general binding ranges, and owner allocation
 for each non-scalar range value.
 
-The ABI is intentionally narrow. Prop additions/deletions through spreads,
-aliased and rest destructuring, foreign React element objects, component ranges
-with multiple top-level nodes, and ref identity updates require separate
-decisions. `useRef` is naturally stable under the compiled construct-once path.
+The ABI is intentionally narrow. Prop additions/deletions through spreads, rest
+and nested destructuring, foreign React element objects, and ref identity
+updates require separate decisions. Multi-root component ranges and aliased
+direct destructuring are supported. `useRef` is naturally stable under the
+compiled construct-once path.
 The former rerendering compatibility runtime was removed by
 [Single client compiler and runtime path](compiled-only-client-runtime.md).
 

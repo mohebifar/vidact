@@ -243,8 +243,9 @@ export function createCompiledState<T>(
   sourceMask: SourceMask,
   initialValue: T | (() => T),
 ): StateSlot<T> {
+  const assertWritable = stateWriteGuard(scope)
   const value = typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue
-  return createStateSlot(scope[1], sourceMask, value)
+  return createStateSlot(scope[1], sourceMask, value, assertWritable)
 }
 
 export function createCompiledProp<T>(
@@ -253,12 +254,13 @@ export function createCompiledProp<T>(
   input: T | CompiledBinding<T>,
   fallback?: () => T,
 ): StateSlot<T> {
+  const assertWritable = stateWriteGuard(scope)
   const upstream = isCompiledBinding(input) ? input : undefined
   const read = (): T => {
     const value = upstream === undefined ? (input as T) : upstream[1]()
     return value === undefined && fallback !== undefined ? fallback() : value
   }
-  const slot = createStateSlot<T>(scope[1], sourceMask, read())
+  const slot = createStateSlot<T>(scope[1], sourceMask, read(), assertWritable)
   if (upstream !== undefined) {
     const remove = subscribeBinding(upstream, () => slot.set(read()))
     const owner = scopeOwners.get(scope)
@@ -268,6 +270,16 @@ export function createCompiledProp<T>(
     owner[1].add(remove)
   }
   return slot
+}
+
+function stateWriteGuard(scope: CompiledScope): () => void {
+  const owner = scopeOwners.get(scope)
+  if (owner === undefined) {
+    throw new Error(DEV ? 'compiled state received an unknown scope' : 'V003')
+  }
+  return () => {
+    if (owner[0]) throw new Error(DEV ? 'cannot update state after disposal' : 'V012')
+  }
 }
 
 export function binding<T>(

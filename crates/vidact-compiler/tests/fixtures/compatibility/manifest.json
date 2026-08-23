@@ -60,10 +60,9 @@
       "spanContains": "{...attributes}"
     },
     {
-      "path": "rejected/aliased-prop.tsx",
-      "expectation": "rejected",
-      "code": "UnsupportedSyntax",
-      "spanContains": "title: label"
+      "path": "accepted/aliased-prop.tsx",
+      "expectation": "accepted",
+      "components": ["AliasedProp"]
     },
     {
       "path": "rejected/rest-props.tsx",

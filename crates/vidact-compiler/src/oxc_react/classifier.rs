@@ -96,12 +96,6 @@ pub(super) fn classify_component<'a>(
                     ));
                 }
             };
-            if identifier.name.as_str() != prop_name.as_ref() {
-                return Err(unsupported_at(
-                    "aliased prop destructuring is unsupported",
-                    property.span,
-                ));
-            }
             let symbol = identifier.symbol_id.get().ok_or_else(|| {
                 Diagnostic::new(
                     DiagnosticCode::AnalysisFailed,

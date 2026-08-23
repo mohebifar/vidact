@@ -11,12 +11,14 @@ export function createStateSlot<T>(
   invalidate: (sources: SourceMask) => void,
   source: SourceMask,
   initialValue: T,
+  assertWritable?: () => void,
 ): StateSlot<T> {
   let value = initialValue
 
   return {
     get: () => value,
     set: (update) => {
+      assertWritable?.()
       const next = typeof update === 'function' ? (update as (previous: T) => T)(value) : update
       if (Object.is(value, next)) return
 

@@ -1012,9 +1012,6 @@ fn prop_binding_symbols<'a>(
                 return Err(unsupported("dynamic prop destructuring is unsupported")
                     .with_span(SourceSpan::new(property.span.start, property.span.end)));
             };
-            if !prop_sources.contains(prop_name.as_ref()) {
-                continue;
-            }
             let (identifier, default) = match &property.value {
                 BindingPattern::BindingIdentifier(identifier) => (identifier.as_ref(), None),
                 BindingPattern::AssignmentPattern(assignment) => {
@@ -1034,13 +1031,13 @@ fn prop_binding_symbols<'a>(
                         .with_span(SourceSpan::new(span.start, span.end)));
                 }
             };
-            if identifier.name.as_str() != prop_name.as_ref() {
-                return Err(unsupported("aliased prop destructuring is unsupported")
-                    .with_span(SourceSpan::new(property.span.start, property.span.end)));
+            if !prop_sources.contains(identifier.name.as_str()) {
+                continue;
             }
-            let Some(source) = sources.get(prop_name.as_ref()).copied() else {
+            let Some(source) = sources.get(identifier.name.as_str()).copied() else {
                 return Err(analysis_error(format!(
-                    "prop {prop_name} is absent from analysis"
+                    "prop binding {} for {prop_name} is absent from analysis",
+                    identifier.name
                 )));
             };
             let symbol = identifier.symbol_id.get().ok_or_else(|| {

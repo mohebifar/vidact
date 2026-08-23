@@ -586,8 +586,8 @@ fn compiles_named_block_bodied_arrow_components() {
 }
 
 #[test]
-fn rejects_aliased_props_instead_of_emitting_mount_snapshots() {
-    let diagnostics = compile_surgical_module(ModuleInput {
+fn compiles_aliased_props_into_local_updater_slots() {
+    let output = compile_surgical_module(ModuleInput {
         filename: "AliasedProp.tsx",
         source: r#"
             export function AliasedProp({ name: label }): Node {
@@ -595,13 +595,13 @@ fn rejects_aliased_props_instead_of_emitting_mount_snapshots() {
             }
         "#,
     })
-    .expect_err("unsupported prop aliases must not disappear from the source graph");
+    .expect("the local alias has a semantic symbol and can own the compiled prop slot");
 
     assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| { diagnostic.message.contains("aliased prop destructuring") })
+        output.contains("label = __vidactCreateProp(__vidactScope, 1, label)"),
+        "{output}"
     );
+    assert!(output.contains("() => label.get()"), "{output}");
 }
 
 #[test]

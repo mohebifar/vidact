@@ -477,7 +477,9 @@ describe('compiled DOM corpus', () => {
     }, host)
 
     setItems([{ id: 2, label: 'two' }])
-    removedItem.set({ id: 1, label: 'ONE' })
+    expect(() => removedItem.set({ id: 1, label: 'ONE' })).toThrow(
+      'cannot update state after disposal',
+    )
 
     expect(removedUpdaterRuns).toBe(0)
     expect(host.textContent).toBe('two')

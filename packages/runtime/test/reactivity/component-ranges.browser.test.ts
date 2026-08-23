@@ -83,7 +83,7 @@ describe('compiled component ranges', () => {
     }, host)
 
     mounted.dispose()
-    setChild(1)
+    expect(() => setChild(1)).toThrow('cannot update state after disposal')
 
     expect(childUpdates).toBe(0)
     expect(host.childNodes).toHaveLength(0)
@@ -147,7 +147,7 @@ describe('compiled component ranges', () => {
       }, host),
     ).toThrow(/unsupported compiled child/i)
 
-    setValue(1)
+    expect(() => setValue(1)).toThrow('cannot update state after disposal')
     expect(updates).toBe(0)
     expect(host.childNodes).toHaveLength(1)
     expect(host.firstChild).toBe(previous)

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
-const CounterValue = ({ value }: { value: number }): JSX.Element => {
-  return <output data-counter-value>{value}</output>
+const CounterValue = ({ value: displayed }: { value: number }): JSX.Element => {
+  return <output data-counter-value>{displayed}</output>
 }
 
 export function MultiComponentApp(): JSX.Element {
