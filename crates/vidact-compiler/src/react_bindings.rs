@@ -155,6 +155,10 @@ impl<'s> ReactBindings<'s> {
         self.is_named_call(call, "useEffectEvent")
     }
 
+    pub(crate) fn is_id_call(&self, call: &CallExpression<'_>) -> bool {
+        self.is_named_call(call, "useId")
+    }
+
     fn is_named_call(&self, call: &CallExpression<'_>, name: &str) -> bool {
         match call.callee.without_parentheses() {
             Expression::Identifier(identifier) => reference_symbol(identifier, self.scoping)

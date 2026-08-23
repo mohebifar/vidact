@@ -55,6 +55,7 @@ const CHOOSE: &str = "__vidactChoose";
 const CREATE_CONTEXT: &str = "__vidactCreateContext";
 const CREATE_EXTERNAL_STORE: &str = "__vidactCreateExternalStore";
 const CREATE_EFFECT_EVENT: &str = "__vidactCreateEffectEvent";
+const CREATE_ID: &str = "__vidactCreateId";
 const CREATE_PROP: &str = "__vidactCreateProp";
 const CREATE_REST_PROP: &str = "__vidactCreateRestProp";
 const CREATE_REDUCER: &str = "__vidactCreateReducer";
@@ -184,6 +185,7 @@ fn transform_program<'a>(
         CREATE_CONTEXT,
         CREATE_EXTERNAL_STORE,
         CREATE_EFFECT_EVENT,
+        CREATE_ID,
         CREATE_PROP,
         CREATE_REST_PROP,
         CREATE_REDUCER,
@@ -340,6 +342,11 @@ impl<'a> Visit<'a> for PostTransformReactUsage<'_, '_> {
                 .get_or_insert(("useEffectEvent", call.span));
             return;
         }
+        if self.react.is_id_call(call) {
+            self.remaining_compiled_hook_call
+                .get_or_insert(("useId", call.span));
+            return;
+        }
         walk_call_expression(self, call);
     }
 
@@ -409,6 +416,7 @@ fn transform_component<'a>(
     let mut external_sources = BTreeSet::<SourceId>::new();
     let mut effect_event_sources = BTreeSet::<SourceId>::new();
     let mut effect_event_symbols = BTreeSet::<SymbolId>::new();
+    let mut id_sources = BTreeSet::<SourceId>::new();
     let mut memo_sources = BTreeSet::<SourceId>::new();
     let iterative_plans = iterative::collect(&ast, body, scoping)?;
     let (mut item_source_symbols, mut item_state_symbols) = item_parameters(body, &ast);
@@ -500,6 +508,10 @@ fn transform_component<'a>(
                 if let Some(source) = source {
                     effect_event_sources.insert(source);
                 }
+            } else if let Some(source) = id_binding_source(declarator, &source_ids, &react) {
+                if let Some(source) = source {
+                    id_sources.insert(source);
+                }
             } else if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
                 && let Some(source) = source_ids.get(identifier.name.as_str())
                 && let Some(symbol) = identifier.symbol_id.get()
@@ -565,6 +577,7 @@ fn transform_component<'a>(
                 &item_source_symbols,
             )?;
             transform_effect_event_declarator(&ast, declarator, &react)?;
+            transform_id_declarator(&ast, declarator, &react)?;
             if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
                 && ir.sources.iter().any(|source| {
                     source.kind == SourceKind::Derived
@@ -573,6 +586,7 @@ fn transform_component<'a>(
                         && !context_sources.contains(&source.id)
                         && !external_sources.contains(&source.id)
                         && !effect_event_sources.contains(&source.id)
+                        && !id_sources.contains(&source.id)
                 })
             {
                 declarator.kind = VariableDeclarationKind::Let;
@@ -704,6 +718,7 @@ fn transform_component<'a>(
             || context_sources.contains(write)
             || external_sources.contains(write)
             || effect_event_sources.contains(write)
+            || id_sources.contains(write)
         {
             continue;
         }
@@ -1041,6 +1056,22 @@ fn effect_event_binding_symbol(
     )))
 }
 
+fn id_binding_source(
+    declarator: &VariableDeclarator<'_>,
+    sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
+) -> Option<Option<SourceId>> {
+    let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+        return None;
+    };
+    let Some(Expression::CallExpression(call)) = &declarator.init else {
+        return None;
+    };
+    react
+        .is_id_call(call)
+        .then(|| sources.get(identifier.name.as_str()).copied())
+}
+
 fn transform_state_declarator<'a>(
     ast: &AstBuilder<'a>,
     declarator: &mut VariableDeclarator<'a>,
@@ -1280,6 +1311,25 @@ fn transform_effect_event_declarator<'a>(
         CREATE_EFFECT_EVENT,
         [ident(ast, SCOPE), callback],
     ));
+    Ok(())
+}
+
+fn transform_id_declarator<'a>(
+    ast: &AstBuilder<'a>,
+    declarator: &mut VariableDeclarator<'a>,
+    react: &ReactBindings<'_>,
+) -> Result<(), Diagnostic> {
+    let Some(Expression::CallExpression(hook_call)) = &declarator.init else {
+        return Ok(());
+    };
+    if !react.is_id_call(hook_call) {
+        return Ok(());
+    }
+    if !hook_call.arguments.is_empty() {
+        return Err(unsupported("useId does not accept arguments")
+            .with_span(SourceSpan::new(hook_call.span.start, hook_call.span.end)));
+    }
+    declarator.init = Some(call_name(ast, CREATE_ID, [ident(ast, SCOPE)]));
     Ok(())
 }
 
@@ -2972,6 +3022,7 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>, program: &Program<'a>) -> Statement<
         ("createCompiledContext", CREATE_CONTEXT),
         ("createCompiledExternalStore", CREATE_EXTERNAL_STORE),
         ("createCompiledEffectEvent", CREATE_EFFECT_EVENT),
+        ("createCompiledId", CREATE_ID),
         ("createCompiledMemo", CREATE_MEMO),
         ("createCompiledProp", CREATE_PROP),
         ("createCompiledRestProp", CREATE_REST_PROP),

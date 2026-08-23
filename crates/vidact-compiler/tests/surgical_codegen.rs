@@ -1006,6 +1006,30 @@ fn rejects_effect_event_references_outside_effect_callbacks() {
 }
 
 #[test]
+fn compiles_ids_against_the_logical_root_generator() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "IdentifiedField.tsx",
+        source: r#"
+            import { useId as useStableId } from 'react';
+            export function IdentifiedField(): Node {
+                const inputId = useStableId();
+                const hintId = useStableId();
+                return <><label htmlFor={inputId}>Name</label><input id={inputId} aria-describedby={hintId} /><small id={hintId}>Required</small></>;
+            }
+        "#,
+    })
+    .expect("useId should lower to the logical root generator");
+
+    assert!(
+        output.contains("createCompiledId as __vidactCreateId"),
+        "{output}"
+    );
+    assert_eq!(output.matches("__vidactCreateId(__vidactScope)").count(), 2);
+    assert!(!output.contains("useStableId("), "{output}");
+    assert!(!output.contains("inputId.get()"), "{output}");
+}
+
+#[test]
 fn compiles_aliased_props_into_local_updater_slots() {
     let output = compile_surgical_module(ModuleInput {
         filename: "AliasedProp.tsx",

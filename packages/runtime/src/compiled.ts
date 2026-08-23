@@ -21,7 +21,14 @@ type ContextFrame = {
   readonly parent: ContextFrame | null
 }
 
-type Owner = [disposed: boolean, cleanups: Set<() => void>, context: ContextFrame | null]
+type RootIdentity = { nextId: number; readonly prefix: string }
+
+type Owner = [
+  disposed: boolean,
+  cleanups: Set<() => void>,
+  context: ContextFrame | null,
+  rootIdentity: RootIdentity,
+]
 
 type CompiledUpdater = [
   reads: SourceMask,
@@ -129,6 +136,8 @@ type ComponentRange = readonly [start: Comment, end: Comment, scope: CompiledSco
 
 let activeOwner: Owner | null = null
 let activeContextFrame: ContextFrame | null = null
+let activeRootIdentity: RootIdentity | null = null
+let nextClientRoot = 0
 let activeScopeCollector: Set<CompiledScope> | null = null
 let activeConstructionOwner: Owner | null = null
 let transactionDepth = 0
@@ -396,6 +405,16 @@ export function createCompiledEffectEvent<Arguments extends unknown[], Result>(
   }
 }
 
+export function createCompiledId(scope: CompiledScope): string {
+  const owner = scopeOwners.get(scope)
+  if (owner === undefined) {
+    throw new Error(DEV ? 'createCompiledId received an unknown scope' : 'V003')
+  }
+  const id = `:${owner[3].prefix}r${owner[3].nextId}:`
+  owner[3].nextId += 1
+  return id
+}
+
 export function useContext<T>(context: CompiledContext<T>): T {
   if (activeConstructionOwner === null) {
     throw new Error(DEV ? 'useContext must run during compiled component construction' : 'V019')
@@ -420,6 +439,15 @@ export function useEffectEvent<Arguments extends unknown[], Result>(
   callback: (...arguments_: Arguments) => Result,
 ): (...arguments_: Arguments) => Result {
   return callback
+}
+
+export function useId(): string {
+  if (activeConstructionOwner === null) {
+    throw new Error(DEV ? 'useId must run during compiled component construction' : 'V023')
+  }
+  const id = `:${activeConstructionOwner[3].prefix}r${activeConstructionOwner[3].nextId}:`
+  activeConstructionOwner[3].nextId += 1
+  return id
 }
 
 export function useMemo<T>(factory: () => T, _dependencies: readonly unknown[]): T {
@@ -1251,11 +1279,23 @@ export function registerCompiledCleanup(cleanup: () => void): void {
   onCleanup(cleanup)
 }
 
+export interface MountCompiledOptions {
+  readonly identifierPrefix?: string
+}
+
 export function mountCompiled(
   component: () => CompiledComponentResult,
   host: ParentNode,
+  options?: MountCompiledOptions,
 ): { dispose: () => void } {
-  const root = constructCompiledComponent(component)
+  const previousRootIdentity = activeRootIdentity
+  activeRootIdentity = createRootIdentity(options?.identifierPrefix)
+  let root: CompiledComponentResult
+  try {
+    root = constructCompiledComponent(component)
+  } finally {
+    activeRootIdentity = previousRootIdentity
+  }
   const range = componentRanges.get(root)
   if (range === undefined) {
     throw new Error(DEV ? 'mountCompiled received an unknown component result' : 'V007')
@@ -1378,12 +1418,15 @@ export function mountCompiledPropTransition<T>(
 function structural(scope: CompiledScope, mount: StructuralBinding[1]): StructuralBinding {
   let mounted = false
   const context = activeContextFrame ?? activeOwner?.[2] ?? scopeOwners.get(scope)?.[2] ?? null
+  const rootIdentity = activeOwner?.[3] ?? scopeOwners.get(scope)?.[3] ?? activeRootIdentity
   return [
     STRUCTURAL,
     (parent, before) => {
       if (mounted) throw new Error(DEV ? 'compiled block is already mounted' : 'V008')
       mounted = true
-      withContextFrame(context, () => withScopeNamespace(scope, () => mount(parent, before)))
+      withRootIdentity(rootIdentity, () =>
+        withContextFrame(context, () => withScopeNamespace(scope, () => mount(parent, before))),
+      )
     },
   ]
 }
@@ -1396,11 +1439,16 @@ function subscribe(
   additionalReads?: SourceMask,
 ): () => void {
   const context = activeContextFrame ?? activeOwner?.[2] ?? scopeOwners.get(scope)?.[2] ?? null
-  const removers = [scope[0](reads, () => withContextFrame(context, run))]
+  const rootIdentity = activeOwner?.[3] ?? scopeOwners.get(scope)?.[3] ?? activeRootIdentity
+  const removers = [
+    scope[0](reads, () => withRootIdentity(rootIdentity, () => withContextFrame(context, run))),
+  ]
   if (additionalScope !== undefined && additionalReads !== undefined) {
     removers.push(
       additionalScope[0](additionalReads, () =>
-        withContextFrame(context, () => withScopeNamespace(scope, run)),
+        withRootIdentity(rootIdentity, () =>
+          withContextFrame(context, () => withScopeNamespace(scope, run)),
+        ),
       ),
     )
   }
@@ -1424,7 +1472,19 @@ function withScopeNamespace<Result>(scope: CompiledScope, operation: () => Resul
 }
 
 function createOwner(): Owner {
-  return [false, new Set(), activeContextFrame ?? activeOwner?.[2] ?? null]
+  return [
+    false,
+    new Set(),
+    activeContextFrame ?? activeOwner?.[2] ?? null,
+    activeOwner?.[3] ?? activeRootIdentity ?? createRootIdentity(),
+  ]
+}
+
+function createRootIdentity(identifierPrefix?: string): RootIdentity {
+  return {
+    nextId: 0,
+    prefix: identifierPrefix ?? `v${nextClientRoot++}-`,
+  }
 }
 
 function provideContext<T>(
@@ -1474,13 +1534,16 @@ function contextInputFromFrame<T>(
 function withOwner<T>(owner: Owner, operation: () => T): T {
   const previous = activeOwner
   const previousContext = activeContextFrame
+  const previousRootIdentity = activeRootIdentity
   activeOwner = owner
   activeContextFrame = owner[2]
+  activeRootIdentity = owner[3]
   try {
     return operation()
   } finally {
     activeOwner = previous
     activeContextFrame = previousContext
+    activeRootIdentity = previousRootIdentity
   }
 }
 
@@ -1491,6 +1554,16 @@ function withContextFrame<T>(frame: ContextFrame | null, operation: () => T): T 
     return operation()
   } finally {
     activeContextFrame = previous
+  }
+}
+
+function withRootIdentity<T>(rootIdentity: RootIdentity | null, operation: () => T): T {
+  const previous = activeRootIdentity
+  activeRootIdentity = rootIdentity
+  try {
+    return operation()
+  } finally {
+    activeRootIdentity = previous
   }
 }
 

@@ -139,6 +139,11 @@
       "components": ["EffectEvent"]
     },
     {
+      "path": "accepted/use-id.tsx",
+      "expectation": "accepted",
+      "components": ["IdentifiedField"]
+    },
+    {
       "path": "rejected/foreign-array-call.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",
