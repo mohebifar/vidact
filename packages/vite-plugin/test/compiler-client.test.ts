@@ -192,7 +192,7 @@ describe('vidact compiler client', () => {
     expect(virtualReactModule({})).not.toContain('captureOwnerStack')
   })
 
-  it('exposes framework caches, resource hints, streaming, and static rendering only when enabled', () => {
+  it('exposes server strings by target and framework caches, hints, streams, and static rendering by feature', () => {
     expect(virtualReactModule({ target: 'server', features: ['framework'] })).toContain(
       'cache, cacheSignal',
     )
@@ -213,8 +213,9 @@ describe('vidact compiler client', () => {
       virtualModule('react-dom/static', { target: 'server', features: ['framework'] }),
     ).toContain('prerender, prerenderToNodeStream')
     expect(virtualModule('react-dom/server', { target: 'server' })).toContain(
-      'requires the server target and framework feature',
+      'renderToStaticMarkup, renderToString',
     )
+    expect(virtualModule('react-dom/server', {})).toContain('requires the server target')
   })
 
   it('selects isolated Actions facades and exposes form APIs only when enabled', () => {

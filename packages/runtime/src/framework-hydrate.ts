@@ -82,9 +82,14 @@ export function hydrateFrameworkBoundary(
   application: () => CompiledComponentResult,
   options?: MountCompiledOptions & { readonly replay?: EventReplayQueue },
 ): CompiledRoot {
-  const root = hydrateRoot(host, application, options)
-  options?.replay?.replay()
-  return root
+  try {
+    const root = hydrateRoot(host, application, options)
+    options?.replay?.replay()
+    return root
+  } catch (error) {
+    options?.replay?.dispose()
+    throw error
+  }
 }
 
 function nodePath(root: ParentNode, node: Node): readonly number[] | undefined {

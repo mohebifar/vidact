@@ -4,9 +4,12 @@ import {
   type CompiledBinding,
 } from './compiled.ts'
 import { attachEventProp, isEventProp } from './dom/events.ts'
-import { ensureControlledFormRestoration, isControlledFormProp } from './dom/forms.ts'
-import { INTERNAL_NAMESPACE_PROP } from './dom/namespace.ts'
-import { applyDomProp } from './dom/properties.ts'
+import { INTERNAL_NAMESPACE_PROP } from './dom/intrinsic.ts'
+import {
+  applyDomProp,
+  ensureControlledFormRestoration,
+  isControlledFormProp,
+} from './dom/properties.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 let spreadId = 0

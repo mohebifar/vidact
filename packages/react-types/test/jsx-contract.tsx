@@ -22,7 +22,12 @@ import {
   preloadModule,
   useFormStatus,
 } from 'react-dom'
-import { renderToReadableStream, resume } from 'react-dom/server'
+import {
+  renderToReadableStream,
+  renderToStaticMarkup,
+  renderToString,
+  resume,
+} from 'react-dom/server'
 import { prerender } from 'react-dom/static'
 
 const child: VidactNode = 'child'
@@ -121,6 +126,8 @@ preloadModule('/chunk.js')
 preinit('/app.css', { as: 'style', precedence: 'app' })
 preinitModule('/app.js')
 const readable = renderToReadableStream('server')
+const serverString: string = renderToString('server')
+const staticString: string = renderToStaticMarkup('server')
 const prerendered = prerender('server')
 const resumed = resume('continuation')
 
@@ -145,6 +152,8 @@ void functionFormAction
 void cachedRead('id')
 void requestSignal
 void readable
+void serverString
+void staticString
 void prerendered
 void resumed
 

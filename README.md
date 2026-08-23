@@ -5,11 +5,12 @@ React-compatible model, then compile them into direct DOM operations and a tiny
 static updater runtime. There is no Virtual DOM and no runtime dependency
 tracking.
 
-This orphan branch is a from-scratch Rust rebuild. It currently contains the
-compiler-neutral updater IR, the runtime foundation, and executable browser
-corpora. A surgical vertical slice now compiles the TodoMVC example into
-one-time DOM construction, scalar bindings, conditional ranges, and keyed list
-ranges. It is not a general TSX compiler yet.
+This branch is a from-scratch Rust rebuild with client, hydration, and server
+targets. The default contract covers modern function components, fine-grained
+state and props, lifecycle hooks, context, external stores, refs, portals,
+errors, forms, namespaces, and owned list ranges. Cross-cutting async,
+concurrent, Actions, retained-UI, profiling, raw-HTML, and framework protocols
+are explicit compiler features.
 
 ## Architecture
 
@@ -39,13 +40,14 @@ the rationale and integration constraints.
 - `crates/vidact-compiler`: compiler-neutral analysis facts and updater IR
 - `packages/runtime`: tree-shakeable scheduler, state slots, and keyed arrays
 - `packages/vite-plugin`: Rust compilation and OXC JSX-lowering Vite adapter
-- `tests/browser`: Vitest Browser corpora running in Chromium
+- `tests/browser`: compiled Vitest Browser corpora running in Chromium, Firefox, and WebKit
 - `examples/todomvc`: runnable array-state TodoMVC without a Virtual DOM
 - `docs/architecture`: durable architecture decisions and upstream constraints
 
 ## Development
 
-Requirements: Rust 1.96, Node 24+, pnpm 10, and a Playwright Chromium install.
+Requirements: Rust 1.96, Node 24+, pnpm 10, and Playwright's Chromium, Firefox,
+and WebKit installs.
 
 ```sh
 scripts/prepare-oxc.sh
@@ -55,7 +57,9 @@ cargo test --workspace
 pnpm test:browser
 ```
 
-`pnpm check` runs the typecheck and both Rust and browser test suites.
+`pnpm check` runs lint/format/type gates, Rust and cross-browser suites, package
+and example verification, production size reachability, and compiler/runtime
+performance and retention budgets.
 The prepare script initializes the pinned Oxc submodule and applies Vidact's
 checked-in React Compiler patch. Maintainers editing that patch install the
 pinned tool with `go install github.com/microsoft/go-infra/cmd/git-go-patch@v0.0.16`;
@@ -98,20 +102,14 @@ diff a tree.
 - Disposed component scopes ignore later invalidations.
 - Non-stabilizing updater feedback fails loudly instead of blocking the browser forever.
 
-The pinned React Compiler adapter and a bounded TSX-to-DOM code generator are
-now executable. The emitter parses once, preserves source expressions as OXC
-AST, rewrites state references by semantic binding identity, builds the output
-AST, and delegates printing to `oxc_codegen`. TodoMVC proves the full
-TSX-to-browser path including array insertion, filtering, editing, removal, and
-surgical DOM identity. Vidact-specific source and render classification now
-uses OXC AST nodes and semantic binding identities; aliased and namespace React
-state imports work, while foreign hook-shaped calls fail closed. Exact function
-spans now isolate several same-module components, and the versioned compatibility
-manifest distinguishes accepted, rejected, and intentionally different syntax
-with source-located rejections. React Compiler's owned CFG now reaches Vidact's
-IR, and multiple render returns reject at the exact return site without callback
-or source-text false positives. The next milestone is DOM-range lowering for
-that typed control flow, narrower non-return feature diagnostics, original-TSX
-source maps, and the multi-root component-range ABI. The project is not
-production-ready until effects, complete component/DOM ownership semantics,
-SSR/hydration, and cross-browser gates exist.
+The compiler parses once, preserves source expressions as OXC AST, lowers React
+Compiler control-flow facts into Vidact's owned-range IR, and composes source
+maps back to original TSX. The Vite integration fingerprints target, features,
+environment, compiler artifact, and compiler/runtime protocols; compatible
+dependency source can be opted in explicitly. Production packages contain
+built ESM, declarations, maps, isolated entry points, and clean-install gates.
+
+See [the React migration guide](docs/migration/from-react.md),
+[release policy](docs/release-policy.md), and
+[architecture decisions](docs/architecture/README.md) for the supported and
+intentionally different contracts.

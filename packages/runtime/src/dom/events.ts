@@ -1,4 +1,4 @@
-import { isReactFormChangeEvent, restoreControlledFormState } from './forms.ts'
+import { isReactFormChangeEvent, restoreControlledFormState } from './properties.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 

@@ -1,5 +1,11 @@
 declare module 'react-dom/server' {
   export {
+    renderToStaticMarkup,
+    renderToString,
+    type ServerChild,
+    type ServerRenderOptions,
+  } from '@vidact/runtime/server'
+  export {
     renderToPipeableStream,
     renderToReadableStream,
     resume,

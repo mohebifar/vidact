@@ -53,6 +53,71 @@ fn compile_framework(input: ModuleInput<'_>) -> Result<String, Vec<Diagnostic>> 
 }
 
 #[test]
+fn imports_only_dom_capabilities_reached_by_intrinsic_jsx() {
+    let counter = compile_surgical_module(ModuleInput {
+        filename: "Counter.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function Counter() {
+                const [count, setCount] = useState(0);
+                return <button onClick={() => setCount(count + 1)}>{count}</button>;
+            }
+        "#,
+    })
+    .expect("counter should compile");
+    assert!(!counter.contains("@vidact/runtime/dom/forms"), "{counter}");
+    assert!(
+        !counter.contains("@vidact/runtime/dom/namespace"),
+        "{counter}"
+    );
+    assert!(!counter.contains("@vidact/runtime/dom/styles"), "{counter}");
+
+    let capabilities = compile_surgical_module(ModuleInput {
+        filename: "Capabilities.tsx",
+        source: r#"
+            export function Capabilities() {
+                return <input value="ready" style={{ color: 'red' }} />;
+            }
+        "#,
+    })
+    .expect("form and style capabilities should compile");
+    assert!(
+        capabilities.contains("@vidact/runtime/dom/forms"),
+        "{capabilities}"
+    );
+    assert!(
+        capabilities.contains("__vidactEnableDomForms()"),
+        "{capabilities}"
+    );
+    assert!(
+        capabilities.contains("@vidact/runtime/dom/styles"),
+        "{capabilities}"
+    );
+    assert!(
+        capabilities.contains("__vidactEnableDomStyles()"),
+        "{capabilities}"
+    );
+
+    let namespace = compile_surgical_module(ModuleInput {
+        filename: "Namespace.tsx",
+        source: r#"
+            export function Namespace() {
+                return <svg><circle cx="1" /></svg>;
+            }
+        "#,
+    })
+    .expect("namespace capability should compile");
+    assert!(
+        namespace.contains("@vidact/runtime/dom/namespace"),
+        "{namespace}"
+    );
+    assert!(
+        namespace.contains("__vidactEnableDomNamespace()"),
+        "{namespace}"
+    );
+}
+
+#[test]
 fn gates_framework_resource_hints_and_server_only_cache_apis() {
     let hints = ModuleInput {
         filename: "FrameworkHints.tsx",
@@ -153,9 +218,20 @@ fn activates_framework_metadata_only_for_html_head_elements() {
 
     let output = compile_framework(ModuleInput {
         filename: "FrameworkWithoutMetadata.tsx",
-        source: r#"export function App() { return <svg><title>icon</title></svg>; }"#,
+        source: r#"
+            export function App() {
+                return <>
+                    <svg><title>icon</title></svg>
+                    <title itemProp="name">item</title>
+                    <meta itemProp="description" content="item" />
+                    <link itemProp="author" href="/author" />
+                    <link rel="stylesheet" href="/manual.css" />
+                    <link rel="icon" href="/managed.ico" onLoad={() => undefined} />
+                </>;
+            }
+        "#,
     })
-    .expect("SVG titles are not document metadata");
+    .expect("item metadata and manually managed resources are not document metadata");
     assert!(!output.contains("enableFrameworkMetadata"), "{output}");
 }
 

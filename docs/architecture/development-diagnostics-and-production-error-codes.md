@@ -42,7 +42,7 @@ Current code families are grouped by runtime concern:
 | `V201` | event handler values |
 | `V301` | controlled form values |
 | `V401` | DOM property ownership |
-| `V501`–`V502` | style targets and values |
+| `V501`–`V503` | style targets, values, and missing compiler-injected capability activation |
 | `V601`–`V605` | raw HTML shape and target restrictions |
 | `V701` | source-mask indexes |
 | `V801`–`V804` | keyed-list lifecycle and key validity |

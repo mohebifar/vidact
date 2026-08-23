@@ -7,6 +7,7 @@ export default defineConfig({
     __VIDACT_UNSAFE_HTML__: 'true',
   },
   test: {
+    setupFiles: ['test/setup-browser.ts'],
     include: ['test/**/*.browser.test.ts', '../test-support/src/tests/**/*.browser.test.ts'],
     exclude: ['test/lifecycle/activity.browser.test.ts'],
     browser: {

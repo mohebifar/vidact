@@ -2,7 +2,11 @@ export * from './async-actions.ts'
 export * from './framework-protocol.ts'
 
 import { installFrameworkMetadata } from './direct-dom.ts'
-import { hoistFrameworkMetadata, isFrameworkMetadataElement } from './metadata.ts'
+import {
+  hoistFrameworkMetadata,
+  installFrameworkMetadataPropRekeying,
+  isFrameworkMetadataElement,
+} from './metadata.ts'
 
 let metadataInstalled = false
 
@@ -10,8 +14,9 @@ let metadataInstalled = false
 export function enableFrameworkMetadata(): void {
   if (metadataInstalled) return
   metadataInstalled = true
-  installFrameworkMetadata((element) =>
-    isFrameworkMetadataElement(element) ? hoistFrameworkMetadata(element) : element,
+  installFrameworkMetadataPropRekeying()
+  installFrameworkMetadata((element, props) =>
+    isFrameworkMetadataElement(element, props) ? hoistFrameworkMetadata(element) : element,
   )
 }
 

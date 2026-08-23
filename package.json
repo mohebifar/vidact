@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "benchmark": "cargo build --quiet -p vidact-compiler --bin vidactc && pnpm build:packages && node --expose-gc scripts/benchmark.mjs",
     "build:examples": "pnpm --filter @vidact/example-todomvc build",
     "build:packages": "pnpm --filter @vidact/runtime build && pnpm --filter @vidact/test-support build && pnpm --filter @vidact/vite build",
-    "check": "pnpm lint && pnpm format && pnpm typecheck && pnpm test",
+    "check": "pnpm lint && pnpm format && pnpm typecheck && pnpm test && pnpm size && pnpm benchmark",
     "dev:todomvc": "pnpm --filter @vidact/example-todomvc dev",
     "format": "oxfmt --disable-nested-config \"**/*.{js,jsx,ts,tsx,json,jsonc,css}\" --check",
     "format:fix": "oxfmt --disable-nested-config \"**/*.{js,jsx,ts,tsx,json,jsonc,css}\" --write",

@@ -1,13 +1,12 @@
 import { validateRawHtmlRelatedProp } from '../raw-html.ts'
-import { applyFormProp } from './forms.ts'
-import { MATHML_NAMESPACE, SVG_NAMESPACE } from './namespace.ts'
-import { applyStyleProp } from './styles.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 const UNSAFE_HTML = typeof __VIDACT_UNSAFE_HTML__ === 'undefined' || __VIDACT_UNSAFE_HTML__
 
 const XLINK_NAMESPACE = 'http://www.w3.org/1999/xlink'
 const XML_NAMESPACE = 'http://www.w3.org/XML/1998/namespace'
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
+const MATHML_NAMESPACE = 'http://www.w3.org/1998/Math/MathML'
 
 const booleanAttributes = new Set([
   'allowFullScreen',
@@ -125,6 +124,50 @@ const kebabCaseSvgAttributes = new Set([
 
 type DomPropHandler = (element: Element, name: string, value: unknown) => boolean
 
+export interface FormDomCapability {
+  readonly applyProp: DomPropHandler
+  readonly ensureControlledRestoration: (element: Element) => () => void
+  readonly isControlledProp: (element: Element, name: string) => boolean
+  readonly isReactChangeEvent: (element: Element, eventName: string) => boolean
+  readonly restoreControlledState: (element: Element) => void
+}
+
+type StyleDomCapability = (element: Element, value: unknown) => void
+
+let formCapability: FormDomCapability | undefined
+let styleCapability: StyleDomCapability | undefined
+const NOOP = (): void => {}
+
+/** @internal */
+export function installFormDomCapability(capability: FormDomCapability): void {
+  formCapability = capability
+}
+
+/** @internal */
+export function installStyleDomCapability(capability: StyleDomCapability): void {
+  styleCapability = capability
+}
+
+/** @internal */
+export function ensureControlledFormRestoration(element: Element): () => void {
+  return formCapability?.ensureControlledRestoration(element) ?? NOOP
+}
+
+/** @internal */
+export function isControlledFormProp(element: Element, name: string): boolean {
+  return formCapability?.isControlledProp(element, name) ?? false
+}
+
+/** @internal */
+export function isReactFormChangeEvent(element: Element, eventName: string): boolean {
+  return formCapability?.isReactChangeEvent(element, eventName) ?? false
+}
+
+/** @internal */
+export function restoreControlledFormState(element: Element): void {
+  formCapability?.restoreControlledState(element)
+}
+
 export let applyDomProp = applyBaseDomProp
 
 export function installDomPropHandler(handler: DomPropHandler): void {
@@ -134,17 +177,21 @@ export function installDomPropHandler(handler: DomPropHandler): void {
   }
 }
 
-function applyBaseDomProp(element: Element, name: string, value: unknown): void {
+/** @internal Specialized capabilities may own a prop while reusing the base policy. */
+export function applyBaseDomProp(element: Element, name: string, value: unknown): void {
   if (name === 'dangerouslySetInnerHTML') {
     throw new Error(
       DEV ? 'dangerouslySetInnerHTML must be handled as an owned opaque subtree' : 'V401',
     )
   }
   if (name === 'style') {
-    applyStyleProp(element, value)
+    if (styleCapability === undefined) {
+      throw new Error(DEV ? 'style prop requires the DOM style capability' : 'V503')
+    }
+    styleCapability(element, value)
     return
   }
-  if (applyFormProp(element, name, value)) return
+  if (formCapability?.applyProp(element, name, value)) return
   if (name.startsWith('data-') || name.startsWith('aria-')) {
     applyStringAttribute(element, name, value)
     return

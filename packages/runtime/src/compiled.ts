@@ -2,7 +2,7 @@ import {
   currentIntrinsicNamespace,
   withIntrinsicNamespace,
   type IntrinsicNamespace,
-} from './dom/namespace.ts'
+} from './dom/intrinsic.ts'
 import {
   HydrationMismatch,
   beginHydration,
@@ -38,6 +38,8 @@ const MAX_FLUSH_PASSES = 100
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 let retainedUiEnabled = typeof __VIDACT_RETAINED_UI__ !== 'undefined' && __VIDACT_RETAINED_UI__
 let profilingEnabled = false
+let activeOwnerCount = 0
+let createdOwnerCount = 0
 const BINDING = Symbol(DEV ? 'Vidact.Binding' : undefined)
 const STRUCTURAL = Symbol(DEV ? 'Vidact.StructuralBinding' : undefined)
 const CONTEXT = Symbol(DEV ? 'Vidact.Context' : undefined)
@@ -2810,6 +2812,10 @@ function createOwner(
   retainedConnection = activeOwner?.[5] ?? null,
   profileContext = activeOwner?.[6] ?? activeConstructionOwner?.[6] ?? null,
 ): Owner {
+  if (DEV) {
+    activeOwnerCount += 1
+    createdOwnerCount += 1
+  }
   let nextProfile = profileContext
   if (profilingEnabled && activeProfileName !== null && activeConstructionOwner === null) {
     nextProfile = {
@@ -3179,6 +3185,7 @@ function onCleanup(cleanup: () => void): void {
 function disposeOwner(owner: Owner): void {
   if (owner[0]) return
   owner[0] = true
+  if (DEV) activeOwnerCount -= 1
   pendingInsertionCommits.delete(owner)
   pendingOwnerCommits.delete(owner)
   const cleanups = [...owner[1]]
@@ -3194,6 +3201,14 @@ function disposeOwner(owner: Owner): void {
     }
   }
   if (hasError) throw firstError
+}
+
+/** @internal Test-only allocation and retention evidence. */
+export function readCompiledOwnerMetrics(): {
+  readonly active: number
+  readonly created: number
+} {
+  return { active: activeOwnerCount, created: createdOwnerCount }
 }
 
 function mountCompiledBindingBefore(

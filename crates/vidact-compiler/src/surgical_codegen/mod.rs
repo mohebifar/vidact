@@ -78,6 +78,9 @@ const CREATE_OPTIMISTIC: &str = "__vidactCreateOptimistic";
 const DEFERRED: &str = "__vidactDeferred";
 const DISPATCH: &str = "__vidactDispatch";
 const ENABLE_FRAMEWORK_METADATA: &str = "__vidactEnableFrameworkMetadata";
+const ENABLE_DOM_FORMS: &str = "__vidactEnableDomForms";
+const ENABLE_DOM_NAMESPACE: &str = "__vidactEnableDomNamespace";
+const ENABLE_DOM_STYLES: &str = "__vidactEnableDomStyles";
 const INDEXED: &str = "__vidactIndexed";
 const KEYED: &str = "__vidactKeyed";
 const ITEM_INDEX: &str = "__vidactItemIndex";
@@ -276,10 +279,91 @@ fn has_framework_metadata(program: &Program<'_>) -> bool {
     finder.found
 }
 
-fn is_framework_metadata_element(name: &str, element: &JSXElement<'_>) -> bool {
-    if matches!(name, "title" | "meta" | "link") {
-        return true;
+#[derive(Default)]
+struct DomCapabilityFinder {
+    forms: bool,
+    namespace: bool,
+    styles: bool,
+}
+
+impl<'a> Visit<'a> for DomCapabilityFinder {
+    fn visit_jsx_element(&mut self, element: &JSXElement<'a>) {
+        let intrinsic_tag = match &element.opening_element.name {
+            JSXElementName::Identifier(tag)
+                if tag
+                    .name
+                    .as_str()
+                    .bytes()
+                    .next()
+                    .is_some_and(|first| first.is_ascii_lowercase()) =>
+            {
+                Some(tag.name.as_str())
+            }
+            _ => None,
+        };
+
+        if matches!(
+            intrinsic_tag,
+            Some("input" | "option" | "select" | "textarea")
+        ) {
+            self.forms = true;
+        }
+        if matches!(intrinsic_tag, Some("math" | "svg")) {
+            self.namespace = true;
+        }
+        for item in &element.opening_element.attributes {
+            match item {
+                JSXAttributeItem::SpreadAttribute(_) if intrinsic_tag.is_some() => {
+                    self.forms = true;
+                    self.styles = true;
+                }
+                JSXAttributeItem::SpreadAttribute(_) => {}
+                JSXAttributeItem::Attribute(attribute) => {
+                    let JSXAttributeName::Identifier(name) = &attribute.name else {
+                        continue;
+                    };
+                    let name = name.name.as_str();
+                    if name == "__vidactNamespace" {
+                        self.namespace = true;
+                    }
+                    if intrinsic_tag.is_none() {
+                        continue;
+                    }
+                    if name == "style" {
+                        self.styles = true;
+                    }
+                    if matches!(
+                        name,
+                        "checked"
+                            | "defaultChecked"
+                            | "defaultValue"
+                            | "multiple"
+                            | "muted"
+                            | "onChange"
+                            | "onInput"
+                            | "selected"
+                            | "value"
+                    ) || name.starts_with("__vidactSpread")
+                    {
+                        self.forms = true;
+                        if name.starts_with("__vidactSpread") {
+                            self.styles = true;
+                        }
+                    }
+                }
+            }
+        }
+        oxc_ast_visit::walk::walk_jsx_element(self, element);
     }
+}
+
+fn dom_capabilities(program: &Program<'_>) -> DomCapabilityFinder {
+    let mut finder = DomCapabilityFinder::default();
+    finder.visit_program(program);
+    finder
+}
+
+fn is_framework_metadata_element(name: &str, element: &JSXElement<'_>) -> bool {
     let has_attribute = |expected: &str| {
         element.opening_element.attributes.iter().any(|item| {
             matches!(
@@ -290,7 +374,27 @@ fn is_framework_metadata_element(name: &str, element: &JSXElement<'_>) -> bool {
             )
         })
     };
-    (name == "style" && has_attribute("precedence"))
+    if matches!(name, "title" | "meta") {
+        return !has_attribute("itemProp");
+    }
+    if name == "link" {
+        if ["itemProp", "onLoad", "onError", "disabled"]
+            .into_iter()
+            .any(has_attribute)
+        {
+            return false;
+        }
+        let is_static_stylesheet = element.opening_element.attributes.iter().any(|item| {
+            matches!(
+                item,
+                JSXAttributeItem::Attribute(attribute)
+                    if matches!(&attribute.name, JSXAttributeName::Identifier(name) if name.name == "rel")
+                        && matches!(&attribute.value, Some(JSXAttributeValue::StringLiteral(value)) if value.value == "stylesheet")
+            )
+        });
+        return !is_static_stylesheet || has_attribute("precedence");
+    }
+    (name == "style" && has_attribute("href") && has_attribute("precedence"))
         || (name == "script" && has_attribute("async") && has_attribute("src"))
 }
 
@@ -336,6 +440,9 @@ fn transform_program<'a>(
         CREATE_OPTIMISTIC,
         DEFERRED,
         DISPATCH,
+        ENABLE_DOM_FORMS,
+        ENABLE_DOM_NAMESPACE,
+        ENABLE_DOM_STYLES,
         INDEXED,
         KEYED,
         ITEM_INDEX,
@@ -370,8 +477,56 @@ fn transform_program<'a>(
             ),
         );
     }
-    let import = runtime_import(&ast, program, options);
-    program.body.insert(0, import);
+    let capabilities = dom_capabilities(program);
+    let mut prefix = vec![runtime_import(&ast, program, options)];
+    if capabilities.forms {
+        prefix.push(capability_import(
+            &ast,
+            "enableDomForms",
+            ENABLE_DOM_FORMS,
+            "@vidact/runtime/dom/forms",
+        ));
+    }
+    if capabilities.namespace {
+        prefix.push(capability_import(
+            &ast,
+            "enableDomNamespace",
+            ENABLE_DOM_NAMESPACE,
+            "@vidact/runtime/dom/namespace",
+        ));
+    }
+    if capabilities.styles {
+        prefix.push(capability_import(
+            &ast,
+            "enableDomStyles",
+            ENABLE_DOM_STYLES,
+            "@vidact/runtime/dom/styles",
+        ));
+    }
+    if capabilities.forms {
+        prefix.push(Statement::new_expression_statement(
+            SPAN,
+            call_name(&ast, ENABLE_DOM_FORMS, []),
+            &ast,
+        ));
+    }
+    if capabilities.namespace {
+        prefix.push(Statement::new_expression_statement(
+            SPAN,
+            call_name(&ast, ENABLE_DOM_NAMESPACE, []),
+            &ast,
+        ));
+    }
+    if capabilities.styles {
+        prefix.push(Statement::new_expression_statement(
+            SPAN,
+            call_name(&ast, ENABLE_DOM_STYLES, []),
+            &ast,
+        ));
+    }
+    for (index, statement) in prefix.into_iter().enumerate() {
+        program.body.insert(index, statement);
+    }
     Ok(())
 }
 
@@ -4479,6 +4634,33 @@ fn runtime_import<'a>(
             None,
             ast,
         ),
+        None,
+        None,
+        ImportOrExportKind::Value,
+        ast,
+    )
+}
+
+fn capability_import<'a>(
+    ast: &AstBuilder<'a>,
+    imported: &str,
+    local: &str,
+    source: &str,
+) -> Statement<'a> {
+    let specifiers = oxc_allocator::Vec::from_iter_in(
+        [ImportDeclarationSpecifier::new_import_specifier(
+            SPAN,
+            ModuleExportName::new_identifier_name(SPAN, atom(ast, imported), ast),
+            BindingIdentifier::new(SPAN, atom(ast, local), ast),
+            ImportOrExportKind::Value,
+            ast,
+        )],
+        ast,
+    );
+    Statement::new_import_declaration(
+        SPAN,
+        Some(specifiers),
+        StringLiteral::new(SPAN, atom(ast, source), None, ast),
         None,
         None,
         ImportOrExportKind::Value,

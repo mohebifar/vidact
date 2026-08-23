@@ -3,6 +3,7 @@
 - Decision state: Accepted
 - Decided: 2026-08-23
 - Supersedes in part: [Opaque raw HTML subtrees](opaque-raw-html-subtrees.md)
+- Superseded in part by: [Compiler-injected DOM capability reachability](compiler-injected-dom-capabilities.md)
 - Amends: [Component spans and compatibility corpus](component-spans-and-compatibility-corpus.md)
 
 ## Context
@@ -97,9 +98,11 @@ The complete adapted semantics and trust boundary are recorded in
 `hydrate` and `server` select implemented hydration and SSR lowering targets.
 
 The `unsafe-html` implementation is absent from chunks built without the
-feature. Forms, styles, namespaces, events, and refs still share the default DOM
-runtime, so extending capability reachability to those families remains a
-separate size project under the compact ABI decision.
+feature. At the time of this decision, forms, styles, namespaces, events, and
+refs still shared the default DOM runtime. The later
+[compiler-injected DOM capability decision](compiler-injected-dom-capabilities.md)
+isolates forms, object styles, and SVG/MathML namespace behavior by actual JSX
+use; events and the small HTML intrinsic core remain when a counter uses them.
 
 Protocol constants are intentionally explicit rather than inferred from
 package versions. Any incompatible payload or runtime ABI change must bump the

@@ -71,6 +71,9 @@ export function renderToPipeableStream(
 ): PipeableStream {
   const controller = linkedAbortController(options.signal)
   const html = renderFrameworkHtml(value, options, controller.signal, options)
+  // A caller may create a stream for lifecycle callbacks and never pipe it. Mark the
+  // render rejection as observed while retaining the original promise for pipe().
+  void html.catch(() => undefined)
   let piped = false
   return {
     abort(reason) {

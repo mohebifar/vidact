@@ -52,6 +52,27 @@ describe('framework server runtime', () => {
     expect(calls).toBe(1)
   })
 
+  it('lets portable cached async work capture its request signal before suspension', async () => {
+    let capturedBeforeAwait: AbortSignal | null = null
+    let readAfterAwait: AbortSignal | null = null
+    const read = cache(async () => {
+      capturedBeforeAwait = cacheSignal()
+      await Promise.resolve()
+      readAfterAwait = cacheSignal()
+      return 'ready'
+    })
+
+    const stream = await renderToReadableStream(() =>
+      Suspense({
+        children: () => <strong>{use(read())}</strong>,
+        fallback: () => <span>pending</span>,
+      }),
+    )
+    expect(await readStream(stream)).toContain('ready')
+    expect(capturedBeforeAwait).toBeInstanceOf(AbortSignal)
+    expect(readAfterAwait).toBeNull()
+  })
+
   it('hoists and deduplicates metadata and resource hints into the document head', async () => {
     const stream = await renderToReadableStream(() => {
       preconnect('https://cdn.example.test', { crossOrigin: 'anonymous' })
@@ -65,6 +86,14 @@ describe('framework server runtime', () => {
           <body>
             <title>Vidact framework</title>
             <meta name="description" content="second" />
+            <meta itemProp="description" content="item metadata" />
+            <link rel="stylesheet" href="/manual.css" />
+            <style href="first-style" precedence="z-first">
+              {'.first {}'}
+            </style>
+            <style href="second-style" precedence="a-second">
+              {'.second {}'}
+            </style>
             <main>content</main>
           </body>
         </html>
@@ -76,6 +105,9 @@ describe('framework server runtime', () => {
     expect(html).toContain('rel="preload" href="/app.css" as="style" fetchpriority="high"')
     expect(html.match(/name="description"/g)).toHaveLength(1)
     expect(html).toContain('content="second"')
+    expect(html.indexOf('itemprop="description"')).toBeGreaterThan(html.indexOf('<body>'))
+    expect(html.indexOf('href="/manual.css"')).toBeGreaterThan(html.indexOf('<body>'))
+    expect(html.indexOf('.first {}')).toBeLessThan(html.indexOf('.second {}'))
   })
 
   it('produces integrity-checked prerender continuations and resumes final HTML', async () => {
@@ -128,6 +160,21 @@ describe('framework server runtime', () => {
     expect(callbacks).toEqual(['shell', 'all'])
   })
 
+  it('reports an unpiped pipeable render failure without leaving a rejected promise unobserved', async () => {
+    let rejectShell!: (error: unknown) => void
+    const shellError = new Promise<never>((_resolve, reject) => {
+      rejectShell = reject
+    })
+    renderToPipeableStream(
+      () => {
+        throw new Error('pipeable render failed')
+      },
+      { onShellError: rejectShell },
+    )
+
+    await expect(shellError).rejects.toThrow('pipeable render failed')
+  })
+
   it('serializes manifest-checked client references and allowlisted Server Functions', async () => {
     const manifest = createClientModuleManifest({ 'app/Counter': ['default'] })
     const reference = createClientReference('app/Counter')
@@ -163,6 +210,31 @@ describe('framework server runtime', () => {
     expect(decodeFrameworkValue(encodeFrameworkValue(tagShapedUserValue))).toEqual(
       tagShapedUserValue,
     )
+
+    registry.register('wait/forever', () => new Promise<never>(() => {}))
+    const controller = new AbortController()
+    const pendingInvocation = registry.invoke('wait/forever', [], controller.signal)
+    controller.abort(new Error('cancel Server Function'))
+    await expect(pendingInvocation).rejects.toThrow('cancel Server Function')
+  })
+
+  it('bounds framework payload depth and node count for untrusted transport values', () => {
+    let deeplyNested: FrameworkValue = null
+    for (let depth = 0; depth < 101; depth += 1) deeplyNested = [deeplyNested]
+    expect(() => encodeFrameworkValue(deeplyNested)).toThrow('cannot exceed depth 100')
+
+    const tooManyNodes = Array.from({ length: 100_000 }, () => null)
+    expect(() => encodeFrameworkValue(tooManyNodes)).toThrow('cannot exceed 100000 nodes')
+
+    let encoded: unknown = null
+    for (let depth = 0; depth < 101; depth += 1) encoded = [encoded]
+    const body = JSON.stringify(encoded)
+    const envelope = JSON.stringify({
+      protocol: 'vidact-framework-v1',
+      checksum: frameworkChecksum(body),
+      body,
+    })
+    expect(() => decodeFrameworkValue(envelope)).toThrow('cannot exceed depth 100')
   })
 
   it('propagates abort signals through pending framework renders', async () => {
@@ -196,4 +268,12 @@ function concatenate(chunks: readonly Uint8Array[]): Uint8Array {
     offset += chunk.length
   }
   return output
+}
+
+function frameworkChecksum(value: string): string {
+  let hash = 0x81_1c_9d_c5
+  for (const byte of new TextEncoder().encode(value)) {
+    hash = Math.imul(hash ^ byte, 0x01_00_01_93)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
 }

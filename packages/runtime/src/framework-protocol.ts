@@ -59,6 +59,15 @@ interface FrameworkEnvelope {
   readonly body: string
 }
 
+interface TraversalBudget {
+  nodes: number
+}
+
+const MAX_FRAMEWORK_PAYLOAD_CHARACTERS = 64 * 1024 * 1024
+const MAX_FRAMEWORK_BODY_CHARACTERS = 32 * 1024 * 1024
+const MAX_FRAMEWORK_VALUE_DEPTH = 100
+const MAX_FRAMEWORK_VALUE_NODES = 100_000
+
 export function createClientReference(id: string, exportName = 'default'): ClientReference {
   assertReferencePart(id, 'client module id')
   assertReferencePart(exportName, 'client export name')
@@ -108,8 +117,8 @@ export function createServerFunctionRegistry(): ServerFunctionRegistry {
       if (signal?.aborted) throw abortReason(signal)
       const implementation = functions.get(id)
       if (implementation === undefined) throw new Error(`unknown server function ${id}`)
-      const result = await implementation(...arguments_)
-      if (signal?.aborted) throw abortReason(signal)
+      const operation = Promise.resolve(implementation(...arguments_))
+      const result = signal === undefined ? await operation : await withAbort(operation, signal)
       assertFrameworkValue(result)
       return result
     },
@@ -120,18 +129,22 @@ export function encodeFrameworkValue(
   value: FrameworkValue,
   manifest?: ClientModuleManifest,
 ): string {
-  const body = JSON.stringify(encodeValue(value, manifest, new Set()))
-  return JSON.stringify({
+  const body = JSON.stringify(encodeValue(value, manifest, new Set(), { nodes: 0 }, 0))
+  assertFrameworkPayloadSize(body, MAX_FRAMEWORK_BODY_CHARACTERS, 'body')
+  const payload = JSON.stringify({
     protocol: VIDACT_FRAMEWORK_PROTOCOL,
     checksum: checksum(body),
     body,
   } satisfies FrameworkEnvelope)
+  assertFrameworkPayloadSize(payload, MAX_FRAMEWORK_PAYLOAD_CHARACTERS, 'envelope')
+  return payload
 }
 
 export function decodeFrameworkValue(
   payload: string,
   manifest?: ClientModuleManifest,
 ): FrameworkValue {
+  assertFrameworkPayloadSize(payload, MAX_FRAMEWORK_PAYLOAD_CHARACTERS, 'envelope')
   const envelope = JSON.parse(payload) as Partial<FrameworkEnvelope>
   if (
     envelope.protocol !== VIDACT_FRAMEWORK_PROTOCOL ||
@@ -143,7 +156,8 @@ export function decodeFrameworkValue(
   if (checksum(envelope.body) !== envelope.checksum) {
     throw new Error('Vidact framework payload integrity check failed')
   }
-  return decodeValue(JSON.parse(envelope.body) as EncodedValue, manifest)
+  assertFrameworkPayloadSize(envelope.body, MAX_FRAMEWORK_BODY_CHARACTERS, 'body')
+  return decodeValue(JSON.parse(envelope.body) as EncodedValue, manifest, { nodes: 0 }, 0)
 }
 
 export function invokeServerFunctionPayload(
@@ -164,7 +178,10 @@ function encodeValue(
   value: FrameworkValue,
   manifest: ClientModuleManifest | undefined,
   ancestors: Set<object>,
+  budget: TraversalBudget,
+  depth: number,
 ): EncodedValue {
+  consumeTraversalBudget(budget, depth)
   if (value === undefined) return { $vidact: 'undefined' }
   if (typeof value === 'bigint') return { $vidact: 'bigint', value: String(value) }
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return value
@@ -182,20 +199,22 @@ function encodeValue(
     return {
       $vidact: 'server-function',
       id: value.id,
-      bound: encodeValue(value.bound, manifest, ancestors),
+      bound: encodeValue(value.bound, manifest, ancestors, budget, depth + 1),
     }
   }
   if (typeof value !== 'object') throw new TypeError('unsupported framework value')
   if (ancestors.has(value)) throw new TypeError('framework values cannot contain cycles')
   ancestors.add(value)
   try {
-    if (Array.isArray(value)) return value.map((item) => encodeValue(item, manifest, ancestors))
+    if (Array.isArray(value)) {
+      return value.map((item) => encodeValue(item, manifest, ancestors, budget, depth + 1))
+    }
     if (!isPlainObject(value)) throw new TypeError('framework objects must use a plain prototype')
     return {
       $vidact: 'object',
       entries: Object.entries(value).map(([key, item]) => {
         assertSafeKey(key)
-        return [key, encodeValue(item, manifest, ancestors)]
+        return [key, encodeValue(item, manifest, ancestors, budget, depth + 1)]
       }),
     }
   } finally {
@@ -203,13 +222,21 @@ function encodeValue(
   }
 }
 
-function decodeValue(value: EncodedValue, manifest?: ClientModuleManifest): FrameworkValue {
+function decodeValue(
+  value: EncodedValue,
+  manifest: ClientModuleManifest | undefined,
+  budget: TraversalBudget,
+  depth: number,
+): FrameworkValue {
+  consumeTraversalBudget(budget, depth)
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return value
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) throw new TypeError('framework values require finite numbers')
     return value
   }
-  if (Array.isArray(value)) return value.map((item) => decodeValue(item, manifest))
+  if (Array.isArray(value)) {
+    return value.map((item) => decodeValue(item, manifest, budget, depth + 1))
+  }
   if (!isPlainObject(value)) throw new TypeError('invalid framework value')
   const tag = value.$vidact
   if (tag === 'undefined') return undefined
@@ -223,7 +250,7 @@ function decodeValue(value: EncodedValue, manifest?: ClientModuleManifest): Fram
   if (tag === 'server-function' && typeof value.id === 'string' && Array.isArray(value.bound)) {
     return createServerFunctionReference(
       value.id,
-      value.bound.map((item) => decodeValue(item, manifest)),
+      value.bound.map((item) => decodeValue(item, manifest, budget, depth + 1)),
     )
   }
   if (tag === 'object' && Array.isArray(value.entries)) {
@@ -237,7 +264,7 @@ function decodeValue(value: EncodedValue, manifest?: ClientModuleManifest): Fram
       }
       const [key, item] = entry
       assertSafeKey(key)
-      output[key] = decodeValue(item, manifest)
+      output[key] = decodeValue(item, manifest, budget, depth + 1)
     }
     return output
   }
@@ -248,7 +275,7 @@ function decodeValue(value: EncodedValue, manifest?: ClientModuleManifest): Fram
   >
   for (const [key, item] of Object.entries(value)) {
     assertSafeKey(key)
-    output[key] = decodeValue(item, manifest)
+    output[key] = decodeValue(item, manifest, budget, depth + 1)
   }
   return output
 }
@@ -277,6 +304,22 @@ function assertSafeKey(key: string): void {
   }
 }
 
+function consumeTraversalBudget(budget: TraversalBudget, depth: number): void {
+  if (depth > MAX_FRAMEWORK_VALUE_DEPTH) {
+    throw new RangeError(`framework values cannot exceed depth ${MAX_FRAMEWORK_VALUE_DEPTH}`)
+  }
+  budget.nodes += 1
+  if (budget.nodes > MAX_FRAMEWORK_VALUE_NODES) {
+    throw new RangeError(`framework values cannot exceed ${MAX_FRAMEWORK_VALUE_NODES} nodes`)
+  }
+}
+
+function assertFrameworkPayloadSize(value: string, limit: number, label: string): void {
+  if (value.length > limit) {
+    throw new RangeError(`Vidact framework payload ${label} exceeds ${limit} characters`)
+  }
+}
+
 function assertReferencePart(value: string, label: string): void {
   if (value.length === 0 || value.includes('\0')) throw new TypeError(`${label} must be non-empty`)
 }
@@ -291,4 +334,22 @@ function checksum(value: string): string {
 
 function abortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
+}
+
+function withAbort<Value>(operation: Promise<Value>, signal: AbortSignal): Promise<Value> {
+  if (signal.aborted) return Promise.reject(abortReason(signal))
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => reject(abortReason(signal))
+    signal.addEventListener('abort', onAbort, { once: true })
+    void operation.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      },
+    )
+  })
 }

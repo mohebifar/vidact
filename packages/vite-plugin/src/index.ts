@@ -162,13 +162,20 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       const actionsEnabled = configuration.features.includes('actions')
       const concurrentEnabled = configuration.features.includes('concurrent')
       const frameworkEnabled = configuration.features.includes('framework')
-      if (id === REACT_DOM_SERVER_MODULE || id === REACT_DOM_STATIC_MODULE) {
-        if (!frameworkEnabled || configuration.target !== 'server') {
-          return `throw new Error("${id === REACT_DOM_SERVER_MODULE ? 'react-dom/server' : 'react-dom/static'} requires the server target and framework feature")`
+      if (id === REACT_DOM_SERVER_MODULE) {
+        if (configuration.target !== 'server') {
+          return 'throw new Error("react-dom/server requires the server target")'
         }
-        return id === REACT_DOM_SERVER_MODULE
-          ? 'export { renderToPipeableStream, renderToReadableStream, resume, resumeToPipeableStream } from "@vidact/runtime/framework/server"'
-          : 'export { prerender, prerenderToNodeStream } from "@vidact/runtime/framework/server"'
+        const core = `export { renderToStaticMarkup, renderToString } from "${serverRuntimeEntry(configuration.features.includes('async'), concurrentEnabled, actionsEnabled)}"`
+        return frameworkEnabled
+          ? `${core}\nexport { renderToPipeableStream, renderToReadableStream, resume, resumeToPipeableStream } from "@vidact/runtime/framework/server"`
+          : core
+      }
+      if (id === REACT_DOM_STATIC_MODULE) {
+        if (!frameworkEnabled || configuration.target !== 'server') {
+          return 'throw new Error("react-dom/static requires the server target and framework feature")'
+        }
+        return 'export { prerender, prerenderToNodeStream } from "@vidact/runtime/framework/server"'
       }
       if (id !== REACT_DOM_MODULE) return null
       const core =

@@ -8,18 +8,18 @@ import { build } from 'vite'
 const directory = path.dirname(fileURLToPath(import.meta.url))
 const repository = path.resolve(directory, '../..')
 const fixtures = [
-  { name: 'counter', entry: path.join(directory, 'fixtures/counter.tsx'), gzipBudget: 8_104 },
+  { name: 'counter', entry: path.join(directory, 'fixtures/counter.tsx'), gzipBudget: 6_815 },
   {
     name: 'async-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['async'],
-    gzipBudget: 8_104,
+    gzipBudget: 6_815,
   },
   {
     name: 'concurrent-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['concurrent'],
-    gzipBudget: 8_200,
+    gzipBudget: 6_900,
   },
   {
     name: 'concurrent',
@@ -31,7 +31,7 @@ const fixtures = [
     name: 'actions-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['actions'],
-    gzipBudget: 8_104,
+    gzipBudget: 6_815,
   },
   {
     name: 'actions',
@@ -43,7 +43,7 @@ const fixtures = [
     name: 'retained-ui-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['retained-ui'],
-    gzipBudget: 8_104,
+    gzipBudget: 6_815,
   },
   {
     name: 'retained-ui',
@@ -55,7 +55,7 @@ const fixtures = [
     name: 'profiling-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['profiling'],
-    gzipBudget: 8_104,
+    gzipBudget: 6_815,
   },
   {
     name: 'profiling',
@@ -67,7 +67,7 @@ const fixtures = [
     name: 'framework-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['framework'],
-    gzipBudget: 8_104,
+    gzipBudget: 6_815,
   },
   {
     name: 'framework',
@@ -79,6 +79,17 @@ const fixtures = [
     name: 'control-flow',
     entry: path.join(directory, 'fixtures/control-flow.tsx'),
     gzipBudget: 8_526,
+  },
+  { name: 'dom-form', entry: path.join(directory, 'fixtures/dom-form.tsx'), gzipBudget: 8_500 },
+  {
+    name: 'dom-namespace',
+    entry: path.join(directory, 'fixtures/dom-namespace.tsx'),
+    gzipBudget: 8_500,
+  },
+  {
+    name: 'dom-style',
+    entry: path.join(directory, 'fixtures/dom-style.tsx'),
+    gzipBudget: 8_500,
   },
   {
     name: 'keyed-list',
@@ -143,6 +154,28 @@ if (
     'enabling an unused async, concurrent, Actions, retained UI, profiling, or framework family changed the counter artifact',
   )
 }
+const unusedCounterCapabilities = [
+  '/dom/forms.js',
+  '/dom/namespace.js',
+  '/dom/styles.js',
+  '/dom-forms.js',
+  '/dom-styles.js',
+  '/keyed-list.js',
+  '/metadata.js',
+  '/profiling.js',
+  '/raw-html.js',
+  '/ref.js',
+]
+for (const suffix of unusedCounterCapabilities) {
+  if (counter?.modules.some((module) => module.id.endsWith(suffix))) {
+    regressions.push(`counter retained unused capability module ${suffix}`)
+  }
+}
+assertCapabilityModule('dom-form', '/dom/forms.js')
+assertCapabilityModule('dom-form', '/dom-forms.js')
+assertCapabilityModule('dom-namespace', '/dom/namespace.js')
+assertCapabilityModule('dom-style', '/dom/styles.js')
+assertCapabilityModule('dom-style', '/dom-styles.js')
 if (
   frameworkUnused?.modules.some((module) => module.id.endsWith('packages/runtime/dist/metadata.js'))
 ) {
@@ -150,6 +183,13 @@ if (
 }
 if (regressions.length > 0) {
   throw new Error(`gzip budget exceeded:\n${regressions.join('\n')}`)
+}
+
+function assertCapabilityModule(fixtureName, suffix) {
+  const fixture = measurements.find((measurement) => measurement.fixture === fixtureName)
+  if (!fixture?.modules.some((module) => module.id.endsWith(suffix))) {
+    regressions.push(`${fixtureName} did not retain required capability module ${suffix}`)
+  }
 }
 
 async function measureFixture(fixture) {

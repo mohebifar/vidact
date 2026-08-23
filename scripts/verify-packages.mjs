@@ -92,6 +92,9 @@ import { flushSync, startTransition } from '@vidact/runtime/concurrent'
 import { createCompiledActionState, useActionState } from '@vidact/runtime/actions'
 import { Suspense as AsyncActionsSuspense } from '@vidact/runtime/async/actions'
 import { renderToStaticMarkup as renderActionsToStaticMarkup } from '@vidact/runtime/actions/server'
+import { enableDomForms } from '@vidact/runtime/dom/forms'
+import { enableDomNamespace } from '@vidact/runtime/dom/namespace'
+import { enableDomStyles } from '@vidact/runtime/dom/styles'
 import { renderToStaticMarkup } from '@vidact/runtime/server'
 import { act } from '@vidact/test-support'
 import { vidact } from '@vidact/vite'
@@ -109,6 +112,9 @@ void startTransition
 void createCompiledActionState
 void useActionState
 void AsyncActionsSuspense
+void enableDomForms()
+void enableDomNamespace()
+void enableDomStyles()
 void act
 void vidact()
 if (renderToStaticMarkup(() => 'ready') !== 'ready') throw new Error('server entry failed')
@@ -123,6 +129,9 @@ import { flushSync, startTransition } from '@vidact/runtime/concurrent'
 import { createCompiledActionState, useActionState } from '@vidact/runtime/actions'
 import { Suspense as AsyncActionsSuspense } from '@vidact/runtime/async/actions'
 import { renderToStaticMarkup as renderActionsToStaticMarkup } from '@vidact/runtime/actions/server'
+import { enableDomForms } from '@vidact/runtime/dom/forms'
+import { enableDomNamespace } from '@vidact/runtime/dom/namespace'
+import { enableDomStyles } from '@vidact/runtime/dom/styles'
 import { renderToStaticMarkup } from '@vidact/runtime/server'
 import { act } from '@vidact/test-support'
 import { vidact } from '@vidact/vite'
@@ -132,6 +141,9 @@ if (renderToStaticMarkup(() => 'ready') !== 'ready') throw new Error('server ent
 if ([Suspense, createResource, lazy].some((value) => typeof value !== 'function')) throw new Error('async entry failed')
 if ([flushSync, startTransition].some((value) => typeof value !== 'function')) throw new Error('concurrent entry failed')
 if ([createCompiledActionState, useActionState, AsyncActionsSuspense].some((value) => typeof value !== 'function')) throw new Error('Actions entry failed')
+enableDomForms()
+enableDomNamespace()
+enableDomStyles()
 if (renderActionsToStaticMarkup(() => 'ready') !== 'ready') throw new Error('Actions server entry failed')
 if (typeof act !== 'function' || typeof vidact !== 'function') throw new Error('package entry failed')
 `,

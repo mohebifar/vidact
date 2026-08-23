@@ -4,7 +4,7 @@ import {
   mountCompiledProp,
   type CompiledBinding,
 } from './compiled.ts'
-import { INTERNAL_COMPONENT_SPREAD_PROP } from './dom/namespace.ts'
+import { INTERNAL_COMPONENT_SPREAD_PROP } from './dom/intrinsic.ts'
 
 type Props = Record<string, unknown>
 type ComponentSpreadDirective = (props: Props) => Props

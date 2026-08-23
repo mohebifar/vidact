@@ -42,6 +42,7 @@ export interface ServerFrameworkRenderContext {
   readonly pending: Set<PromiseLike<unknown>>
   readonly cache: Map<Function, FrameworkCacheEntry[]>
   readonly head: Map<string, { readonly html: string; readonly precedence: string }>
+  readonly stylePrecedence: string[]
   sawHead: boolean
 }
 
@@ -113,6 +114,7 @@ const BOOLEAN_ATTRIBUTES = new Set([
   'formNoValidate',
   'hidden',
   'inert',
+  'itemScope',
   'loop',
   'multiple',
   'muted',
@@ -164,6 +166,11 @@ const ATTRIBUTE_ALIASES: Readonly<Record<string, string>> = {
   formAction: 'formaction',
   htmlFor: 'for',
   httpEquiv: 'http-equiv',
+  itemID: 'itemid',
+  itemProp: 'itemprop',
+  itemRef: 'itemref',
+  itemScope: 'itemscope',
+  itemType: 'itemtype',
 }
 
 const VALID_ATTRIBUTE_NAME = /^[A-Za-z_:][A-Za-z0-9:._-]*$/
@@ -188,6 +195,7 @@ export function createServerFrameworkRenderContext(
     pending: new Set(),
     cache: new Map(),
     head: new Map(),
+    stylePrecedence: [],
     sawHead: false,
   }
 }
@@ -284,14 +292,14 @@ export function preinit(href: string, options: PreinitOptions): void {
     registerHeadEntry(
       `style:${href}`,
       `<link rel="stylesheet" href="${escapeAttribute(href)}"${serializeHintOptions(options)}>`,
-      options.precedence ?? 'default',
+      `2:${options.precedence ?? 'default'}`,
     )
     return
   }
   registerHeadEntry(
     `script:${href}`,
     `<script src="${escapeAttribute(href)}"${serializeHintOptions(options)}></script>`,
-    'script',
+    '3:script',
   )
 }
 
@@ -299,7 +307,7 @@ export function preinitModule(href: string, options: ResourceHintOptions = {}): 
   registerHeadEntry(
     `module:${href}`,
     `<script type="module" src="${escapeAttribute(href)}"${serializeHintOptions(options)}></script>`,
-    'module',
+    '3:script',
   )
 }
 
@@ -814,7 +822,7 @@ function serializeAttribute(name: string, value: unknown): string {
   if (name.startsWith('data-') || name.startsWith('aria-')) {
     return ` ${normalizedName}="${escapeAttribute(String(value))}"`
   }
-  if (BOOLEAN_ATTRIBUTES.has(normalizedName)) return value ? ` ${normalizedName}=""` : ''
+  if (BOOLEAN_ATTRIBUTES.has(name)) return value ? ` ${normalizedName}=""` : ''
   if (typeof value === 'boolean') return ''
   if (!VALID_ATTRIBUTE_NAME.test(normalizedName)) return ''
   return ` ${normalizedName}="${escapeAttribute(String(value))}"`
@@ -826,6 +834,7 @@ function beginFrameworkRenderPass(): void {
   if (framework.signal.aborted) throw frameworkAbortReason(framework.signal)
   framework.pending.clear()
   framework.head.clear()
+  framework.stylePrecedence.length = 0
   framework.sawHead = false
 }
 
@@ -833,10 +842,7 @@ function finalizeFrameworkHtml(html: string): string {
   const framework = activeFrameworkRender
   if (framework === undefined) return html
   const head = [...framework.head.entries()]
-    .toSorted(
-      ([leftKey, left], [rightKey, right]) =>
-        left.precedence.localeCompare(right.precedence) || leftKey.localeCompare(rightKey),
-    )
+    .toSorted(([, left], [, right]) => compareHeadPrecedence(framework, left, right))
     .map(([, entry]) => entry.html)
     .join('')
   if (framework.sawHead) return html.replace(FRAMEWORK_HEAD_PLACEHOLDER, head)
@@ -852,9 +858,21 @@ function finalizeFrameworkHtml(html: string): string {
 }
 
 function isHoistableHeadElement(type: string, props: ServerProps): boolean {
-  if (type === 'title' || type === 'meta' || type === 'link') return true
-  if (type === 'style') return typeof props?.precedence === 'string'
+  if (type === 'title' || type === 'meta') return !hasOwnProp(props, 'itemProp')
+  if (type === 'link') {
+    if (['itemProp', 'onLoad', 'onError', 'disabled'].some((name) => hasOwnProp(props, name))) {
+      return false
+    }
+    return props?.rel !== 'stylesheet' || typeof props.precedence === 'string'
+  }
+  if (type === 'style') {
+    return typeof props?.href === 'string' && typeof props.precedence === 'string'
+  }
   return type === 'script' && props?.async === true && typeof props.src === 'string'
+}
+
+function hasOwnProp(props: ServerProps, name: string): boolean {
+  return props !== null && Object.hasOwn(props, name)
 }
 
 function metadataKey(type: string, props: ServerProps): string {
@@ -868,7 +886,7 @@ function metadataKey(type: string, props: ServerProps): string {
   if (type === 'link') {
     return `link:${String(props?.rel ?? '')}:${String(props?.href ?? '')}:${String(props?.as ?? '')}`
   }
-  if (type === 'style') return `style-inline:${String(props?.href ?? props?.children ?? '')}`
+  if (type === 'style') return `style:${String(props?.href ?? '')}`
   if (type === 'script') return `script:${String(props?.src ?? '')}`
   return `${type}:${JSON.stringify(props)}`
 }
@@ -898,7 +916,30 @@ function registerResourceHint(
 }
 
 function registerHeadEntry(key: string, html: string, precedence: string): void {
-  activeFrameworkRender?.head.set(key, { html, precedence })
+  const framework = activeFrameworkRender
+  if (framework === undefined) return
+  if (precedence.startsWith('2:')) {
+    const stylePrecedence = precedence.slice(2)
+    if (!framework.stylePrecedence.includes(stylePrecedence)) {
+      framework.stylePrecedence.push(stylePrecedence)
+    }
+  }
+  framework.head.set(key, { html, precedence })
+}
+
+function compareHeadPrecedence(
+  framework: ServerFrameworkRenderContext,
+  left: { readonly precedence: string },
+  right: { readonly precedence: string },
+): number {
+  const leftRank = Number(left.precedence[0])
+  const rightRank = Number(right.precedence[0])
+  if (leftRank !== rightRank) return leftRank - rightRank
+  if (leftRank !== 2) return 0
+  return (
+    framework.stylePrecedence.indexOf(left.precedence.slice(2)) -
+    framework.stylePrecedence.indexOf(right.precedence.slice(2))
+  )
 }
 
 function serializeHintOptions(

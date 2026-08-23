@@ -56,6 +56,18 @@
       "types": "./dist/hydrate.d.ts",
       "import": "./dist/hydrate.js"
     },
+    "./dom/forms": {
+      "types": "./dist/dom-forms.d.ts",
+      "import": "./dist/dom-forms.js"
+    },
+    "./dom/namespace": {
+      "types": "./dist/dom/namespace.d.ts",
+      "import": "./dist/dom/namespace.js"
+    },
+    "./dom/styles": {
+      "types": "./dist/dom-styles.d.ts",
+      "import": "./dist/dom-styles.js"
+    },
     "./retained-ui": {
       "types": "./dist/retained-ui.d.ts",
       "import": "./dist/retained-ui.js"

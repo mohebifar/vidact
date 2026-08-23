@@ -7,7 +7,7 @@ import {
   createCompiledState,
 } from '../../src/compiled.ts'
 import { Fragment, h } from '../../src/direct-dom.ts'
-import { createEventReplayQueue } from '../../src/framework-hydrate.ts'
+import { createEventReplayQueue, hydrateFrameworkBoundary } from '../../src/framework-hydrate.ts'
 import {
   preconnect,
   prefetchDNS,
@@ -75,6 +75,27 @@ describe('framework browser helpers', () => {
     expect(queue.size()).toBe(0)
   })
 
+  it('disposes event replay capture when boundary hydration fails', () => {
+    const host = document.createElement('div')
+    host.innerHTML = '<button>submit</button>'
+    document.body.append(host)
+    const button = host.querySelector('button')!
+    const queue = createEventReplayQueue(host)
+
+    expect(() =>
+      hydrateFrameworkBoundary(
+        host,
+        () => {
+          throw new Error('hydrate application failed')
+        },
+        { replay: queue },
+      ),
+    ).toThrow('hydrate application failed')
+
+    button.click()
+    expect(queue.size()).toBe(0)
+  })
+
   it('hoists reactive metadata with last-owner precedence and restores it on disposal', () => {
     enableFrameworkMetadata()
     const originalTitle = document.title
@@ -112,5 +133,90 @@ describe('framework browser helpers', () => {
     expect(document.title).toBe('FIRST')
     first.dispose()
     expect(document.title).toBe(originalTitle)
+  })
+
+  it('leaves item metadata and manually managed links in place', () => {
+    enableFrameworkMetadata()
+    const host = document.createElement('div')
+    const root = mountCompiled(() => {
+      const scope = createCompiledScope()
+      return compiledRoot(scope, () =>
+        h(
+          Fragment,
+          null,
+          h('title', { itemProp: 'name' }, 'item title'),
+          h('meta', { itemProp: 'description', content: 'item description' }),
+          h('link', { itemProp: 'author', href: '/author' }),
+          h('link', { rel: 'stylesheet', href: '/manual.css' }),
+          h('link', { rel: 'icon', href: '/managed.ico', onLoad: () => undefined }),
+        ),
+      )
+    }, host)
+
+    expect(host.querySelector('title[itemprop="name"]')?.textContent).toBe('item title')
+    expect(host.querySelector('meta[itemprop="description"]')).not.toBeNull()
+    expect(host.querySelector('link[itemprop="author"]')).not.toBeNull()
+    expect(host.querySelector('link[href="/manual.css"]')).not.toBeNull()
+    expect(host.querySelector('link[href="/managed.ico"]')).not.toBeNull()
+    root.dispose()
+  })
+
+  it('orders stylesheet precedence by first discovery instead of lexical value', () => {
+    enableFrameworkMetadata()
+    const host = document.createElement('div')
+    const root = mountCompiled(() => {
+      const scope = createCompiledScope()
+      return compiledRoot(scope, () =>
+        h(
+          Fragment,
+          null,
+          h('link', { rel: 'stylesheet', href: '/first.css', precedence: 'z-first' }),
+          h('link', { rel: 'stylesheet', href: '/second.css', precedence: 'a-second' }),
+        ),
+      )
+    }, host)
+
+    expect(
+      [...document.head.querySelectorAll('link[rel="stylesheet"]')]
+        .filter((link) => {
+          const href = link.getAttribute('href') ?? ''
+          return href.endsWith('/first.css') || href.endsWith('/second.css')
+        })
+        .map((link) => link.getAttribute('href')),
+    ).toEqual(['/first.css', '/second.css'])
+    root.dispose()
+  })
+
+  it('rekeys reactive metadata identity props before another owner claims the old key', () => {
+    enableFrameworkMetadata()
+    const nameSource = source(0)
+    let setName!: (value: string) => void
+    const firstHost = document.createElement('div')
+    const first = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const name = createCompiledState(scope, nameSource, 'old-key')
+      setName = name.set
+      return compiledRoot(scope, () =>
+        h('meta', { name: binding(scope, nameSource, name.get), content: 'first' }),
+      )
+    }, firstHost)
+
+    setName('new-key')
+    const secondHost = document.createElement('div')
+    const second = mountCompiled(() => {
+      const scope = createCompiledScope()
+      return compiledRoot(scope, () => h('meta', { name: 'old-key', content: 'second' }))
+    }, secondHost)
+
+    expect(document.head.querySelector('meta[name="new-key"]')?.getAttribute('content')).toBe(
+      'first',
+    )
+    expect(document.head.querySelector('meta[name="old-key"]')?.getAttribute('content')).toBe(
+      'second',
+    )
+    second.dispose()
+    expect(document.head.querySelector('meta[name="old-key"]')).toBeNull()
+    expect(document.head.querySelector('meta[name="new-key"]')).not.toBeNull()
+    first.dispose()
   })
 })

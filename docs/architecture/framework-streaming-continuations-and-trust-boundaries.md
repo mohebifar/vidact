@@ -32,9 +32,12 @@ at their call site when the feature is disabled.
 
 Framework renders own one request-local cache, abort signal, pending-resource
 set, and head registry. `cache` memoizes by function plus argument identity for
-that request; `cacheSignal` exposes its lifetime signal. A render retries the
-same request context until all registered resources settle or a bounded
-stabilization limit is reached.
+that request; `cacheSignal` exposes its lifetime signal while synchronous
+render/cache evaluation is on the server stack. A cached async operation that
+needs the signal after an `await` must capture it before suspending. The shared
+Web/Node entry does not assume a host-specific async-context API. A render
+retries the same request context until all registered resources settle or a
+bounded stabilization limit is reached.
 
 `renderToReadableStream` and `renderToPipeableStream` expose chunking,
 cancellation, error callbacks, and destination backpressure. They deliberately
@@ -55,8 +58,10 @@ manifest. Server Functions use opaque identifiers and an application-created
 registry; invocation can reach only identifiers explicitly registered in that
 registry. The serializer supports a closed JSON-compatible value model,
 preserves tag-shaped user objects without ambiguity, rejects cycles and unsafe
-object keys, and carries an explicit framework protocol plus corruption
-checksum.
+object keys, bounds envelope/body size and traversal depth/node count, and
+carries an explicit framework protocol plus corruption checksum. Pending Server
+Function invocations race their request abort signal and remove abort listeners
+after settlement.
 
 The checksum is not a message authentication code. Applications and frameworks
 remain responsible for authenticated transport, authorization, CSRF and origin
@@ -73,8 +78,8 @@ Resource hints and eligible metadata are coordinated by the framework entry.
 Server renders deduplicate and order head entries. Client metadata has logical
 owner cleanup, last-owner precedence, reactive replacement, and restoration of
 an existing unmanaged baseline. The compiler activates client metadata support
-only for eligible HTML `title`, `meta`, `link`, precedence-bearing `style`, and
-async external `script` JSX. SVG titles do not activate it. Enabling an unused
+only for eligible HTML `title`, `meta`, `link`, `style` with stable `href` and
+`precedence`, and async external `script` JSX. SVG titles do not activate it. Enabling an unused
 framework feature therefore retains the exact default client artifact.
 
 ## Compiler and runtime contract

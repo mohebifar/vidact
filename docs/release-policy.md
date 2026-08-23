@@ -20,8 +20,9 @@ the workspace lockfile.
 
 ## Release gates
 
-Before publishing, maintainers run `pnpm check`, the runtime-size gate, and the
-clean tarball consumer test. The package build emits ESM, declarations,
+Before publishing, maintainers run `pnpm check`, which includes the runtime-size,
+compiler cold/incremental performance, runtime throughput/allocation/retention,
+and clean tarball consumer gates. The package build emits ESM, declarations,
 declaration maps, and source maps; the smoke test installs the exact tarballs
 outside the workspace and verifies runtime, server, test, Vite, and TSX type
 entry points.

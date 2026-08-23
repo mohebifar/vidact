@@ -16,11 +16,6 @@ import {
 } from './compiled.ts'
 import { attachEventProp, isEventProp } from './dom/events.ts'
 import {
-  ensureControlledFormRestoration,
-  isControlledFormProp,
-  restoreControlledFormState,
-} from './dom/forms.ts'
-import {
   INTERNAL_NAMESPACE_PROP,
   createComponentProps,
   createIntrinsicElement,
@@ -28,8 +23,13 @@ import {
   readIntrinsicNamespace,
   resolveIntrinsicNamespace,
   withIntrinsicNamespace,
-} from './dom/namespace.ts'
-import { applyDomProp } from './dom/properties.ts'
+} from './dom/intrinsic.ts'
+import {
+  applyDomProp,
+  ensureControlledFormRestoration,
+  isControlledFormProp,
+  restoreControlledFormState,
+} from './dom/properties.ts'
 import {
   claimHydrationElement,
   claimHydrationArrayRange,
@@ -60,10 +60,12 @@ export type DirectProps = Record<string, unknown> | null
 export type DirectComponent = (props: Record<string, unknown>) => CompiledRenderValue
 
 export const Fragment = Symbol(DEV ? 'Vidact.Fragment' : undefined)
-let frameworkMetadataHandler: ((element: Element) => Node) | undefined
+let frameworkMetadataHandler: ((element: Element, props: DirectProps) => Node) | undefined
 
 /** @internal */
-export function installFrameworkMetadata(handler: (element: Element) => Node): void {
+export function installFrameworkMetadata(
+  handler: (element: Element, props: DirectProps) => Node,
+): void {
   frameworkMetadataHandler = handler
 }
 
@@ -128,7 +130,7 @@ export function h(
   )
   if (restoreAfterChildren) restoreControlledFormState(element)
   if (frameworkMetadataHandler !== undefined && namespace === 'html') {
-    return frameworkMetadataHandler(element)
+    return frameworkMetadataHandler(element, props)
   }
   return element
 }
