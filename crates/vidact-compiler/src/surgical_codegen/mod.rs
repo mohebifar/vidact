@@ -45,12 +45,14 @@ const COMPILED_ROOT: &str = "__vidactCompiledRoot";
 const CHOOSE: &str = "__vidactChoose";
 const CREATE_PROP: &str = "__vidactCreateProp";
 const CREATE_SCOPE: &str = "__vidactCreateScope";
+const CREATE_NARROW_SCOPE: &str = "__vidactCreateNarrowScope";
 const CREATE_STATE: &str = "__vidactCreateState";
 const DISPATCH: &str = "__vidactDispatch";
 const INDEXED: &str = "__vidactIndexed";
 const KEYED: &str = "__vidactKeyed";
 const ITEM_INDEX: &str = "__vidactItemIndex";
 const ITEM_SCOPE: &str = "__vidactItemScope";
+const NARROW_SOURCE_BITS: u32 = 32;
 const SOURCE: &str = "__vidactSource";
 const WHEN: &str = "__vidactWhen";
 
@@ -121,6 +123,7 @@ fn transform_program<'a>(
         CHOOSE,
         CREATE_PROP,
         CREATE_SCOPE,
+        CREATE_NARROW_SCOPE,
         CREATE_STATE,
         DISPATCH,
         INDEXED,
@@ -376,11 +379,16 @@ fn transform_component<'a>(
     }
 
     let mut inserted = oxc_allocator::Vec::new_in(&ast);
-    inserted.push(scope_statement(&ast));
+    inserted.push(scope_statement(
+        &ast,
+        ir.sources
+            .iter()
+            .all(|source| source.id.get() < NARROW_SOURCE_BITS),
+    ));
     inserted.extend(prop_bindings.iter().map(|prop| {
         let mut arguments = vec![
             ident(&ast, SCOPE),
-            call_name(&ast, SOURCE, [number(&ast, prop.source.get())]),
+            mask(&ast, &[prop.source]),
             ident(&ast, &prop.name),
         ];
         if let Some(default) = &prop.default {
@@ -609,11 +617,7 @@ fn transform_state_declarator<'a>(
     declarator.init = Some(call_name(
         ast,
         CREATE_STATE,
-        [
-            ident(ast, SCOPE),
-            call_name(ast, SOURCE, [number(ast, value_source.get())]),
-            initial,
-        ],
+        [ident(ast, SCOPE), mask(ast, &[value_source]), initial],
     ));
     Ok(())
 }
@@ -1408,18 +1412,18 @@ fn register_derived<'a>(
         ),
         ast,
     );
-    let run = arrow_block(ast, [], [assignment]);
-    let updater = object(
-        ast,
-        [
-            ("reads", mask(ast, reads)),
-            ("writes", mask(ast, writes)),
-            ("run", run),
-        ],
-    );
     Statement::new_expression_statement(
         SPAN,
-        call_member(ast, ident(ast, SCOPE), "add", [updater]),
+        call_index(
+            ast,
+            ident(ast, SCOPE),
+            0,
+            [
+                mask(ast, reads),
+                arrow_block(ast, [], [assignment]),
+                mask(ast, writes),
+            ],
+        ),
         ast,
     )
 }
@@ -1430,27 +1434,36 @@ fn register_derived_statements<'a>(
     reads: &[SourceId],
     writes: &[SourceId],
 ) -> Statement<'a> {
-    let updater = object(
-        ast,
-        [
-            ("reads", mask(ast, reads)),
-            ("writes", mask(ast, writes)),
-            ("run", arrow_block(ast, [], statements)),
-        ],
-    );
     Statement::new_expression_statement(
         SPAN,
-        call_member(ast, ident(ast, SCOPE), "add", [updater]),
+        call_index(
+            ast,
+            ident(ast, SCOPE),
+            0,
+            [
+                mask(ast, reads),
+                arrow_block(ast, [], statements),
+                mask(ast, writes),
+            ],
+        ),
         ast,
     )
 }
 
-fn scope_statement<'a>(ast: &AstBuilder<'a>) -> Statement<'a> {
+fn scope_statement<'a>(ast: &AstBuilder<'a>, narrow: bool) -> Statement<'a> {
     variable_statement(
         ast,
         VariableDeclarationKind::Const,
         SCOPE,
-        call_name(ast, CREATE_SCOPE, []),
+        call_name(
+            ast,
+            if narrow {
+                CREATE_NARROW_SCOPE
+            } else {
+                CREATE_SCOPE
+            },
+            [],
+        ),
     )
 }
 
@@ -1463,6 +1476,7 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>, program: &Program<'a>) -> Statement<
         ("choose", CHOOSE),
         ("createCompiledProp", CREATE_PROP),
         ("createCompiledScope", CREATE_SCOPE),
+        ("createNarrowCompiledScope", CREATE_NARROW_SCOPE),
         ("createCompiledState", CREATE_STATE),
         ("dispatch", DISPATCH),
         ("indexed", INDEXED),

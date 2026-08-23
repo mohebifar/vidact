@@ -250,11 +250,8 @@ describe('compiled DOM corpus', () => {
       const scope = createCompiledScope()
       const first = createCompiledState(scope, firstSource, 0)
       const second = createCompiledState(scope, secondSource, 0)
-      scope.add({
-        reads: combineSources(firstSource, secondSource),
-        run: () => {
-          updaterRuns += 1
-        },
+      scope[0](combineSources(firstSource, secondSource), () => {
+        updaterRuns += 1
       })
       return compiledRoot(scope, () =>
         h(
@@ -282,19 +279,13 @@ describe('compiled DOM corpus', () => {
     const secondScope = createCompiledScope()
     const first = createCompiledState(firstScope, valueSource, 0)
     const second = createCompiledState(secondScope, valueSource, 0)
-    firstScope.add({
-      reads: valueSource,
-      run: () => second.set(second.get() + 1),
-    })
-    secondScope.add({
-      reads: valueSource,
-      run: () => first.set(first.get() + 1),
-    })
+    firstScope[0](valueSource, () => second.set(second.get() + 1))
+    secondScope[0](valueSource, () => first.set(first.get() + 1))
 
     expect(() => first.set(1)).toThrow(/did not stabilize/i)
 
-    firstScope.dispose()
-    secondScope.dispose()
+    firstScope[3]()
+    secondScope[3]()
   })
 
   it('updates same-key records through item slots without replacing their DOM', async () => {
@@ -437,9 +428,9 @@ describe('compiled DOM corpus', () => {
       (item) => item.id,
       (item) => h('li', null, item.get().label),
     )
-    duplicate.mount(duplicateHost, null)
-    expect(() => duplicate.mount(duplicateHost, null)).toThrow(/already mounted/i)
-    scope.dispose()
+    duplicate[1](duplicateHost, null)
+    expect(() => duplicate[1](duplicateHost, null)).toThrow(/already mounted/i)
+    scope[3]()
 
     mounted.dispose()
   })
@@ -470,11 +461,8 @@ describe('compiled DOM corpus', () => {
             (item, _index, itemScope) => {
               if (item.get().id === 1) {
                 removedItem = item
-                itemScope.add({
-                  reads: itemSource,
-                  run: () => {
-                    removedUpdaterRuns += 1
-                  },
+                itemScope[0](itemSource, () => {
+                  removedUpdaterRuns += 1
                 })
               }
               return h(
@@ -508,11 +496,8 @@ describe('compiled DOM corpus', () => {
     const Child: DirectComponent = (props) => {
       const scope = createCompiledScope()
       const label = createCompiledProp(scope, childLabelSource, props.label)
-      scope.add({
-        reads: childLabelSource,
-        run: () => {
-          childUpdates += 1
-        },
+      scope[0](childLabelSource, () => {
+        childUpdates += 1
       })
       return compiledRoot(scope, () =>
         h(
@@ -627,11 +612,8 @@ describe('compiled DOM corpus', () => {
       const scope = createCompiledScope()
       const first = createCompiledProp(scope, firstChildSource, props.first)
       const second = createCompiledProp(scope, secondChildSource, props.second)
-      scope.add({
-        reads: combineSources(firstChildSource, secondChildSource),
-        run: () => {
-          observed.push(`${first.get()}:${second.get()}`)
-        },
+      scope[0](combineSources(firstChildSource, secondChildSource), () => {
+        observed.push(`${first.get()}:${second.get()}`)
       })
       return compiledRoot(scope, () =>
         h(
@@ -650,7 +632,7 @@ describe('compiled DOM corpus', () => {
       const first = createCompiledState(scope, firstParentSource, 'one')
       const second = createCompiledState(scope, secondParentSource, 'two')
       setBoth = (nextFirst, nextSecond) =>
-        scope.batch(() => {
+        scope[2](() => {
           first.set(nextFirst)
           second.set(nextSecond)
         })
@@ -680,11 +662,8 @@ describe('compiled DOM corpus', () => {
     const BrokenChild: DirectComponent = (props) => {
       const scope = createCompiledScope()
       createCompiledProp(scope, childLabelSource, props.label)
-      scope.add({
-        reads: childLabelSource,
-        run: () => {
-          leakedUpdates += 1
-        },
+      scope[0](childLabelSource, () => {
+        leakedUpdates += 1
       })
       return compiledRoot(scope, () => {
         throw new Error('child failed')

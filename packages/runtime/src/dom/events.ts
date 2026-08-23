@@ -1,9 +1,11 @@
-import { isReactFormChangeEvent } from './forms.ts'
+import { isReactFormChangeEvent, restoreControlledFormState } from './forms.ts'
+
+const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 
 export function attachEventProp(element: Element, name: string, value: unknown): () => void {
   if (value === null || value === undefined) return () => {}
   if (typeof value !== 'function') {
-    throw new TypeError(`event prop ${name} must be a function, null, or undefined`)
+    throw new TypeError(DEV ? `event prop ${name} must be a function, null, or undefined` : 'V201')
   }
 
   const reactEventName = name.slice(2)
@@ -18,6 +20,11 @@ export function attachEventProp(element: Element, name: string, value: unknown):
   }
 
   const eventName = nativeEventName(eventNameWithoutPhase)
+  if (eventName === 'input' || eventName === 'change') {
+    const dispatch = (event: Event): void => invokeFormListener(element, listener, event)
+    element.addEventListener(eventName, dispatch, capture)
+    return () => element.removeEventListener(eventName, dispatch, capture)
+  }
   element.addEventListener(eventName, listener, capture)
   return () => element.removeEventListener(eventName, listener, capture)
 }
@@ -35,13 +42,24 @@ function attachReactChangeEvent(
   const dispatch = (event: Event): void => {
     const target = event.target
     if (!(target instanceof Element) || !isReactFormChangeEvent(target, event.type)) return
-    listener(event)
+    invokeFormListener(element, listener, event)
   }
   element.addEventListener('input', dispatch, capture)
   element.addEventListener('change', dispatch, capture)
   return () => {
     element.removeEventListener('input', dispatch, capture)
     element.removeEventListener('change', dispatch, capture)
+  }
+}
+
+function invokeFormListener(element: Element, listener: EventListener, event: Event): void {
+  try {
+    listener(event)
+  } finally {
+    const target = event.target as Element
+    if (isReactFormChangeEvent(target, event.type) && (target === element || event.cancelBubble)) {
+      restoreControlledFormState(target)
+    }
   }
 }
 

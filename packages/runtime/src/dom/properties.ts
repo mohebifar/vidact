@@ -3,6 +3,8 @@ import { applyFormProp } from './forms.ts'
 import { MATHML_NAMESPACE, SVG_NAMESPACE } from './namespace.ts'
 import { applyStyleProp } from './styles.ts'
 
+const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
+
 const XLINK_NAMESPACE = 'http://www.w3.org/1999/xlink'
 const XML_NAMESPACE = 'http://www.w3.org/XML/1998/namespace'
 
@@ -45,86 +47,86 @@ const mathBooleanishStringAttributes = new Set([
 ])
 const svgBooleanishStringAttributes = new Set(['focusable', 'preserveAlpha'])
 
-const svgAttributeAliases = new Map([
-  ['accentHeight', 'accent-height'],
-  ['alignmentBaseline', 'alignment-baseline'],
-  ['arabicForm', 'arabic-form'],
-  ['baselineShift', 'baseline-shift'],
-  ['capHeight', 'cap-height'],
-  ['clipPath', 'clip-path'],
-  ['clipRule', 'clip-rule'],
-  ['colorInterpolation', 'color-interpolation'],
-  ['colorInterpolationFilters', 'color-interpolation-filters'],
-  ['colorProfile', 'color-profile'],
-  ['colorRendering', 'color-rendering'],
-  ['crossOrigin', 'crossorigin'],
-  ['dominantBaseline', 'dominant-baseline'],
-  ['enableBackground', 'enable-background'],
-  ['fillOpacity', 'fill-opacity'],
-  ['fillRule', 'fill-rule'],
-  ['floodColor', 'flood-color'],
-  ['floodOpacity', 'flood-opacity'],
-  ['fontFamily', 'font-family'],
-  ['fontSize', 'font-size'],
-  ['fontSizeAdjust', 'font-size-adjust'],
-  ['fontStretch', 'font-stretch'],
-  ['fontStyle', 'font-style'],
-  ['fontVariant', 'font-variant'],
-  ['fontWeight', 'font-weight'],
-  ['glyphName', 'glyph-name'],
-  ['glyphOrientationHorizontal', 'glyph-orientation-horizontal'],
-  ['glyphOrientationVertical', 'glyph-orientation-vertical'],
-  ['horizAdvX', 'horiz-adv-x'],
-  ['horizOriginX', 'horiz-origin-x'],
-  ['imageRendering', 'image-rendering'],
-  ['letterSpacing', 'letter-spacing'],
-  ['lightingColor', 'lighting-color'],
-  ['markerEnd', 'marker-end'],
-  ['markerMid', 'marker-mid'],
-  ['markerStart', 'marker-start'],
-  ['overlinePosition', 'overline-position'],
-  ['overlineThickness', 'overline-thickness'],
-  ['paintOrder', 'paint-order'],
-  ['pointerEvents', 'pointer-events'],
-  ['renderingIntent', 'rendering-intent'],
-  ['shapeRendering', 'shape-rendering'],
-  ['stopColor', 'stop-color'],
-  ['stopOpacity', 'stop-opacity'],
-  ['strikethroughPosition', 'strikethrough-position'],
-  ['strikethroughThickness', 'strikethrough-thickness'],
-  ['strokeDasharray', 'stroke-dasharray'],
-  ['strokeDashoffset', 'stroke-dashoffset'],
-  ['strokeLinecap', 'stroke-linecap'],
-  ['strokeLinejoin', 'stroke-linejoin'],
-  ['strokeMiterlimit', 'stroke-miterlimit'],
-  ['strokeOpacity', 'stroke-opacity'],
-  ['strokeWidth', 'stroke-width'],
-  ['textAnchor', 'text-anchor'],
-  ['textDecoration', 'text-decoration'],
-  ['textRendering', 'text-rendering'],
-  ['tabIndex', 'tabindex'],
-  ['transformOrigin', 'transform-origin'],
-  ['underlinePosition', 'underline-position'],
-  ['underlineThickness', 'underline-thickness'],
-  ['unicodeBidi', 'unicode-bidi'],
-  ['unicodeRange', 'unicode-range'],
-  ['unitsPerEm', 'units-per-em'],
-  ['vAlphabetic', 'v-alphabetic'],
-  ['vHanging', 'v-hanging'],
-  ['vIdeographic', 'v-ideographic'],
-  ['vMathematical', 'v-mathematical'],
-  ['vectorEffect', 'vector-effect'],
-  ['vertAdvY', 'vert-adv-y'],
-  ['vertOriginX', 'vert-origin-x'],
-  ['vertOriginY', 'vert-origin-y'],
-  ['wordSpacing', 'word-spacing'],
-  ['writingMode', 'writing-mode'],
-  ['xHeight', 'x-height'],
+const kebabCaseSvgAttributes = new Set([
+  'accentHeight',
+  'alignmentBaseline',
+  'arabicForm',
+  'baselineShift',
+  'capHeight',
+  'clipPath',
+  'clipRule',
+  'colorInterpolation',
+  'colorInterpolationFilters',
+  'colorProfile',
+  'colorRendering',
+  'dominantBaseline',
+  'enableBackground',
+  'fillOpacity',
+  'fillRule',
+  'floodColor',
+  'floodOpacity',
+  'fontFamily',
+  'fontSize',
+  'fontSizeAdjust',
+  'fontStretch',
+  'fontStyle',
+  'fontVariant',
+  'fontWeight',
+  'glyphName',
+  'glyphOrientationHorizontal',
+  'glyphOrientationVertical',
+  'horizAdvX',
+  'horizOriginX',
+  'imageRendering',
+  'letterSpacing',
+  'lightingColor',
+  'markerEnd',
+  'markerMid',
+  'markerStart',
+  'overlinePosition',
+  'overlineThickness',
+  'paintOrder',
+  'pointerEvents',
+  'renderingIntent',
+  'shapeRendering',
+  'stopColor',
+  'stopOpacity',
+  'strikethroughPosition',
+  'strikethroughThickness',
+  'strokeDasharray',
+  'strokeDashoffset',
+  'strokeLinecap',
+  'strokeLinejoin',
+  'strokeMiterlimit',
+  'strokeOpacity',
+  'strokeWidth',
+  'textAnchor',
+  'textDecoration',
+  'textRendering',
+  'transformOrigin',
+  'underlinePosition',
+  'underlineThickness',
+  'unicodeBidi',
+  'unicodeRange',
+  'unitsPerEm',
+  'vAlphabetic',
+  'vHanging',
+  'vIdeographic',
+  'vMathematical',
+  'vectorEffect',
+  'vertAdvY',
+  'vertOriginX',
+  'vertOriginY',
+  'wordSpacing',
+  'writingMode',
+  'xHeight',
 ])
 
 export function applyDomProp(element: Element, name: string, value: unknown): void {
   if (name === 'dangerouslySetInnerHTML') {
-    throw new Error('dangerouslySetInnerHTML must be handled as an owned opaque subtree')
+    throw new Error(
+      DEV ? 'dangerouslySetInnerHTML must be handled as an owned opaque subtree' : 'V401',
+    )
   }
   if (name === 'style') {
     applyStyleProp(element, value)
@@ -166,8 +168,9 @@ export function applyDomProp(element: Element, name: string, value: unknown): vo
     element.removeAttribute(attribute)
     return
   }
-  if (name in element) Reflect.set(element, name, value)
-  else element.setAttribute(attribute, value === true ? '' : String(value))
+  if (!(name in element && Reflect.set(element, name, value))) {
+    element.setAttribute(attribute, String(value))
+  }
   validateRawHtmlProp(element, name)
 }
 
@@ -220,8 +223,16 @@ function namespacedAttribute(name: string): {
     const localName = lowerInitial(name.slice(3))
     return { namespace: XML_NAMESPACE, qualifiedName: `xml:${localName}`, localName }
   }
-  const qualifiedName = name === 'className' ? 'class' : (svgAttributeAliases.get(name) ?? name)
+  const qualifiedName = svgAttributeName(name)
   return { namespace: null, qualifiedName, localName: qualifiedName }
+}
+
+function svgAttributeName(name: string): string {
+  if (name === 'className') return 'class'
+  if (name === 'crossOrigin') return 'crossorigin'
+  if (name === 'tabIndex') return 'tabindex'
+  if (!kebabCaseSvgAttributes.has(name)) return name
+  return name.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`)
 }
 
 function htmlAttributeName(name: string): string {

@@ -17,20 +17,17 @@ describe('compiled updater corpus', () => {
     const count = createCompiledState(scope, countSource, 0)
     let doubled = 0
 
-    scope.add({
-      reads: countSource,
-      writes: doubledSource,
-      run: () => {
+    scope[0](
+      countSource,
+      () => {
         doubled = count.get() * 2
         trace.push('derive')
       },
-    })
-    scope.add({
-      reads: doubledSource,
-      run: () => {
-        text.data = String(doubled)
-        trace.push('text')
-      },
+      doubledSource,
+    )
+    scope[0](doubledSource, () => {
+      text.data = String(doubled)
+      trace.push('text')
     })
 
     count.set(3)
@@ -47,15 +44,12 @@ describe('compiled updater corpus', () => {
     const last = createCompiledState(scope, lastSource, 'Lovelace')
     let runs = 0
     let fullName = ''
-    scope.add({
-      reads: combineSources(firstSource, lastSource),
-      run: () => {
-        runs += 1
-        fullName = `${first.get()} ${last.get()}`
-      },
+    scope[0](combineSources(firstSource, lastSource), () => {
+      runs += 1
+      fullName = `${first.get()} ${last.get()}`
     })
 
-    scope.batch(() => {
+    scope[2](() => {
       first.set('Grace')
       last.set('Hopper')
     })
@@ -69,11 +63,8 @@ describe('compiled updater corpus', () => {
     const scope = createCompiledScope()
     const value = createCompiledState(scope, wideSource, 0)
     let observed = 0
-    scope.add({
-      reads: wideSource,
-      run: () => {
-        observed = value.get()
-      },
+    scope[0](wideSource, () => {
+      observed = value.get()
     })
 
     value.set(42)
@@ -87,13 +78,10 @@ describe('compiled updater corpus', () => {
     const observed: number[] = []
     const scope = createCompiledScope()
     masks.forEach((reads, index) => {
-      scope.add({
-        reads,
-        run: () => observed.push(indexes[index]!),
-      })
+      scope[0](reads, () => observed.push(indexes[index]!))
     })
 
-    scope.invalidate(combineSources(masks[1]!, masks[3]!))
+    scope[1](combineSources(masks[1]!, masks[3]!))
 
     expect(observed).toEqual([32, 64])
   })
@@ -102,10 +90,7 @@ describe('compiled updater corpus', () => {
     const valueSource = source(0)
     const scope = createCompiledScope()
     const value = createCompiledState(scope, valueSource, 0)
-    scope.add({
-      reads: valueSource,
-      run: () => value.set((previous) => previous + 1),
-    })
+    scope[0](valueSource, () => value.set((previous) => previous + 1))
 
     expect(() => value.set(1)).toThrow(/did not stabilize/i)
   })

@@ -18,13 +18,13 @@ describe('keyed array corpus', () => {
         const node = document.createElement('span')
         node.dataset.key = String(todo.id)
         node.textContent = todo.label
-        return {
-          nodes: [node],
-          update: (next) => {
+        return [
+          [node],
+          (next) => {
             node.textContent = next.label
           },
-          dispose: () => disposed.push(todo.id),
-        }
+          () => disposed.push(todo.id),
+        ]
       },
     })
 
@@ -114,13 +114,14 @@ describe('keyed array corpus', () => {
     const disposed: number[] = []
     const list = createKeyedList<Todo, number>(host, {
       key: (todo) => todo.id,
-      render: (todo) => ({
-        nodes: [document.createTextNode(todo.label)],
-        dispose: () => {
+      render: (todo) => [
+        [document.createTextNode(todo.label)],
+        undefined,
+        () => {
           disposed.push(todo.id)
           if (todo.id === 1) throw new Error('cleanup failed')
         },
-      }),
+      ],
     })
     list.update([
       { id: 1, label: 'one' },

@@ -21,6 +21,7 @@ pub(super) fn annotate<'a>(
     let mut transformer = NamespaceTransformer {
         ast,
         context: NamespaceContext::Inherit,
+        inside_component_children: false,
         diagnostic: None,
     };
     transformer.visit_function_body(body);
@@ -30,6 +31,7 @@ pub(super) fn annotate<'a>(
 struct NamespaceTransformer<'a, 'b> {
     ast: &'b AstBuilder<'a>,
     context: NamespaceContext,
+    inside_component_children: bool,
     diagnostic: Option<Diagnostic>,
 }
 
@@ -49,6 +51,13 @@ impl<'a> VisitMut<'a> for NamespaceTransformer<'a, '_> {
 
         let tag = super::raw_html::intrinsic_jsx_name(&element.opening_element.name)
             .filter(|name| name.chars().next().is_some_and(char::is_lowercase));
+        let is_component = tag.is_none();
+        if self.inside_component_children && tag.is_some() {
+            self.diagnostic = Some(super::unsupported(
+                "JSX intrinsic children passed to a component require deferred namespace-aware construction",
+            ));
+            return;
+        }
         let element_context = element_context(self.context, tag);
         let children_context = child_context(element_context, tag);
         let has_spread = element
@@ -71,9 +80,12 @@ impl<'a> VisitMut<'a> for NamespaceTransformer<'a, '_> {
         }
 
         let previous = self.context;
+        let previous_inside_component_children = self.inside_component_children;
         self.context = children_context;
+        self.inside_component_children |= is_component && !element.children.is_empty();
         walk_jsx_element(self, element);
         self.context = previous;
+        self.inside_component_children = previous_inside_component_children;
     }
 }
 

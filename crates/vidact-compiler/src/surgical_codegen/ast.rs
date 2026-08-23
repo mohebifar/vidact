@@ -4,9 +4,21 @@ use oxc_span::SPAN;
 
 use crate::analysis::SourceId;
 
-use super::{COMBINE_SOURCES, SOURCE};
+use super::{COMBINE_SOURCES, NARROW_SOURCE_BITS, SOURCE};
 
 pub(super) fn mask<'a>(ast: &AstBuilder<'a>, sources: &[SourceId]) -> Expression<'a> {
+    if sources
+        .iter()
+        .all(|source| source.get() < NARROW_SOURCE_BITS)
+    {
+        return number(
+            ast,
+            sources
+                .iter()
+                .fold(0, |combined, source| combined | (1 << source.get())),
+        );
+    }
+
     let mut masks = sources
         .iter()
         .map(|source| call_name(ast, SOURCE, [number(ast, source.get())]));
@@ -39,16 +51,16 @@ pub(super) fn call_name<'a>(
     call(ast, ident(ast, name), arguments)
 }
 
-pub(super) fn call_member<'a>(
+pub(super) fn call_index<'a>(
     ast: &AstBuilder<'a>,
     object: Expression<'a>,
-    property: &str,
+    index: u32,
     arguments: impl IntoIterator<Item = Expression<'a>>,
 ) -> Expression<'a> {
-    let member = Expression::from(MemberExpression::new_static_member_expression(
+    let member = Expression::from(MemberExpression::new_computed_member_expression(
         SPAN,
         object,
-        IdentifierName::new(SPAN, atom(ast, property), ast),
+        number(ast, index),
         false,
         ast,
     ));
@@ -149,28 +161,6 @@ fn parameters<'a>(
         None,
         ast,
     )
-}
-
-pub(super) fn object<'a, 'n>(
-    ast: &AstBuilder<'a>,
-    properties: impl IntoIterator<Item = (&'n str, Expression<'a>)>,
-) -> Expression<'a> {
-    let properties = oxc_allocator::Vec::from_iter_in(
-        properties.into_iter().map(|(name, value)| {
-            ObjectPropertyKind::new_object_property(
-                SPAN,
-                PropertyKind::Init,
-                PropertyKey::new_static_identifier(SPAN, atom(ast, name), ast),
-                value,
-                false,
-                false,
-                false,
-                ast,
-            )
-        }),
-        ast,
-    );
-    Expression::new_object_expression(SPAN, properties, ast)
 }
 
 pub(super) fn variable_statement<'a>(

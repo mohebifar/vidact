@@ -1,10 +1,13 @@
 const BITS_PER_WORD = 32
+const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 
 export type SourceMask = number | Uint32Array
 
 export function source(index: number): SourceMask {
   if (!Number.isSafeInteger(index) || index < 0) {
-    throw new RangeError(`source index must be a non-negative safe integer, received ${index}`)
+    throw new RangeError(
+      DEV ? `source index must be a non-negative safe integer, received ${index}` : 'V701',
+    )
   }
 
   const word = Math.floor(index / BITS_PER_WORD)

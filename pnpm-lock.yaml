@@ -138,6 +138,24 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.3)(@vitest/browser-playwright@4.1.11)(vite@8.2.2(@types/node@24.13.3))
 
+  tests/runtime-size:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.13.3
+        version: 24.13.3
+      '@vidact/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+      '@vidact/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite-plugin
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vite:
+        specifier: 8.2.2
+        version: 8.2.2(@types/node@24.13.3)
+
 packages:
 
   '@ast-grep/cli-darwin-arm64@0.45.1':

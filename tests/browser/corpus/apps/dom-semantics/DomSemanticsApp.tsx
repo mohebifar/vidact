@@ -103,6 +103,12 @@ export function DomSemanticsApp(): JSX.Element {
       </label>
       <output data-controlled-output>{value}</output>
       <input data-controlled-restore value="locked" />
+      <input data-controlled-stop value="locked" onChange={(event) => event.stopPropagation()} />
+      <input
+        data-controlled-stop-immediate
+        onChange={(event) => event.stopImmediatePropagation()}
+        value="locked"
+      />
 
       <section
         data-change-ancestor
@@ -124,6 +130,10 @@ export function DomSemanticsApp(): JSX.Element {
       <output data-ancestor-output>{ancestorValue}</output>
       <output data-ancestor-trace>{ancestorTrace}</output>
 
+      <section onChangeCapture={(event) => event.stopPropagation()}>
+        <input data-controlled-capture-stop value="locked" />
+      </section>
+
       <textarea
         data-controlled-textarea
         value={notes}
@@ -132,6 +142,7 @@ export function DomSemanticsApp(): JSX.Element {
       <output data-textarea-output>{notes}</output>
 
       <form id="controlled-radio-form" data-controlled-radio-form />
+      <form id="other-radio-form" data-other-radio-form />
       <input
         data-controlled-radio-a
         form="controlled-radio-form"
@@ -147,6 +158,13 @@ export function DomSemanticsApp(): JSX.Element {
         name="controlled-choice"
         checked={radio === 'b'}
         onChange={() => setRadio('b')}
+      />
+      <input
+        data-other-radio
+        defaultChecked
+        form="other-radio-form"
+        type="radio"
+        name="controlled-choice"
       />
       <output data-radio-output>{radio}</output>
 

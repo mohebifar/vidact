@@ -7,11 +7,11 @@ describe('lifecycle corpus', () => {
     const valueSource = source(0)
     let runs = 0
     const scope = createCompiledScope()
-    scope.add({ reads: valueSource, run: () => runs++ })
+    scope[0](valueSource, () => runs++)
     const value = createCompiledState(scope, valueSource, 0)
 
     value.set(1)
-    scope.dispose()
+    scope[3]()
     value.set(2)
 
     expect(runs).toBe(1)

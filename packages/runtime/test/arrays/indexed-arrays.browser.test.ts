@@ -16,13 +16,13 @@ describe('indexed array corpus', () => {
         const node = document.createElement('span')
         node.dataset.id = row.id
         node.textContent = row.label
-        return {
-          nodes: [node],
-          update: (next) => {
+        return [
+          [node],
+          (next) => {
             node.dataset.id = next.id
             node.textContent = next.label
           },
-        }
+        ]
       },
     })
 
@@ -55,13 +55,13 @@ describe('indexed array corpus', () => {
       render: (row) => {
         const node = document.createElement('span')
         node.textContent = row.label
-        return {
-          nodes: [node],
-          update: (next) => {
+        return [
+          [node],
+          (next) => {
             node.textContent = next.label
           },
-          dispose: () => disposed.push(row.id),
-        }
+          () => disposed.push(row.id),
+        ]
       },
     })
     list.update([

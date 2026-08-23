@@ -8,7 +8,7 @@ fn turns_todomvc_into_one_time_construction_and_static_bindings() {
     })
     .expect("TodoMVC belongs to the surgical vertical slice");
 
-    assert!(output.contains("__vidactCreateScope()"));
+    assert!(output.contains("__vidactCreateNarrowScope()"));
     assert!(output.contains("__vidactCreateState("));
     assert!(output.contains("__vidactCompiledRoot("));
     assert!(output.contains("__vidactEvent("));
@@ -196,7 +196,7 @@ fn compiles_multiple_components_in_one_module_by_span() {
         "{output}"
     );
     assert_eq!(
-        output.matches("__vidactCreateScope()").count(),
+        output.matches("__vidactCreateNarrowScope()").count(),
         2,
         "{output}"
     );
@@ -407,10 +407,7 @@ fn compiles_keyed_item_and_parent_reads_into_separate_static_domains() {
     assert!(output.contains("(item, index) => item.id"), "{output}");
     assert!(output.contains("item.get().id"), "{output}");
     assert!(output.contains("index.get()"), "{output}");
-    assert!(
-        output.contains("__vidactItemScope, __vidactSource(0)"),
-        "{output}"
-    );
+    assert!(output.contains("__vidactItemScope, 1"), "{output}");
 }
 
 #[test]
@@ -612,7 +609,7 @@ fn compiles_early_returns_into_one_owned_choice() {
     .expect("every render path now exits through one compiled component range");
 
     assert!(output.contains("return __vidactCompiledRoot"));
-    assert!(output.contains("__vidactChoose(__vidactScope, __vidactSource(0)"));
+    assert!(output.contains("__vidactChoose(__vidactScope, 1"));
     assert!(!output.contains("if (!ready"));
     assert_eq!(output.matches("return ").count(), 1);
 }
@@ -661,7 +658,7 @@ fn dispatches_dynamic_component_keys_without_remounting_stable_identity() {
 
     assert!(output.contains("dispatch as __vidactDispatch"), "{output}");
     assert!(
-        output.contains("__vidactDispatch(__vidactScope, __vidactSource(0)"),
+        output.contains("__vidactDispatch(__vidactScope, 1"),
         "{output}"
     );
     assert!(output.contains("() => key.get()"), "{output}");
@@ -732,18 +729,33 @@ fn compiles_phi_derived_values_into_ordered_static_updaters() {
         output.contains("selected = alternate.get() ? first.get() : second.get()"),
         "{output}"
     );
-    assert!(output.contains("writes:"), "{output}");
-    assert!(
-        output.contains(
-            "reads: __vidactCombineSources(__vidactSource(0), __vidactSource(1), __vidactSource(2))"
-        ),
-        "{output}"
-    );
+    assert!(!output.contains("writes:"), "{output}");
+    assert!(output.contains("__vidactScope[0](7,"), "{output}");
     assert!(output.contains("() => selected"), "{output}");
     assert!(
         !output.contains("alternate.get() ? selected : selected"),
         "{output}"
     );
+}
+
+#[test]
+fn retains_wide_source_masks_for_components_with_more_than_32_sources() {
+    let declarations = (0..33)
+        .map(|index| format!("const [value{index}, setValue{index}] = useState({index});"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let source = format!(
+        "import {{ useState }} from 'react'; export function Wide() {{ {declarations} return <p>{{value0 + value32}}</p>; }}"
+    );
+    let output = compile_surgical_module(ModuleInput {
+        filename: "Wide.tsx",
+        source: &source,
+    })
+    .expect("wide components must retain the multi-word source-mask fallback");
+
+    assert!(output.contains("source as __vidactSource"), "{output}");
+    assert!(output.contains("__vidactCreateScope()"), "{output}");
+    assert!(output.contains("__vidactSource(32)"), "{output}");
 }
 
 #[test]
@@ -882,5 +894,28 @@ fn rejects_reactive_jsx_spreads_instead_of_capturing_a_mount_snapshot() {
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic.code == DiagnosticCode::UnsupportedSyntax
             && diagnostic.message.contains("reactive JSX spreads")
+    }));
+}
+
+#[test]
+fn rejects_intrinsic_component_children_until_construction_can_be_deferred() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "NamespaceChildren.tsx",
+        source: r#"
+            function ForeignObject({ children }) {
+                return <foreignObject>{children}</foreignObject>;
+            }
+            export function NamespaceChildren() {
+                return <svg><ForeignObject><div /></ForeignObject></svg>;
+            }
+        "#,
+    })
+    .expect_err("eager component children can be constructed in the wrong DOM namespace");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic
+                .message
+                .contains("deferred namespace-aware construction")
     }));
 }

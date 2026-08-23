@@ -1,10 +1,8 @@
-interface ControlledFormState {
-  value?: unknown
-  checked?: boolean
-}
+type ControlledFormState = [value?: unknown, checked?: boolean]
 
 const controlledFormStates = new WeakMap<Element, ControlledFormState>()
 const controlledRestorationCleanups = new WeakMap<Element, () => void>()
+const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 
 export function isControlledFormProp(element: Element, name: string): boolean {
   return (
@@ -22,7 +20,16 @@ export function ensureControlledFormRestoration(element: Element): () => void {
 
   const schedule = (event: Event): void => {
     if (!isReactFormChangeEvent(element, event.type)) return
-    queueMicrotask(() => restoreControlledFormState(element))
+    const root = element.getRootNode()
+    let restored = false
+    const restore = (): void => {
+      if (restored) return
+      restored = true
+      root.removeEventListener(event.type, restore)
+      restoreControlledFormState(element)
+    }
+    root.addEventListener(event.type, restore, { once: true })
+    queueMicrotask(restore)
   }
   element.addEventListener('input', schedule)
   element.addEventListener('change', schedule)
@@ -48,21 +55,21 @@ export function applyFormProp(element: Element, name: string, value: unknown): b
   if (name === 'value') {
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
       if (value === undefined) {
-        delete remember(element).value
+        delete remember(element)[0]
         return true
       }
       const next = value === null || value === undefined ? '' : String(value)
-      remember(element).value = next
+      remember(element)[0] = next
       if (element.value !== next) element.value = next
       return true
     }
     if (element instanceof HTMLSelectElement) {
       if (value === undefined) {
-        delete remember(element).value
+        delete remember(element)[0]
         return true
       }
       const next = normalizeSelectValue(element, value)
-      remember(element).value = value
+      remember(element)[0] = value
       applySelectValue(element, next)
       return true
     }
@@ -70,11 +77,11 @@ export function applyFormProp(element: Element, name: string, value: unknown): b
 
   if (name === 'checked' && element instanceof HTMLInputElement) {
     if (value === undefined) {
-      delete remember(element).checked
+      delete remember(element)[1]
       return true
     }
     const next = Boolean(value)
-    remember(element).checked = next
+    remember(element)[1] = next
     if (element.checked !== next) element.checked = next
     return true
   }
@@ -120,29 +127,29 @@ export function restoreControlledFormState(element: Element): void {
 function restoreElement(element: Element): void {
   const state = controlledFormStates.get(element)
   if (state === undefined) return
-  if (state.value !== undefined) {
+  if (state[0] !== undefined) {
     if (element instanceof HTMLSelectElement) {
-      applySelectValue(element, normalizeSelectValue(element, state.value))
+      applySelectValue(element, normalizeSelectValue(element, state[0]))
     } else if (
       (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) &&
-      element.value !== state.value
+      element.value !== state[0]
     ) {
-      element.value = String(state.value)
+      element.value = String(state[0])
     }
   }
   if (
-    state.checked !== undefined &&
+    state[1] !== undefined &&
     element instanceof HTMLInputElement &&
-    element.checked !== state.checked
+    element.checked !== state[1]
   ) {
-    element.checked = state.checked
+    element.checked = state[1]
   }
 }
 
 function remember(element: Element): ControlledFormState {
   const existing = controlledFormStates.get(element)
   if (existing !== undefined) return existing
-  const state: ControlledFormState = {}
+  const state: ControlledFormState = []
   controlledFormStates.set(element, state)
   return state
 }
@@ -151,7 +158,7 @@ function normalizeSelectValue(element: HTMLSelectElement, value: unknown): unkno
   if (!element.multiple) return value === null || value === undefined ? '' : String(value)
   if (value === null || value === undefined) return []
   if (!Array.isArray(value)) {
-    throw new TypeError('a controlled <select multiple> value must be an array')
+    throw new TypeError(DEV ? 'a controlled <select multiple> value must be an array' : 'V301')
   }
   return value.map(String)
 }

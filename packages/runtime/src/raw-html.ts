@@ -6,6 +6,7 @@ import {
 
 const RAW_HTML_PUBLICATION_PRIORITY = 100
 const rawHtmlHosts = new WeakSet<HTMLElement>()
+const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 
 export function mountRawHtmlProp(
   element: HTMLElement,
@@ -45,9 +46,8 @@ function prepareRawHtml(
   const container = rawHtmlContainer(element)
   const wasRawHtmlHost = rawHtmlHosts.has(element)
   let previousNodes: Node[] | undefined
-  return {
-    priority: RAW_HTML_PUBLICATION_PRIORITY,
-    commit() {
+  return [
+    () => {
       // A reactive script `type` prop commits before the raw subtree.
       assertExecutableRawHtmlTarget(element)
       const adopted = adoptRawHtml(element, staged)
@@ -55,13 +55,16 @@ function prepareRawHtml(
       container.replaceChildren(adopted)
       rawHtmlHosts.add(element)
     },
-    rollback() {
+    () => {
       if (previousNodes === undefined) return
       container.replaceChildren(...previousNodes)
       if (!wasRawHtmlHost) rawHtmlHosts.delete(element)
       previousNodes = undefined
     },
-  }
+    undefined,
+    undefined,
+    RAW_HTML_PUBLICATION_PRIORITY,
+  ]
 }
 
 export function validateRawHtmlRelatedProp(element: HTMLElement, name: string): void {
@@ -73,14 +76,17 @@ function readRawHtml(element: HTMLElement, value: unknown, children: readonly un
   assertRawHtmlPropTarget(element)
   if (typeof value !== 'object' || !('__html' in value)) {
     throw new Error(
-      '`props.dangerouslySetInnerHTML` must be in the form `{__html: ...}`. ' +
-        'Please visit https://react.dev/link/dangerously-set-inner-html for more information.',
+      DEV
+        ? '`props.dangerouslySetInnerHTML` must be in the form `{__html: ...}`. Please visit https://react.dev/link/dangerously-set-inner-html for more information.'
+        : 'V601',
     )
   }
   const html = value['__html']
   if (html === null || html === undefined) return html
   if (children.some((child) => child !== null && child !== undefined)) {
-    throw new Error('Can only set one of `children` or `props.dangerouslySetInnerHTML`.')
+    throw new Error(
+      DEV ? 'Can only set one of `children` or `props.dangerouslySetInnerHTML`.' : 'V602',
+    )
   }
   assertExecutableRawHtmlTarget(element)
   return html
@@ -90,11 +96,13 @@ function assertRawHtmlPropTarget(element: HTMLElement): void {
   const tag = element.localName
   if (isVoidHtmlElement(tag)) {
     throw new Error(
-      `${tag} is a void element tag and must neither have \`children\` nor use \`dangerouslySetInnerHTML\`.`,
+      DEV
+        ? `${tag} is a void element tag and must neither have \`children\` nor use \`dangerouslySetInnerHTML\`.`
+        : 'V603',
     )
   }
   if (tag === 'textarea') {
-    throw new Error('`dangerouslySetInnerHTML` does not make sense on <textarea>.')
+    throw new Error(DEV ? '`dangerouslySetInnerHTML` does not make sense on <textarea>.' : 'V604')
   }
 }
 
@@ -102,7 +110,9 @@ function assertExecutableRawHtmlTarget(element: HTMLElement): void {
   const tag = element.localName
   if (tag === 'script' && isExecutableScript(element as HTMLScriptElement)) {
     throw new Error(
-      'dangerouslySetInnerHTML on an executable <script> is unsupported because direct-created scripts execute when connected; use a non-executable data MIME type',
+      DEV
+        ? 'dangerouslySetInnerHTML on an executable <script> is unsupported because direct-created scripts execute when connected; use a non-executable data MIME type'
+        : 'V605',
     )
   }
 }

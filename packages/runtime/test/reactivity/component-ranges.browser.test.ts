@@ -71,11 +71,8 @@ describe('compiled component ranges', () => {
       const scope = createCompiledScope()
       const value = createCompiledState(scope, childSource, 0)
       setChild = value.set
-      scope.add({
-        reads: childSource,
-        run: () => {
-          childUpdates += 1
-        },
+      scope[0](childSource, () => {
+        childUpdates += 1
       })
       return compiledRoot(scope, () => h('span', null, 'child'))
     }
@@ -142,7 +139,7 @@ describe('compiled component ranges', () => {
         const scope = createCompiledScope()
         const value = createCompiledState(scope, valueSource, 0)
         setValue = value.set
-        scope.add({ reads: valueSource, run: () => (updates += 1) })
+        scope[0](valueSource, () => (updates += 1))
         return compiledRoot(scope, () => [
           h('span', null, 'staged'),
           { type: 'foreign-element' } as never,
@@ -162,12 +159,12 @@ describe('compiled component ranges', () => {
     const firstHost = document.createElement('div')
     const secondHost = document.createElement('div')
 
-    component.mount(firstHost, null)
+    component[1](firstHost, null)
 
-    expect(() => component.mount(secondHost, null)).toThrow(/already mounted/i)
+    expect(() => component[1](secondHost, null)).toThrow(/already mounted/i)
     expect(firstHost.textContent).toBe('once')
     expect(secondHost.childNodes).toHaveLength(0)
-    scope.dispose()
+    scope[3]()
   })
 
   it('retains a selected branch while its own bindings update surgically', async () => {

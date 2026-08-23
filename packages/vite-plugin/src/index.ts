@@ -22,6 +22,15 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
   return {
     name: 'vidact',
     enforce: 'pre',
+    config(config, environment) {
+      // oxlint-disable-next-line no-underscore-dangle -- Compiler/runtime production define.
+      if (config.define?.__VIDACT_DEV__ !== undefined) return
+      return {
+        define: {
+          __VIDACT_DEV__: JSON.stringify(environment.mode !== 'production'),
+        },
+      }
+    },
     configResolved(config) {
       manifestPath =
         options.manifestPath === undefined

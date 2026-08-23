@@ -1,5 +1,9 @@
 import { mountCompiled } from '@vidact/runtime'
-import { assertMutationEnvelope, captureMutations } from '@vidact/test-support'
+import {
+  assertMutationEnvelope,
+  captureMutations,
+  startMutationCapture,
+} from '@vidact/test-support'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { DomSemanticsApp } from './DomSemanticsApp.tsx'
@@ -122,18 +126,24 @@ describe('compiled DOM semantics app', () => {
     const text = host.querySelector<HTMLInputElement>('[data-controlled-text]')!
     const textOutput = host.querySelector<HTMLOutputElement>('[data-controlled-output]')!
     const restore = host.querySelector<HTMLInputElement>('[data-controlled-restore]')!
+    const stopped = host.querySelector<HTMLInputElement>('[data-controlled-stop]')!
+    const stoppedImmediate = host.querySelector<HTMLInputElement>(
+      '[data-controlled-stop-immediate]',
+    )!
     const checkbox = host.querySelector<HTMLInputElement>('[data-controlled-checkbox]')!
     const checkedOutput = host.querySelector<HTMLOutputElement>('[data-checked-output]')!
     const select = host.querySelector<HTMLSelectElement>('[data-controlled-select]')!
     const ancestor = host.querySelector<HTMLInputElement>('[data-ancestor-controlled]')!
     const ancestorOutput = host.querySelector<HTMLOutputElement>('[data-ancestor-output]')!
     const ancestorTrace = host.querySelector<HTMLOutputElement>('[data-ancestor-trace]')!
+    const captureStopped = host.querySelector<HTMLInputElement>('[data-controlled-capture-stop]')!
     const modeFirst = host.querySelector<HTMLSelectElement>('[data-mode-select-first]')!
     const valueFirst = host.querySelector<HTMLSelectElement>('[data-value-select-first]')!
     const textarea = host.querySelector<HTMLTextAreaElement>('[data-controlled-textarea]')!
     const textareaOutput = host.querySelector<HTMLOutputElement>('[data-textarea-output]')!
     const radioA = host.querySelector<HTMLInputElement>('[data-controlled-radio-a]')!
     const radioB = host.querySelector<HTMLInputElement>('[data-controlled-radio-b]')!
+    const otherRadio = host.querySelector<HTMLInputElement>('[data-other-radio]')!
     const radioOutput = host.querySelector<HTMLOutputElement>('[data-radio-output]')!
 
     await captureMutations(host, () => captureChild.click())
@@ -150,10 +160,22 @@ describe('compiled DOM semantics app', () => {
     expect(textOutput.textContent).toBe('typed')
 
     restore.value = 'browser edit'
-    await captureMutations(host, () =>
-      restore.dispatchEvent(new InputEvent('input', { bubbles: true })),
-    )
+    const restoreMutations = startMutationCapture(host)
+    restore.dispatchEvent(new InputEvent('input', { bubbles: true }))
     expect(restore.value).toBe('locked')
+    expect(restoreMutations.stop()).toHaveLength(0)
+
+    stopped.value = 'browser edit'
+    const stoppedMutations = startMutationCapture(host)
+    stopped.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    expect(stopped.value).toBe('locked')
+    expect(stoppedMutations.stop()).toHaveLength(0)
+
+    stoppedImmediate.value = 'browser edit'
+    const stoppedImmediateMutations = startMutationCapture(host)
+    stoppedImmediate.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    expect(stoppedImmediate.value).toBe('locked')
+    expect(stoppedImmediateMutations.stop()).toHaveLength(0)
 
     ancestor.value = 'bubbled'
     await captureMutations(host, () =>
@@ -163,6 +185,12 @@ describe('compiled DOM semantics app', () => {
     expect(ancestor.value).toBe('bubbled')
     expect(ancestorOutput.textContent).toBe('bubbled')
     expect(ancestorTrace.textContent).toBe('capture:bubbled,bubble:bubbled')
+
+    captureStopped.value = 'browser edit'
+    const captureStoppedMutations = startMutationCapture(host)
+    captureStopped.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    expect(captureStopped.value).toBe('locked')
+    expect(captureStoppedMutations.stop()).toHaveLength(0)
 
     textarea.value = 'edited notes'
     await captureMutations(host, () =>
@@ -174,11 +202,16 @@ describe('compiled DOM semantics app', () => {
 
     expect(radioA.checked).toBe(true)
     expect(radioB.checked).toBe(false)
+    expect(radioA.form?.id).toBe('controlled-radio-form')
+    expect(radioB.form).toBe(radioA.form)
+    expect(otherRadio.form?.id).toBe('other-radio-form')
+    expect(otherRadio.checked).toBe(true)
     await captureMutations(host, () => radioB.click())
     expect(host.querySelector('[data-controlled-radio-a]')).toBe(radioA)
     expect(host.querySelector('[data-controlled-radio-b]')).toBe(radioB)
     expect(radioA.checked).toBe(false)
     expect(radioB.checked).toBe(true)
+    expect(otherRadio.checked).toBe(true)
     expect(radioOutput.textContent).toBe('b')
 
     await captureMutations(host, () => checkbox.click())

@@ -27,7 +27,10 @@ lowering and small runtime modules:
 - Compiler lowering annotates nested JSX with the private
   `__vidactNamespace` construction prop. SVG and MathML descendants retain
   their namespace across compiled component calls; children of SVG
-  `foreignObject` reset to HTML.
+  `foreignObject` reset to HTML. Intrinsic JSX authored as a component child is
+  rejected until the compiler can defer its construction: the component may
+  insert that child across an HTML, SVG, MathML, or `foreignObject` boundary
+  that is unknowable at the call site.
 - The JSX runtime consumes that private prop before user component props are
   formed and calls `createElementNS` for SVG and MathML. It never writes the
   private prop to live DOM.
@@ -47,9 +50,10 @@ lowering and small runtime modules:
   radio, and file inputs. The target classifier also applies when the handler
   is registered on an ancestor.
 - Controlled `value` and `checked` writes avoid redundant assignments and are
-  restored in a microtask after native event propagation, even when no public
-  change handler exists. Multiple selects accept array values, apply selection
-  after their options are inserted, and publish mode changes before values.
+  restored synchronously after managed form handlers and normal native event
+  propagation. A microtask remains only as a fallback for unmanaged or stopped
+  native dispatch. Multiple selects accept array values, apply selection after
+  their options are inserted, and publish mode changes before values.
 
 ## Compiler and runtime contract
 
@@ -80,6 +84,8 @@ to component replay.
 
 - Every accepted intrinsic is constructed in the namespace selected by its JSX
   host context, including across compiled component boundaries.
+- JSX intrinsic children are not eagerly passed into components; this unsafe
+  form fails compilation pending lazy, namespace-aware owned children.
 - SVG `foreignObject` children are HTML; the `foreignObject` itself is SVG.
 - Namespace metadata is never visible to a user component or live element.
 - Removing a style key removes its live declaration without replacing the
@@ -89,7 +95,7 @@ to component replay.
   phase-specific listener.
 - A normal controlled text edit publishes from `input`, including through an
   ancestor `onChange`; an unaccepted edit restores the last compiled value
-  after capture and bubble handlers finish.
+  before managed dispatch returns, including when its handler stops propagation.
 - These updates preserve the intrinsic node's identity.
 
 ## Alternatives considered

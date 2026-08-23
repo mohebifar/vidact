@@ -1,0 +1,16 @@
+{
+  "name": "@vidact/runtime-size",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "measure": "node measure.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@vidact/runtime": "workspace:*",
+    "@vidact/vite": "workspace:*",
+    "typescript": "7.0.2",
+    "vite": "8.2.2"
+  }
+}

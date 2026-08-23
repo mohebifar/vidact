@@ -1,8 +1,8 @@
-export interface KeyedItem<T> {
-  readonly nodes: readonly Node[]
-  readonly update?: (value: T, index: number) => void
-  readonly dispose?: () => void
-}
+export type KeyedItem<T> = readonly [
+  nodes: readonly Node[],
+  update?: ((value: T, index: number) => void) | undefined,
+  dispose?: (() => void) | undefined,
+]
 
 export type KeyedRenderResult<T> = Node | readonly Node[] | KeyedItem<T>
 
@@ -17,20 +17,22 @@ export interface KeyedList<T> {
   readonly update: (values: readonly T[]) => readonly Node[]
 }
 
-interface RecordState<T, K> {
-  readonly key: K
-  readonly nodes: readonly Node[]
-  readonly update?: (value: T, index: number) => void
-  readonly dispose?: () => void
-}
+type RecordState<T, K> = readonly [
+  key: K,
+  nodes: readonly Node[],
+  update: ((value: T, index: number) => void) | undefined,
+  dispose: (() => void) | undefined,
+]
+
+const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 
 export function createKeyedList<T, K>(
   parent: Node,
   options: KeyedListOptions<T, K>,
   before: Node | null = null,
 ): KeyedList<T> {
-  const start = document.createComment('vidact:list')
-  const end = document.createComment('/vidact:list')
+  const start = document.createComment(DEV ? 'vidact:list' : '')
+  const end = document.createComment(DEV ? '/vidact:list' : '')
   parent.insertBefore(start, before)
   parent.insertBefore(end, before)
 
@@ -38,10 +40,10 @@ export function createKeyedList<T, K>(
   let records: readonly RecordState<T, K>[] = []
 
   const update = (values: readonly T[]): readonly Node[] => {
-    if (disposed) throw new Error('cannot update a disposed keyed list')
+    if (disposed) throw new Error(DEV ? 'cannot update a disposed keyed list' : 'V801')
     const currentParent = end.parentNode
     if (currentParent === null || start.parentNode !== currentParent) {
-      throw new Error('cannot update a detached keyed list')
+      throw new Error(DEV ? 'cannot update a detached keyed list' : 'V802')
     }
 
     const keys = values.map(options.key)
@@ -49,9 +51,9 @@ export function createKeyedList<T, K>(
     assertUniqueKeys(keys)
 
     const previousByKey = new Map<K, RecordState<T, K>>()
-    for (const record of records) previousByKey.set(record.key, record)
+    for (const record of records) previousByKey.set(record[0], record)
     const created: RecordState<T, K>[] = []
-    const retained: Array<{ record: RecordState<T, K>; value: T; index: number }> = []
+    const retained: Array<readonly [RecordState<T, K>, T, number]> = []
     let nextRecords: RecordState<T, K>[]
     try {
       nextRecords = values.map((value, index): RecordState<T, K> => {
@@ -59,16 +61,16 @@ export function createKeyedList<T, K>(
         const previous = previousByKey.get(key)
         if (previous !== undefined) {
           previousByKey.delete(key)
-          retained.push({ record: previous, value, index })
+          retained.push([previous, value, index])
           return previous
         }
 
         const item = normalizeRenderResult(options.render(value, index))
-        const record = { key, ...item }
+        const record: RecordState<T, K> = [key, item[0], item[1], item[2]]
         created.push(record)
         return record
       })
-      for (const { record, value, index } of retained) record.update?.(value, index)
+      for (const [record, value, index] of retained) record[2]?.(value, index)
     } catch (error) {
       disposeRecords(currentParent, created)
       throw error
@@ -88,12 +90,12 @@ export function createKeyedList<T, K>(
     const selection =
       selectionControl === null
         ? null
-        : { start: selectionControl.selectionStart, end: selectionControl.selectionEnd }
+        : ([selectionControl.selectionStart, selectionControl.selectionEnd] as const)
     let cursor: Node = end
     for (let recordIndex = nextRecords.length - 1; recordIndex >= 0; recordIndex -= 1) {
       const record = nextRecords[recordIndex] as RecordState<T, K>
-      for (let nodeIndex = record.nodes.length - 1; nodeIndex >= 0; nodeIndex -= 1) {
-        const node = record.nodes[nodeIndex] as Node
+      for (let nodeIndex = record[1].length - 1; nodeIndex >= 0; nodeIndex -= 1) {
+        const node = record[1][nodeIndex] as Node
         if (node.nextSibling !== cursor) moveBefore(currentParent, node, cursor)
         cursor = node
       }
@@ -107,16 +109,16 @@ export function createKeyedList<T, K>(
       if (
         selectionControl !== null &&
         selection !== null &&
-        selection.start !== null &&
-        selection.end !== null
+        selection[0] !== null &&
+        selection[1] !== null
       ) {
-        selectionControl.setSelectionRange(selection.start, selection.end)
+        selectionControl.setSelectionRange(selection[0], selection[1])
       }
     }
 
     records = nextRecords
-    if (cleanup.failed) throw cleanup.error
-    return created.flatMap((record) => record.nodes)
+    if (cleanup[1]) throw cleanup[0]
+    return created.flatMap((record) => record[1])
   }
 
   const dispose = (): void => {
@@ -125,12 +127,12 @@ export function createKeyedList<T, K>(
     const currentParent = end.parentNode
     const cleanup =
       currentParent === null
-        ? { error: undefined, failed: false }
+        ? ([undefined, false] as const)
         : disposeRecords(currentParent, records)
     records = []
     start.remove()
     end.remove()
-    if (cleanup.failed) throw cleanup.error
+    if (cleanup[1]) throw cleanup[0]
   }
 
   return { dispose, parent: () => end.parentNode, update }
@@ -150,7 +152,7 @@ function moveBefore(parent: Node, node: Node, before: Node): void {
 function assertValidKeys<K>(keys: readonly K[]): void {
   for (const key of keys) {
     if (typeof key !== 'string' && typeof key !== 'number' && typeof key !== 'bigint') {
-      throw new Error(`invalid key in keyed list: ${String(key)}`)
+      throw new Error(DEV ? `invalid key in keyed list: ${String(key)}` : 'V803')
     }
   }
 }
@@ -158,19 +160,17 @@ function assertValidKeys<K>(keys: readonly K[]): void {
 function assertUniqueKeys<K>(keys: readonly K[]): void {
   const seen = new Set<K>()
   for (const key of keys) {
-    if (seen.has(key)) throw new Error(`duplicate key in keyed list: ${String(key)}`)
+    if (seen.has(key)) {
+      throw new Error(DEV ? `duplicate key in keyed list: ${String(key)}` : 'V804')
+    }
     seen.add(key)
   }
 }
 
 function normalizeRenderResult<T>(result: KeyedRenderResult<T>): KeyedItem<T> {
-  if (isNode(result)) return { nodes: normalizeNodes([result]) }
-  if (isNodeArray(result)) return { nodes: normalizeNodes(result) }
-  return {
-    nodes: normalizeNodes(result.nodes),
-    ...(result.update === undefined ? {} : { update: result.update }),
-    ...(result.dispose === undefined ? {} : { dispose: result.dispose }),
-  }
+  if (isNode(result)) return [normalizeNodes([result])]
+  if (isNodeArray(result)) return [normalizeNodes(result)]
+  return [normalizeNodes(result[0]), result[1], result[2]]
 }
 
 function normalizeNodes(nodes: readonly Node[]): readonly Node[] {
@@ -182,7 +182,7 @@ function normalizeNodes(nodes: readonly Node[]): readonly Node[] {
       normalized.push(node)
     }
   }
-  return normalized.length === 0 ? [document.createComment('vidact:empty')] : normalized
+  return normalized.length === 0 ? [document.createComment(DEV ? 'vidact:empty' : '')] : normalized
 }
 
 function isNode(value: unknown): value is Node {
@@ -190,7 +190,7 @@ function isNode(value: unknown): value is Node {
 }
 
 function isNodeArray<T>(value: KeyedRenderResult<T>): value is readonly Node[] {
-  return Array.isArray(value)
+  return Array.isArray(value) && (value.length === 0 || isNode(value[0]))
 }
 
 function removeNodes(parent: Node, nodes: readonly Node[]): void {
@@ -202,17 +202,17 @@ function removeNodes(parent: Node, nodes: readonly Node[]): void {
 function disposeRecords<T, K>(
   parent: Node,
   records: Iterable<RecordState<T, K>>,
-): { readonly error: unknown; readonly failed: boolean } {
+): readonly [error: unknown, failed: boolean] {
   let firstError: unknown
   let failed = false
   for (const record of records) {
-    removeNodes(parent, record.nodes)
+    removeNodes(parent, record[1])
     try {
-      record.dispose?.()
+      record[3]?.()
     } catch (error) {
       if (!failed) firstError = error
       failed = true
     }
   }
-  return { error: firstError, failed }
+  return [firstError, failed]
 }

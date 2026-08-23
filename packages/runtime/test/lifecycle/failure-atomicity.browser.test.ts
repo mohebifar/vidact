@@ -12,6 +12,57 @@ import {
 } from '../../src/index.ts'
 
 describe('compiled publication atomicity', () => {
+  it('restores a controlled multiple select after a later publication fails', () => {
+    const tag = `vidact-select-failure-${crypto.randomUUID()}`
+    customElements.define(
+      tag,
+      class extends HTMLElement {
+        set value(next: string) {
+          if (next === 'broken') throw new Error('select publication failed')
+        }
+      },
+    )
+
+    const modeSource = source(0)
+    const failureSource = source(1)
+    let publishFailure!: () => void
+    const host = document.createElement('div')
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const mode = createCompiledState(scope, modeSource, true)
+      const failure = createCompiledState(scope, failureSource, false)
+      publishFailure = () =>
+        scope[2](() => {
+          mode.set(false)
+          failure.set(true)
+        })
+      const select = h(
+        'select',
+        {
+          multiple: binding(scope, modeSource, mode.get),
+          value: binding(scope, modeSource, () => (mode.get() ? ['a', 'c'] : 'b')),
+        },
+        h('option', { value: 'a' }, 'A'),
+        h('option', { value: 'b' }, 'B'),
+        h('option', { value: 'c' }, 'C'),
+      )
+      const throwing = h(tag, {
+        value: binding(scope, failureSource, () => (failure.get() ? 'broken' : 'ready')),
+      })
+      return compiledRoot(scope, () => h('div', null, select, throwing))
+    }, host)
+    const select = host.querySelector('select')!
+    const options = [...select.options]
+
+    expect(select.multiple).toBe(true)
+    expect([...select.selectedOptions].map((option) => option.value)).toEqual(['a', 'c'])
+    expect(() => publishFailure()).toThrow('select publication failed')
+    expect(select.multiple).toBe(true)
+    expect([...select.selectedOptions].map((option) => option.value)).toEqual(['a', 'c'])
+    expect([...select.options]).toEqual(options)
+    mounted.dispose()
+  })
+
   it('publishes no earlier text binding when a later computation throws', () => {
     const valueSource = source(0)
     let setValue!: ReturnType<typeof createCompiledState<number>>['set']

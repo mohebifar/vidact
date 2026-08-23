@@ -5,62 +5,60 @@ import {
 } from './dom/namespace.ts'
 import { createIndexedList } from './indexed-list.ts'
 import { createKeyedList } from './keyed-list.ts'
-import {
-  intersectsSources,
-  isEmptySources,
-  source,
-  unionSources,
-  type SourceMask,
-} from './source-mask.ts'
+import { intersectsSources, isEmptySources, unionSources, type SourceMask } from './source-mask.ts'
 import { createStateSlot, type StateSlot } from './state-slot.ts'
 
 const MAX_FLUSH_PASSES = 100
-const BINDING = Symbol('Vidact.Binding')
-const STRUCTURAL = Symbol('Vidact.StructuralBinding')
-const COMPONENT = Symbol('Vidact.CompiledComponent')
+const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
+const BINDING = Symbol(DEV ? 'Vidact.Binding' : undefined)
+const STRUCTURAL = Symbol(DEV ? 'Vidact.StructuralBinding' : undefined)
 
-interface Owner {
-  disposed: boolean
-  readonly cleanups: Set<() => void>
-}
+type Owner = [disposed: boolean, cleanups: Set<() => void>]
 
-interface CompiledUpdater {
-  readonly reads: SourceMask
-  readonly writes?: SourceMask
-  readonly run: (active: SourceMask) => void
-  active: boolean
-}
+type CompiledUpdater = [
+  reads: SourceMask,
+  writes: SourceMask | undefined,
+  run: (active: SourceMask) => void,
+  active: boolean,
+]
 
-export interface CompiledScope {
-  readonly add: (updater: Omit<CompiledUpdater, 'active'>) => () => void
-  readonly batch: <T>(operation: () => T) => T
-  readonly dispose: () => void
-  readonly invalidate: (sources: SourceMask) => void
-}
+export type CompiledScope = readonly [
+  add: (reads: SourceMask, run: (active: SourceMask) => void, writes?: SourceMask) => () => void,
+  invalidate: (sources: SourceMask) => void,
+  batch: <T>(operation: () => T) => T,
+  dispose: () => void,
+]
 
-export interface CompiledBinding<T> {
-  readonly [BINDING]: true
-  readonly evaluate: () => T
-  readonly reads: SourceMask
-  readonly scope: CompiledScope
-  readonly additional: CompiledDependency | undefined
-}
+type SourceOperations = readonly [
+  empty: (mask: SourceMask) => boolean,
+  intersects: (left: SourceMask, right: SourceMask) => boolean,
+  union: (left: SourceMask, right: SourceMask) => SourceMask,
+]
 
-export interface CompiledDependency {
-  readonly reads: SourceMask
-  readonly scope: CompiledScope
-}
+const wideSourceOperations: SourceOperations = [isEmptySources, intersectsSources, unionSources]
+const narrowSourceOperations: SourceOperations = [
+  (mask) => mask === 0,
+  (left, right) => ((left as number) & (right as number)) !== 0,
+  (left, right) => ((left as number) | (right as number)) >>> 0,
+]
 
-export interface OwnedBlock {
-  readonly [STRUCTURAL]: true
-  readonly mount: (parent: Node, before: Node | null) => void
-}
+export type CompiledBinding<T> = readonly [
+  brand: typeof BINDING,
+  evaluate: () => T,
+  scope: CompiledScope,
+  reads: SourceMask,
+  additionalScope: CompiledScope | undefined,
+  additionalReads: SourceMask | undefined,
+]
+
+export type OwnedBlock = readonly [
+  brand: typeof STRUCTURAL,
+  mount: (parent: Node, before: Node | null) => void,
+]
 
 export type StructuralBinding = OwnedBlock
 
-export interface CompiledComponentResult extends OwnedBlock {
-  readonly [COMPONENT]: true
-}
+export type CompiledComponentResult = OwnedBlock
 
 export type CompiledRenderValue =
   | Node
@@ -78,38 +76,21 @@ type RenderValue = CompiledRenderValue
 
 type RefValue = ((value: Element | null) => void | (() => void)) | { current: unknown }
 
-interface PendingRef {
-  owner: Owner | null
-  readonly value: RefValue
-}
+type PendingRef = [owner: Owner | null, value: RefValue]
 
-interface NodePosition {
-  readonly node: Node
-  readonly parent: Node | null
-  readonly nextSibling: Node | null
-}
+type NodePosition = readonly [node: Node, parent: Node | null, nextSibling: Node | null]
 
-interface PublicationOperation {
-  readonly commit: () => void
-  readonly rollback: () => void
-  readonly abort?: () => void
-  readonly finalize?: () => void
-  readonly priority?: number
-}
+type PublicationOperation = readonly [
+  commit: () => void,
+  rollback: () => void,
+  abort?: (() => void) | undefined,
+  finalize?: (() => void) | undefined,
+  priority?: number | undefined,
+]
 
-export interface CompiledPropTransition {
-  readonly commit: () => void
-  readonly rollback: () => void
-  readonly abort?: () => void
-  readonly finalize?: () => void
-  readonly priority?: number
-}
+export type CompiledPropTransition = PublicationOperation
 
-interface ComponentRange {
-  readonly start: Comment
-  readonly end: Comment
-  readonly scope: CompiledScope
-}
+type ComponentRange = readonly [start: Comment, end: Comment, scope: CompiledScope]
 
 let activeOwner: Owner | null = null
 let activeScopeCollector: Set<CompiledScope> | null = null
@@ -123,8 +104,16 @@ const componentRanges = new WeakMap<CompiledComponentResult, ComponentRange>()
 const pendingRefs = new WeakMap<Element, PendingRef>()
 
 export function createCompiledScope(): CompiledScope {
+  return createScope(wideSourceOperations)
+}
+
+export function createNarrowCompiledScope(): CompiledScope {
+  return createScope(narrowSourceOperations)
+}
+
+function createScope(operations: SourceOperations): CompiledScope {
   const namespace = currentIntrinsicNamespace()
-  const owner: Owner = { disposed: false, cleanups: new Set() }
+  const owner = createOwner()
   const updaters: Array<CompiledUpdater | undefined> = []
   const freeUpdaterIndexes: number[] = []
   const addedDuringFlush = new Set<CompiledUpdater>()
@@ -133,15 +122,15 @@ export function createCompiledScope(): CompiledScope {
   let pending: SourceMask = 0
 
   const flush = (): void => {
-    if (owner.disposed || flushing) return
+    if (owner[0] || flushing) return
     flushing = true
     try {
       let pass = 0
-      while (!isEmptySources(pending)) {
+      while (!operations[0](pending)) {
         pass += 1
         if (pass > MAX_FLUSH_PASSES) {
           pending = 0
-          throw new Error('Vidact compiled scope did not stabilize')
+          throw new Error(DEV ? 'Vidact compiled scope did not stabilize' : 'V001')
         }
 
         let active = pending
@@ -152,13 +141,13 @@ export function createCompiledScope(): CompiledScope {
           if (
             updater === undefined ||
             addedDuringFlush.has(updater) ||
-            !updater.active ||
-            !intersectsSources(active, updater.reads)
+            !updater[3] ||
+            !operations[1](active, updater[0])
           ) {
             continue
           }
-          updater.run(active)
-          if (updater.writes !== undefined) active = unionSources(active, updater.writes)
+          updater[2](active)
+          if (updater[1] !== undefined) active = operations[2](active, updater[1])
         }
         addedDuringFlush.clear()
       }
@@ -168,59 +157,62 @@ export function createCompiledScope(): CompiledScope {
     }
   }
 
-  const scope: CompiledScope = {
-    add(updater) {
-      if (owner.disposed) throw new Error('cannot add an updater to a disposed scope')
-      const entry: CompiledUpdater = {
-        ...updater,
-        run: (active) => withScopeNamespace(scope, () => updater.run(active)),
-        active: true,
+  const scope: CompiledScope = [
+    (reads, run, writes) => {
+      if (owner[0]) {
+        throw new Error(DEV ? 'cannot add an updater to a disposed scope' : 'V002')
       }
+      const entry: CompiledUpdater = [
+        reads,
+        writes,
+        (active) => withScopeNamespace(scope, () => run(active)),
+        true,
+      ]
       const reusableIndex = freeUpdaterIndexes.pop()
       const index = reusableIndex ?? updaters.length
       updaters[index] = entry
       if (flushing) addedDuringFlush.add(entry)
       const remove = (): void => {
         if (updaters[index] !== entry) return
-        entry.active = false
+        entry[3] = false
         updaters[index] = undefined
         freeUpdaterIndexes.push(index)
       }
-      if (activeOwner !== null && activeOwner !== owner) activeOwner.cleanups.add(remove)
+      if (activeOwner !== null && activeOwner !== owner) activeOwner[1].add(remove)
       return remove
     },
-    invalidate(sources) {
-      if (owner.disposed || isEmptySources(sources)) return
-      pending = unionSources(pending, sources)
+    (sources) => {
+      if (owner[0] || operations[0](sources)) return
+      pending = operations[2](pending, sources)
       if (batchDepth === 0) scheduleFlush(flush)
     },
-    batch<T>(operation: () => T): T {
+    <T>(operation: () => T): T => {
       batchDepth += 1
       transactionDepth += 1
       try {
         return operation()
       } finally {
         batchDepth -= 1
-        if (batchDepth === 0 && !isEmptySources(pending)) scheduleFlush(flush)
+        if (batchDepth === 0 && !operations[0](pending)) scheduleFlush(flush)
         transactionDepth -= 1
         if (transactionDepth === 0) drainFlushes()
       }
     },
-    dispose() {
-      if (owner.disposed) return
+    () => {
+      if (owner[0]) return
       try {
         disposeOwner(owner)
       } finally {
         pending = 0
         for (const updater of updaters) {
-          if (updater !== undefined) updater.active = false
+          if (updater !== undefined) updater[3] = false
         }
         updaters.length = 0
         freeUpdaterIndexes.length = 0
         addedDuringFlush.clear()
       }
     },
-  }
+  ]
   scopeOwners.set(scope, owner)
   scopeNamespaces.set(scope, namespace)
   activeScopeCollector?.add(scope)
@@ -233,7 +225,7 @@ export function createCompiledState<T>(
   initialValue: T | (() => T),
 ): StateSlot<T> {
   const value = typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue
-  return createStateSlot(scope, sourceMask, value)
+  return createStateSlot(scope[1], sourceMask, value)
 }
 
 export function createCompiledProp<T>(
@@ -244,15 +236,17 @@ export function createCompiledProp<T>(
 ): StateSlot<T> {
   const upstream = isCompiledBinding(input) ? input : undefined
   const read = (): T => {
-    const value = upstream === undefined ? (input as T) : upstream.evaluate()
+    const value = upstream === undefined ? (input as T) : upstream[1]()
     return value === undefined && fallback !== undefined ? fallback() : value
   }
-  const slot = createStateSlot<T>(scope, sourceMask, read())
+  const slot = createStateSlot<T>(scope[1], sourceMask, read())
   if (upstream !== undefined) {
-    const remove = subscribe(upstream, () => slot.set(read()))
+    const remove = subscribeBinding(upstream, () => slot.set(read()))
     const owner = scopeOwners.get(scope)
-    if (owner === undefined) throw new Error('createCompiledProp received an unknown scope')
-    owner.cleanups.add(remove)
+    if (owner === undefined) {
+      throw new Error(DEV ? 'createCompiledProp received an unknown scope' : 'V003')
+    }
+    owner[1].add(remove)
   }
   return slot
 }
@@ -264,18 +258,14 @@ export function binding<T>(
   additionalScope?: CompiledScope,
   additionalReads?: SourceMask,
 ): CompiledBinding<T> {
-  const additional =
-    additionalScope === undefined || additionalReads === undefined
-      ? undefined
-      : { scope: additionalScope, reads: additionalReads }
-  return { [BINDING]: true, evaluate, reads, scope, additional }
+  return [BINDING, evaluate, scope, reads, additionalScope, additionalReads]
 }
 
 export function compiledEvent<T extends Event>(
   scope: CompiledScope,
   handler: (event: T) => void,
 ): (event: T) => void {
-  return (event) => scope.batch(() => handler(event))
+  return (event) => scope[2](() => handler(event))
 }
 
 export function when(
@@ -287,8 +277,8 @@ export function when(
   additionalReads?: SourceMask,
 ): StructuralBinding {
   return structural(scope, (parent, before) => {
-    const start = document.createComment('vidact:when')
-    const end = document.createComment('/vidact:when')
+    const start = document.createComment(DEV ? 'vidact:when' : '')
+    const end = document.createComment(DEV ? '/vidact:when' : '')
     parent.insertBefore(start, before)
     parent.insertBefore(end, before)
     let branchOwner: Owner | null = null
@@ -307,24 +297,14 @@ export function when(
       }
 
       const nextOwner = createOwner()
-      const { fragment, nodes: staged } = stageRender(render, nextOwner)
+      const [fragment, staged] = stageRender(render, nextOwner)
       currentParent.insertBefore(fragment, end)
       for (const node of staged) commitPendingRefs(node)
       branchOwner = nextOwner
       mounted = true
     }
 
-    const removeUpdater = subscribe(
-      {
-        scope,
-        reads,
-        additional:
-          additionalScope === undefined || additionalReads === undefined
-            ? undefined
-            : { scope: additionalScope, reads: additionalReads },
-      },
-      update,
-    )
+    const removeUpdater = subscribe(scope, reads, update, additionalScope, additionalReads)
     try {
       update()
     } catch (error) {
@@ -356,8 +336,8 @@ export function choose(
   additionalReads?: SourceMask,
 ): StructuralBinding {
   return structural(scope, (parent, before) => {
-    const start = document.createComment('vidact:choice')
-    const end = document.createComment('/vidact:choice')
+    const start = document.createComment(DEV ? 'vidact:choice' : '')
+    const end = document.createComment(DEV ? '/vidact:choice' : '')
     parent.insertBefore(start, before)
     parent.insertBefore(end, before)
     let selected = -1
@@ -371,7 +351,7 @@ export function choose(
       if (next === selected) return
       const currentParent = rangeParent(start, end, 'choice block')
       const nextOwner = createOwner()
-      const { fragment, nodes } = stageRender(next === 0 ? consequent : alternate, nextOwner)
+      const [fragment, nodes] = stageRender(next === 0 ? consequent : alternate, nextOwner)
       currentParent.insertBefore(fragment, end)
       try {
         for (const node of nodes) commitPendingRefs(node)
@@ -388,17 +368,7 @@ export function choose(
       disposePublished(previousOwner, previousNodes)
     }
 
-    const removeUpdater = subscribe(
-      {
-        scope,
-        reads,
-        additional:
-          additionalScope === undefined || additionalReads === undefined
-            ? undefined
-            : { scope: additionalScope, reads: additionalReads },
-      },
-      update,
-    )
+    const removeUpdater = subscribe(scope, reads, update, additionalScope, additionalReads)
     try {
       update()
     } catch (error) {
@@ -427,8 +397,8 @@ export function dispatch(
   additionalReads?: SourceMask,
 ): StructuralBinding {
   return structural(scope, (parent, before) => {
-    const start = document.createComment('vidact:dispatch')
-    const end = document.createComment('/vidact:dispatch')
+    const start = document.createComment(DEV ? 'vidact:dispatch' : '')
+    const end = document.createComment(DEV ? '/vidact:dispatch' : '')
     parent.insertBefore(start, before)
     parent.insertBefore(end, before)
     const unset = Symbol('Vidact.UnsetIdentity')
@@ -449,7 +419,7 @@ export function dispatch(
       }
       const currentParent = rangeParent(start, end, 'dispatch block')
       const nextOwner = createOwner()
-      const { fragment, nodes } = stageRender(render, nextOwner)
+      const [fragment, nodes] = stageRender(render, nextOwner)
       currentParent.insertBefore(fragment, end)
       try {
         for (const node of nodes) commitPendingRefs(node)
@@ -467,17 +437,7 @@ export function dispatch(
       disposePublished(previousOwner, previousNodes)
     }
 
-    const removeUpdater = subscribe(
-      {
-        scope,
-        reads,
-        additional:
-          additionalScope === undefined || additionalReads === undefined
-            ? undefined
-            : { scope: additionalScope, reads: additionalReads },
-      },
-      update,
-    )
+    const removeUpdater = subscribe(scope, reads, update, additionalScope, additionalReads)
     try {
       update()
     } catch (error) {
@@ -504,35 +464,34 @@ export function keyed<T, K>(
   render: (value: StateSlot<T>, index: StateSlot<number>, itemScope: CompiledScope) => RenderValue,
 ): StructuralBinding {
   return structural(scope, (parent, before) => {
-    const itemSource = source(0)
-    const indexSource = source(1)
+    const itemSource = 1
+    const indexSource = 2
     const list = createKeyedList(
       parent,
       {
         key,
         render(value, index) {
           const owner = createOwner()
-          const itemScope = createCompiledScope()
+          const itemScope = createNarrowCompiledScope()
           const valueSlot = createCompiledState(itemScope, itemSource, value)
           const indexSlot = createCompiledState(itemScope, indexSource, index)
           try {
             const nodes = withOwner(owner, () => {
-              onCleanup(itemScope.dispose)
+              onCleanup(itemScope[3])
               return materialize(render(valueSlot, indexSlot, itemScope))
             })
-            return {
+            return [
               nodes,
-              update(nextValue: T, nextIndex: number) {
-                itemScope.batch(() => {
+              (nextValue: T, nextIndex: number) => {
+                itemScope[2](() => {
                   valueSlot.set(nextValue)
                   indexSlot.set(nextIndex)
                 })
               },
-              dispose: () => disposeOwner(owner),
-            }
+              () => disposeOwner(owner),
+            ] as const
           } catch (error) {
             disposeOwner(owner)
-            itemScope.dispose()
             throw error
           }
         },
@@ -549,7 +508,7 @@ export function keyed<T, K>(
       }
     }
     update()
-    const removeUpdater = scope.add({ reads, run: update })
+    const removeUpdater = scope[0](reads, update)
     onCleanup(() => {
       removeUpdater()
       list.dispose()
@@ -564,34 +523,33 @@ export function indexed<T>(
   render: (value: StateSlot<T>, index: StateSlot<number>, itemScope: CompiledScope) => RenderValue,
 ): StructuralBinding {
   return structural(scope, (parent, before) => {
-    const itemSource = source(0)
-    const indexSource = source(1)
+    const itemSource = 1
+    const indexSource = 2
     const list = createIndexedList<T>(
       parent,
       {
         render(value, index) {
           const owner = createOwner()
-          const itemScope = createCompiledScope()
+          const itemScope = createNarrowCompiledScope()
           const valueSlot = createCompiledState(itemScope, itemSource, value)
           const indexSlot = createCompiledState(itemScope, indexSource, index)
           try {
             const nodes = withOwner(owner, () => {
-              onCleanup(itemScope.dispose)
+              onCleanup(itemScope[3])
               return materialize(render(valueSlot, indexSlot, itemScope))
             })
-            return {
+            return [
               nodes,
-              update(nextValue: T, nextIndex: number) {
-                itemScope.batch(() => {
+              (nextValue: T, nextIndex: number) => {
+                itemScope[2](() => {
                   valueSlot.set(nextValue)
                   indexSlot.set(nextIndex)
                 })
               },
-              dispose: () => disposeOwner(owner),
-            }
+              () => disposeOwner(owner),
+            ] as const
           } catch (error) {
             disposeOwner(owner)
-            itemScope.dispose()
             throw error
           }
         },
@@ -608,7 +566,7 @@ export function indexed<T>(
       }
     }
     update()
-    const removeUpdater = scope.add({ reads, run: update })
+    const removeUpdater = scope[0](reads, update)
     onCleanup(() => {
       removeUpdater()
       list.dispose()
@@ -621,12 +579,14 @@ export function compiledRoot(
   render: () => CompiledRenderValue,
 ): CompiledComponentResult {
   const owner = scopeOwners.get(scope)
-  if (owner === undefined) throw new Error('compiledRoot received an unknown scope')
-  const start = document.createComment('vidact:component')
-  const end = document.createComment('/vidact:component')
+  if (owner === undefined) {
+    throw new Error(DEV ? 'compiledRoot received an unknown scope' : 'V004')
+  }
+  const start = document.createComment(DEV ? 'vidact:component' : '')
+  const end = document.createComment(DEV ? '/vidact:component' : '')
   const fragment = document.createDocumentFragment()
   fragment.append(start, end)
-  owner.cleanups.add(() => {
+  owner[1].add(() => {
     try {
       removeBetween(start, end)
     } finally {
@@ -639,7 +599,7 @@ export function compiledRoot(
     withOwner(owner, () => withScopeNamespace(scope, () => insertValue(fragment, render(), end)))
   } catch (error) {
     try {
-      scope.dispose()
+      scope[3]()
     } catch {
       // Preserve the render error that made this component unmountable.
     }
@@ -647,26 +607,25 @@ export function compiledRoot(
   }
 
   let mounted = false
-  const component: CompiledComponentResult = {
-    [STRUCTURAL]: true,
-    [COMPONENT]: true,
-    mount(parent, before) {
-      if (mounted) throw new Error('compiled component is already mounted')
+  const component: CompiledComponentResult = [
+    STRUCTURAL,
+    (parent, before) => {
+      if (mounted) throw new Error(DEV ? 'compiled component is already mounted' : 'V005')
       mounted = true
       adoptCompiledRoot(component)
       try {
         parent.insertBefore(fragment, before)
       } catch (error) {
         try {
-          scope.dispose()
+          scope[3]()
         } catch {
           // Preserve the insertion error that made this component unmountable.
         }
         throw error
       }
     },
-  }
-  componentRanges.set(component, { start, end, scope })
+  ]
+  componentRanges.set(component, [start, end, scope])
   return component
 }
 
@@ -674,9 +633,9 @@ export function adoptCompiledRoot(root: unknown): void {
   if (!isCompiledComponentResult(root)) return
   const range = componentRanges.get(root)
   if (range === undefined) return
-  const owner = scopeOwners.get(range.scope)
+  const owner = scopeOwners.get(range[2])
   if (activeOwner !== null && owner !== undefined && activeOwner !== owner) {
-    activeOwner.cleanups.add(range.scope.dispose)
+    activeOwner[1].add(range[2][3])
   }
 }
 
@@ -690,7 +649,7 @@ export function constructCompiledComponent<T extends CompiledRenderValue>(compon
     // oxlint-disable-next-line unicorn/no-array-reverse - scopes is already copied to avoid mutation during iteration
     for (const scope of [...scopes].reverse()) {
       try {
-        scope.dispose()
+        scope[3]()
       } catch {
         // Preserve the construction error that made this component unmountable.
       }
@@ -702,8 +661,10 @@ export function constructCompiledComponent<T extends CompiledRenderValue>(compon
 }
 
 export function queueElementRef(element: Element, value: unknown): void {
-  if (!isRefValue(value)) throw new TypeError('ref must be a callback or an object with current')
-  pendingRefs.set(element, { owner: activeOwner, value })
+  if (!isRefValue(value)) {
+    throw new TypeError(DEV ? 'ref must be a callback or an object with current' : 'V006')
+  }
+  pendingRefs.set(element, [activeOwner, value])
 }
 
 export function registerCompiledCleanup(cleanup: () => void): void {
@@ -716,35 +677,37 @@ export function mountCompiled(
 ): { dispose: () => void } {
   const root = constructCompiledComponent(component)
   const range = componentRanges.get(root)
-  if (range === undefined) throw new Error('mountCompiled received an unknown component result')
+  if (range === undefined) {
+    throw new Error(DEV ? 'mountCompiled received an unknown component result' : 'V007')
+  }
   const previous = [...host.childNodes]
   try {
-    root.mount(host, previous[0] ?? null)
-    commitRangeRefs(range.start, range.end)
+    root[1](host, previous[0] ?? null)
+    commitRangeRefs(range[0], range[1])
     for (const node of previous) host.removeChild(node)
   } catch (error) {
     try {
-      range.scope.dispose()
+      range[2][3]()
     } catch {
       // Preserve the mount error while still running every component cleanup.
     }
     throw error
   }
   return {
-    dispose: range.scope.dispose,
+    dispose: range[2][3],
   }
 }
 
 export function isCompiledBinding(value: unknown): value is CompiledBinding<unknown> {
-  return typeof value === 'object' && value !== null && BINDING in value
+  return Array.isArray(value) && value[0] === BINDING
 }
 
 export function isStructuralBinding(value: unknown): value is StructuralBinding {
-  return typeof value === 'object' && value !== null && STRUCTURAL in value
+  return Array.isArray(value) && value[0] === STRUCTURAL
 }
 
 export function isCompiledComponentResult(value: unknown): value is CompiledComponentResult {
-  return typeof value === 'object' && value !== null && COMPONENT in value
+  return isStructuralBinding(value) && componentRanges.has(value)
 }
 
 export function mountCompiledBinding(parent: Node, value: CompiledBinding<unknown>): void {
@@ -755,16 +718,16 @@ export function mountCompiledProp(
   value: CompiledBinding<unknown>,
   apply: (next: unknown) => void | (() => void),
 ): void {
-  let current = value.evaluate()
+  let current = value[1]()
   let cleanup = apply(current)
-  const removeUpdater = subscribe(value, () => {
-    const next = value.evaluate()
+  const removeUpdater = subscribeBinding(value, () => {
+    const next = value[1]()
     if (Object.is(next, current)) return
     const previous = current
     let nextCleanup: void | (() => void)
     let committedNext = false
-    stagePublication({
-      commit() {
+    stagePublication([
+      () => {
         try {
           nextCleanup = apply(next)
         } catch (error) {
@@ -780,14 +743,14 @@ export function mountCompiledProp(
         cleanup = nextCleanup
         current = next
       },
-      rollback() {
+      () => {
         if (!committedNext) return
         nextCleanup?.()
         cleanup = apply(previous)
         current = previous
         committedNext = false
       },
-    })
+    ])
   })
   onCleanup(() => {
     removeUpdater()
@@ -800,60 +763,73 @@ export function mountCompiledPropTransition<T>(
   initialize: (initial: T) => void,
   prepare: (next: T, previous: T) => CompiledPropTransition | undefined,
 ): void {
-  let current = value.evaluate()
+  let current = value[1]()
   initialize(current)
-  const removeUpdater = subscribe(value, () => {
-    const next = value.evaluate()
+  const removeUpdater = subscribeBinding(value, () => {
+    const next = value[1]()
     if (Object.is(next, current)) return
     const previous = current
     const transition = prepare(next, previous)
     let attempted = false
-    stagePublication({
-      ...(transition?.priority === undefined ? {} : { priority: transition.priority }),
-      commit() {
+    stagePublication([
+      () => {
         attempted = true
-        transition?.commit()
+        transition?.[0]()
         current = next
       },
-      rollback() {
+      () => {
         if (!attempted) return
         try {
-          transition?.rollback()
+          transition?.[1]()
         } finally {
           current = previous
           attempted = false
         }
       },
-      ...(transition?.abort === undefined ? {} : { abort: transition.abort }),
-      ...(transition?.finalize === undefined ? {} : { finalize: transition.finalize }),
-    })
+      transition?.[2],
+      transition?.[3],
+      transition?.[4],
+    ])
   })
   onCleanup(removeUpdater)
 }
 
-function structural(scope: CompiledScope, mount: StructuralBinding['mount']): StructuralBinding {
+function structural(scope: CompiledScope, mount: StructuralBinding[1]): StructuralBinding {
   let mounted = false
-  return {
-    [STRUCTURAL]: true,
-    mount(parent, before) {
-      if (mounted) throw new Error('compiled block is already mounted')
+  return [
+    STRUCTURAL,
+    (parent, before) => {
+      if (mounted) throw new Error(DEV ? 'compiled block is already mounted' : 'V008')
       mounted = true
       withScopeNamespace(scope, () => mount(parent, before))
     },
-  }
+  ]
 }
 
 function subscribe(
-  dependency: CompiledDependency & { readonly additional: CompiledDependency | undefined },
+  scope: CompiledScope,
+  reads: SourceMask,
   run: () => void,
+  additionalScope?: CompiledScope,
+  additionalReads?: SourceMask,
 ): () => void {
-  const runInOwnerNamespace = (): void => withScopeNamespace(dependency.scope, run)
-  const removers = [dependency, dependency.additional]
-    .filter((item): item is CompiledDependency => item !== undefined && !isEmptySources(item.reads))
-    .map((item) => item.scope.add({ reads: item.reads, run: runInOwnerNamespace }))
+  const removers = [scope[0](reads, run)]
+  if (additionalScope !== undefined && additionalReads !== undefined) {
+    removers.push(additionalScope[0](additionalReads, () => withScopeNamespace(scope, run)))
+  }
   return () => {
     for (const remove of removers) remove()
   }
+}
+
+function subscribeBinding(compiledBinding: CompiledBinding<unknown>, run: () => void): () => void {
+  return subscribe(
+    compiledBinding[2],
+    compiledBinding[3],
+    run,
+    compiledBinding[4],
+    compiledBinding[5],
+  )
 }
 
 function withScopeNamespace<Result>(scope: CompiledScope, operation: () => Result): Result {
@@ -861,7 +837,7 @@ function withScopeNamespace<Result>(scope: CompiledScope, operation: () => Resul
 }
 
 function createOwner(): Owner {
-  return { disposed: false, cleanups: new Set() }
+  return [false, new Set()]
 }
 
 function withOwner<T>(owner: Owner, operation: () => T): T {
@@ -875,14 +851,14 @@ function withOwner<T>(owner: Owner, operation: () => T): T {
 }
 
 function onCleanup(cleanup: () => void): void {
-  activeOwner?.cleanups.add(cleanup)
+  activeOwner?.[1].add(cleanup)
 }
 
 function disposeOwner(owner: Owner): void {
-  if (owner.disposed) return
-  owner.disposed = true
-  const cleanups = [...owner.cleanups]
-  owner.cleanups.clear()
+  if (owner[0]) return
+  owner[0] = true
+  const cleanups = [...owner[1]]
+  owner[1].clear()
   let firstError: unknown
   let hasError = false
   for (let index = cleanups.length - 1; index >= 0; index -= 1) {
@@ -901,11 +877,11 @@ function mountCompiledBindingBefore(
   value: CompiledBinding<unknown>,
   before: Node | null,
 ): void {
-  const start = document.createComment('vidact:binding')
-  const end = document.createComment('/vidact:binding')
+  const start = document.createComment(DEV ? 'vidact:binding' : '')
+  const end = document.createComment(DEV ? '/vidact:binding' : '')
   parent.insertBefore(start, before)
   parent.insertBefore(end, before)
-  const unset = Symbol('Vidact.UnsetBinding')
+  const unset = Symbol(DEV ? 'Vidact.UnsetBinding' : undefined)
   let current: unknown = unset
   let currentOwner: Owner | null = null
   let text: Text | null = null
@@ -917,7 +893,7 @@ function mountCompiledBindingBefore(
     disposeRange(owner, start, end)
   }
   const update = (): void => {
-    const next = value.evaluate()
+    const next = value[1]()
     if (current !== unset && Object.is(next, current)) return
     const currentParent = rangeParent(start, end, 'binding range')
 
@@ -927,16 +903,16 @@ function mountCompiledBindingBefore(
         const target = text
         const previousContent = target.data
         const previous = current
-        stagePublication({
-          commit() {
+        stagePublication([
+          () => {
             if (target.data !== content) target.data = content
             current = next
           },
-          rollback() {
+          () => {
             if (target.data !== previousContent) target.data = previousContent
             current = previous
           },
-        })
+        ])
         return
       }
       clear()
@@ -947,7 +923,7 @@ function mountCompiledBindingBefore(
     }
 
     const nextOwner = createOwner()
-    const { fragment, nodes: staged } = stageValue(next as RenderValue, nextOwner)
+    const [fragment, staged] = stageValue(next as RenderValue, nextOwner)
     try {
       clear()
     } catch (error) {
@@ -961,7 +937,7 @@ function mountCompiledBindingBefore(
   }
 
   update()
-  const removeUpdater = subscribe(value, update)
+  const removeUpdater = subscribeBinding(value, update)
   onCleanup(() => {
     removeUpdater()
     clear()
@@ -985,7 +961,7 @@ function materialize(value: RenderValue): Node[] {
 function stageValue(
   value: RenderValue,
   owner: Owner,
-): { readonly fragment: DocumentFragment; readonly nodes: readonly Node[] } {
+): readonly [fragment: DocumentFragment, nodes: readonly Node[]] {
   const fragment = document.createDocumentFragment()
   const moves: NodePosition[] = []
   try {
@@ -999,13 +975,13 @@ function stageValue(
     }
     throw error
   }
-  return { fragment, nodes: [...fragment.childNodes] }
+  return [fragment, [...fragment.childNodes]]
 }
 
 function stageRender(
   render: () => CompiledRenderValue,
   owner: Owner,
-): { readonly fragment: DocumentFragment; readonly nodes: readonly Node[] } {
+): readonly [fragment: DocumentFragment, nodes: readonly Node[]] {
   try {
     return stageValue(withOwner(owner, render), owner)
   } catch (error) {
@@ -1027,7 +1003,7 @@ function insertValue(
   if (value === null || value === undefined || typeof value === 'boolean') return
   if (isStructuralBinding(value)) {
     adoptCompiledRoot(value)
-    value.mount(parent, before)
+    value[1](parent, before)
     return
   }
   if (isCompiledBinding(value)) {
@@ -1044,7 +1020,7 @@ function insertValue(
     return
   }
   if (value instanceof Node) {
-    moves?.push({ node: value, parent: value.parentNode, nextSibling: value.nextSibling })
+    moves?.push([value, value.parentNode, value.nextSibling])
     adoptCompiledRoot(value)
     claimPendingRefOwners(value)
     parent.insertBefore(value, before)
@@ -1052,7 +1028,9 @@ function insertValue(
     return
   }
   if (typeof value === 'object' || typeof value === 'function' || typeof value === 'symbol') {
-    throw new TypeError('unsupported compiled child value; expected a DOM node or owned block')
+    throw new TypeError(
+      DEV ? 'unsupported compiled child value; expected a DOM node or owned block' : 'V009',
+    )
   }
   parent.insertBefore(document.createTextNode(String(value)), before)
 }
@@ -1061,13 +1039,12 @@ function restoreNodePositions(positions: readonly NodePosition[]): void {
   for (let index = positions.length - 1; index >= 0; index -= 1) {
     const position = positions[index]
     if (position === undefined) continue
-    if (position.parent === null) {
-      position.node.parentNode?.removeChild(position.node)
+    if (position[1] === null) {
+      position[0].parentNode?.removeChild(position[0])
       continue
     }
-    const before =
-      position.nextSibling?.parentNode === position.parent ? position.nextSibling : null
-    position.parent.insertBefore(position.node, before)
+    const before = position[2]?.parentNode === position[1] ? position[2] : null
+    position[1].insertBefore(position[0], before)
   }
 }
 
@@ -1083,7 +1060,7 @@ function removeBetween(start: Node, end: Node): void {
 function rangeParent(start: Node, end: Node, description: string): Node {
   const parent = end.parentNode
   if (parent === null || start.parentNode !== parent) {
-    throw new Error(`cannot update a detached ${description}`)
+    throw new Error(DEV ? `cannot update a detached ${description}` : 'V010')
   }
   return parent
 }
@@ -1131,7 +1108,7 @@ function isRefValue(value: unknown): value is RefValue {
 function claimPendingRefOwners(root: Node): void {
   visitElements(root, (element) => {
     const pending = pendingRefs.get(element)
-    if (pending !== undefined && pending.owner === null) pending.owner = activeOwner
+    if (pending !== undefined && pending[0] === null) pending[0] = activeOwner
   })
 }
 
@@ -1140,9 +1117,9 @@ function commitPendingRefs(root: Node): void {
     const pending = pendingRefs.get(element)
     if (pending === undefined) return
     pendingRefs.delete(element)
-    const owner = pending.owner ?? activeOwner
-    const cleanup = attachRef(pending.value, element)
-    owner?.cleanups.add(cleanup)
+    const owner = pending[0] ?? activeOwner
+    const cleanup = attachRef(pending[1], element)
+    owner?.[1].add(cleanup)
   })
 }
 
@@ -1192,7 +1169,7 @@ function drainFlushes(): void {
       const runCount = (runs.get(flush) ?? 0) + 1
       if (runCount > MAX_FLUSH_PASSES) {
         scheduledFlushes.clear()
-        throw new Error('Vidact compiled scopes did not stabilize')
+        throw new Error(DEV ? 'Vidact compiled scopes did not stabilize' : 'V011')
       }
       runs.set(flush, runCount)
       flush()
@@ -1212,11 +1189,11 @@ function drainFlushes(): void {
 
 function stagePublication(operation: PublicationOperation): void {
   if (activePublication === null) {
-    operation.commit()
+    operation[0]()
     try {
-      operation.finalize?.()
+      operation[3]?.()
     } catch (error) {
-      operation.rollback()
+      operation[1]()
       throw error
     }
     return
@@ -1225,26 +1202,26 @@ function stagePublication(operation: PublicationOperation): void {
 }
 
 function commitPublication(operations: readonly PublicationOperation[]): void {
-  const ordered = operations.some((operation) => operation.priority !== undefined)
-    ? operations.toSorted((left, right) => (left.priority ?? 0) - (right.priority ?? 0))
+  const ordered = operations.some((operation) => operation[4] !== undefined)
+    ? operations.toSorted((left, right) => (left[4] ?? 0) - (right[4] ?? 0))
     : operations
   const applied: PublicationOperation[] = []
   try {
     for (const operation of ordered) {
       applied.push(operation)
-      operation.commit()
+      operation[0]()
     }
   } catch (error) {
     for (let index = applied.length - 1; index >= 0; index -= 1) {
       try {
-        applied[index]?.rollback()
+        applied[index]?.[1]()
       } catch {
         // Preserve the publication error while attempting every inverse.
       }
     }
     for (const operation of ordered.slice(applied.length)) {
       try {
-        operation.abort?.()
+        operation[2]?.()
       } catch {
         // Preserve the publication error while disposing every staged value.
       }
@@ -1252,11 +1229,11 @@ function commitPublication(operations: readonly PublicationOperation[]): void {
     throw error
   }
   try {
-    for (const operation of ordered) operation.finalize?.()
+    for (const operation of ordered) operation[3]?.()
   } catch (error) {
     for (let index = applied.length - 1; index >= 0; index -= 1) {
       try {
-        applied[index]?.rollback()
+        applied[index]?.[1]()
       } catch {
         // Preserve the finalization error while attempting every inverse.
       }
@@ -1268,7 +1245,7 @@ function commitPublication(operations: readonly PublicationOperation[]): void {
 function abortPublication(operations: readonly PublicationOperation[]): void {
   for (let index = operations.length - 1; index >= 0; index -= 1) {
     try {
-      operations[index]?.abort?.()
+      operations[index]?.[2]?.()
     } catch {
       // Preserve the computation error while disposing every staged value.
     }

@@ -98,7 +98,7 @@ describe('direct DOM construction', () => {
     expect(() => multiple.set(true)).toThrow(/select multiple.*array/i)
     expect(select.multiple).toBe(false)
     expect(select.value).toBe('a')
-    scope.dispose()
+    scope[3]()
   })
 
   it('constructs root fragments without a compatibility mount', () => {

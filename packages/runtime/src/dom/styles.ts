@@ -44,15 +44,19 @@ const unitlessProperties = new Set([
   'zoom',
 ])
 
+const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
+
 const appliedStyleNames = new WeakMap<Element, Set<string>>()
 
 export function applyStyleProp(element: Element, value: unknown): void {
   const style = Reflect.get(element, 'style')
   if (!(style instanceof CSSStyleDeclaration)) {
-    throw new TypeError('style is only supported on elements with CSS style declarations')
+    throw new TypeError(
+      DEV ? 'style is only supported on elements with CSS style declarations' : 'V501',
+    )
   }
   if (value !== null && value !== undefined && typeof value !== 'object') {
-    throw new TypeError('style prop expects an object, null, or undefined')
+    throw new TypeError(DEV ? 'style prop expects an object, null, or undefined' : 'V502')
   }
 
   const previous = appliedStyleNames.get(element) ?? new Set<string>()

@@ -11,6 +11,12 @@ execution: code
 
 # Vidact Production Rebuild - Plan
 
+> **Construction decision update (2026-08-23):**
+> [Direct DOM-only construction](../architecture/direct-dom-only-construction.md)
+> supersedes this plan's template-cloning and dual-generator language. Client
+> construction uses one namespace-aware DOM-API backend; the explicit unsafe
+> HTML API remains the only HTML-string sink.
+
 ## Goal Capsule
 
 - **Objective:** Deliver a production-grade compiler that accepts a documented React-shaped TSX subset and emits direct vanilla DOM operations with no Virtual DOM.
@@ -70,7 +76,7 @@ The rebuild needs a smaller *total application footprint*, not merely a tiny inc
 
 - R12. The supported DOM surface MUST include HTML, SVG, MathML, custom elements, attributes and properties, styles, classes, events, refs, controlled form values, prop spreads, fragments, conditionals, and an explicit unsafe-HTML API.
 - R13. The system MUST support deterministic SSR and synchronous whole-root hydration without rebuilding a Virtual DOM. Hydration markers and serialized payloads MUST be versioned and injection-safe, and mismatches MUST produce actionable development diagnostics.
-- R14. The default build MUST avoid runtime code generation and user-controlled HTML sinks. CSP-safe DOM construction MUST remain available when static template cloning is not allowed.
+- R14. Client construction MUST use DOM APIs without runtime code generation or implicit HTML-string sinks. User-controlled HTML is accepted only through the explicit unsafe-HTML contract.
 
 **Packaging and production operation**
 
@@ -229,7 +235,7 @@ It should not be resumed as the production base. `src/analyzers/component/compon
 - KTD5. **Make arrays an explicit compiler and runtime primitive.** Keyed lists reconcile instance records by key and move retained DOM ranges. Unkeyed lists reconcile slots by index. Generic dynamic arrays normalize recursively but do not invent item identity.
 - KTD6. **Use a correctness-first O(n) keyed reconciliation core.** Common prefix and suffix paths plus a key map determine reuse, creation, disposal, and anchor-relative range moves. Start with the smallest implementation that produces correct identity and bounded work. Add a longest-increasing-subsequence move minimizer only if list benchmarks show a material end-to-end win while the full-runtime budget still passes; KTD12 forbids paying its code-size cost speculatively.
 - KTD7. **Split DOM work into direct generated operations and opt-in generic helpers.** Static markup is hoisted. Known dynamic props compile to specialized writes. Prop spread, generic dynamic insertion, delegated events, and list reconciliation import helpers only when used.
-- KTD8. **Offer template-clone and CSP-safe code generation.** Template cloning is the size-oriented default for compiler-owned static HTML. A DOM-API mode avoids `innerHTML` for deployments that enforce Trusted Types without a framework policy. Dynamic text never uses HTML parsing.
+- KTD8. **Use one CSP-safe DOM construction path.** Compiler-owned static and dynamic structure uses DOM APIs. Dynamic text never uses HTML parsing, and the explicit unsafe-HTML contract is the only user-controlled string sink.
 - KTD9. **Schedule in explicit phases.** State writes batch. Pure memos update before DOM render effects. DOM work commits synchronously within the batch. User effects run after the DOM commit and clean up before rerun or owner disposal. Equality follows `Object.is` unless a primitive declares another comparator.
 - KTD10. **Ship ESM-first packages with explicit exports.** Browser runtime, server runtime, compiler, Babel adapter, and Vite adapter are separate entry points. Compiler packages may expose a CommonJS condition where tooling still needs it; browser code stays ESM and side-effect controlled.
 - KTD11. **Treat differential compatibility as a test oracle, not the architecture.** Fixtures within the declared React subset render through React and Vidact and compare public DOM and event outcomes. Vidact-specific timing and unsupported features use their own asserted contract.
@@ -255,7 +261,7 @@ flowchart TB
   Hydrate --> Browser
 ```
 
-The compiler must finish semantic analysis before mutating the source AST. Every accepted component becomes a `ComponentIR` containing static templates, reactive cells, derived computations, DOM bindings, child component calls, control-flow blocks, list blocks, effects, source spans, and feature flags. Diagnostics operate on IR or source analysis, not partially rewritten code.
+The compiler must finish semantic analysis before mutating the source AST. Every accepted component becomes a `ComponentIR` containing a static DOM construction plan, reactive cells, derived computations, DOM bindings, child component calls, control-flow blocks, list blocks, effects, source spans, and feature flags. Diagnostics operate on IR or source analysis, not partially rewritten code.
 
 #### Component and update lifecycle
 
@@ -268,7 +274,7 @@ sequenceDiagram
   participant DOM
   Caller->>Component: mount with reactive props
   Component->>Owner: create component scope
-  Component->>DOM: clone static template and bind ranges
+  Component->>DOM: construct static nodes and bind ranges
   Component->>Signals: create state, memos, render effects
   Signals->>DOM: commit initial dynamic values
   DOM-->>Caller: return owned block
@@ -422,7 +428,7 @@ No persistent application data is migrated by the framework itself. Rollback the
 | “React-compatible” expectations exceed the supported subset | Users assume unsupported React behavior and get subtle bugs. | Use React-shaped language, publish the matrix, reject unsupported imports and syntax, and differential-test accepted cases. |
 | Compiler analysis silently misses a reactive read | DOM becomes stale with no runtime error. | Use signal tracking inside generated computations, restrict static derivation lowering, and error on ambiguous top-level reactive control flow. |
 | List algorithm preserves keys but mishandles multi-node ranges | Nodes cross item boundaries or cleanup targets the wrong row. | Give every item explicit anchors and ownership; property-test operation sequences and run browser identity assertions. |
-| Template cloning conflicts with strict CSP or Trusted Types | Production applications cannot instantiate static templates. | Ship and test a DOM-API codegen mode; document a Trusted Types integration for the template mode. |
+| Direct construction output becomes verbose | Application bundles grow despite a small runtime. | Measure representative applications, specialize repetitive emitted operations, and preserve one DOM semantic path. |
 | SSR markers increase HTML or hydration complexity | Bundle savings move into markup and startup work. | Benchmark marker density, omit unnecessary single-node boundaries, and make mismatch diagnostics development-only. |
 | Fine-grained ownership leaks through errors or async work | Detached nodes and subscriptions accumulate. | Centralize owner creation and cleanup, use `try/finally` around owner transitions, and instrument disposer counts in tests. |
 | Generated code becomes larger than a small general runtime | Total application bytes regress on component-heavy apps. | Track generated and total bytes across a corpus; add codegen peepholes only when measurements justify them. |
@@ -502,8 +508,8 @@ No persistent application data is migrated by the framework itself. Rollback the
 - **Requirements:** R1, R2, R5, R8, R11, R12, R14-R16.
 - **Decisions:** KTD4, KTD7, KTD8, KTD10.
 - **Dependencies:** U2, U3.
-- **Files:** `packages/compiler/src/codegen/client/`, `packages/runtime/src/dom/block.ts`, `packages/runtime/src/dom/insert.ts`, `packages/runtime/src/dom/props.ts`, `packages/runtime/src/dom/events.ts`, `packages/runtime/src/dom/template.ts`, `packages/runtime/test/dom-bindings.test.ts`, `packages/test-app/tests/dom-bindings.spec.ts`.
-- **Approach:** Hoist static templates, bind source-located dynamic parts, and emit direct operations for known names. Use owned ranges for conditionals and fragments. Delegate common bubbling events at the mount root and attach non-bubbling, capture, and custom events directly. Keep template and CSP-safe generators behaviorally equivalent.
+- **Files:** `packages/compiler/src/codegen/client/`, `packages/runtime/src/dom/block.ts`, `packages/runtime/src/dom/insert.ts`, `packages/runtime/src/dom/props.ts`, `packages/runtime/src/dom/events.ts`, `packages/runtime/test/dom-bindings.test.ts`, `packages/test-app/tests/dom-bindings.spec.ts`.
+- **Approach:** Emit direct construction and binding operations for known names. Use owned ranges for conditionals and fragments. Delegate common bubbling events at the mount root and attach non-bubbling, capture, and custom events directly. Keep one namespace-aware DOM policy for every compiled intrinsic.
 - **Patterns to follow:** The legacy `src/runtime/createElement.js` demonstrates the needed prop categories. Replace its generic always-on diff with generated operations and explicit fallback helpers. Use the marker-based dynamic insertion lessons from `dom-expressions` without copying its whole runtime surface.
 - **Test scenarios:**
   - Text updates preserve zero, escape markup, skip nullish and boolean values, and replace text with blocks and back.
@@ -511,7 +517,7 @@ No persistent application data is migrated by the framework itself. Rollback the
   - Style objects remove missing properties, custom CSS properties work, and transitions between string, object, and null values are correct.
   - Event handler replacement, removal, capture, non-bubbling events, shadow DOM retargeting, and root disposal behave correctly.
   - Refs receive mounted elements and are cleared or cleaned when their block is removed.
-  - Template and CSP-safe modes produce equivalent DOM for every shared fixture.
+  - Direct construction preserves the same DOM semantics for static and reactive values.
 - **Verification:** Generated output contains no React imports or element objects, browser tests pass across Chromium, Firefox, and WebKit, and unused generic helpers are absent from bundle reports.
 
 ### U5. Add component props and React-shaped hooks

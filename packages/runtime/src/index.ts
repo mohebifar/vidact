@@ -1,3 +1,5 @@
+// oxlint-disable-next-line typescript/triple-slash-reference -- Include the build define in consuming TypeScript programs.
+/// <reference path="./env.d.ts" />
 export { combineSources, intersectsSources, source, type SourceMask } from './source-mask.ts'
 export type { StateUpdate } from './state-slot.ts'
 export {
@@ -15,6 +17,7 @@ export {
   compiledRoot,
   createCompiledProp,
   createCompiledScope,
+  createNarrowCompiledScope,
   createCompiledState,
   dispatch,
   indexed,
@@ -23,7 +26,6 @@ export {
   when,
   type CompiledBinding,
   type CompiledComponentResult,
-  type CompiledDependency,
   type CompiledRenderValue,
   type CompiledScope,
   type ChoiceMode,

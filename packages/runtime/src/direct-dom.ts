@@ -27,6 +27,8 @@ import {
 import { applyDomProp } from './dom/properties.ts'
 import { mountRawHtmlProp } from './raw-html.ts'
 
+const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
+
 export type DirectChild =
   | Node
   | string
@@ -41,13 +43,18 @@ export type DirectChild =
 export type DirectProps = Record<string, unknown> | null
 export type DirectComponent = (props: Record<string, unknown>) => DirectChild
 
-export const Fragment = Symbol('Vidact.Fragment')
+export const Fragment = Symbol(DEV ? 'Vidact.Fragment' : undefined)
 
 export function h<Tag extends keyof HTMLElementTagNameMap>(
   type: Tag,
   props: DirectProps,
   ...children: DirectChild[]
 ): HTMLElementTagNameMap[Tag]
+export function h<Tag extends keyof MathMLElementTagNameMap>(
+  type: Tag,
+  props: DirectProps,
+  ...children: DirectChild[]
+): MathMLElementTagNameMap[Tag]
 export function h(
   type: typeof Fragment,
   props: DirectProps,
@@ -99,8 +106,10 @@ function applyProps(
   const rawHtml = props.dangerouslySetInnerHTML
   let restoreAfterChildren = false
   let hasControlledRestoration = false
-  for (const [name, value] of Object.entries(props)) {
-    if (name === 'key' || name === INTERNAL_NAMESPACE_PROP) continue
+  for (const name in props) {
+    if (!Object.hasOwn(props, name)) continue
+    const value = props[name]
+    if (name === 'key' || name === 'children' || name === INTERNAL_NAMESPACE_PROP) continue
     if (name === 'dangerouslySetInnerHTML') continue
     if (!hasControlledRestoration && isControlledFormProp(element, name)) {
       registerCompiledCleanup(ensureControlledFormRestoration(element))
@@ -109,7 +118,7 @@ function applyProps(
     if (name === 'value' && element instanceof HTMLSelectElement) restoreAfterChildren = true
     if (name === 'ref') {
       if (isCompiledBinding(value)) {
-        throw new Error('reactive ref identities are not supported')
+        throw new Error(DEV ? 'reactive ref identities are not supported' : 'V101')
       }
       queueElementRef(element, value)
       continue
@@ -123,12 +132,18 @@ function applyProps(
         mountCompiledPropTransition(
           value,
           (initial) => applyDomProp(element, name, initial),
-          (next, previous) => ({
-            priority: -1,
-            commit: () => applyDomProp(element, name, next),
-            rollback: () => applyDomProp(element, name, previous),
-            finalize: () => restoreControlledFormState(element),
-          }),
+          // oxlint-disable no-sparse-arrays -- Preserve the compact positional ABI.
+          (next, previous) => [
+            () => applyDomProp(element, name, next),
+            () => {
+              applyDomProp(element, name, previous)
+              restoreControlledFormState(element)
+            },
+            ,
+            () => restoreControlledFormState(element),
+            -1,
+          ],
+          // oxlint-enable no-sparse-arrays
         )
         continue
       }
@@ -143,7 +158,9 @@ function applyProps(
   }
   if (rawHtml === null || rawHtml === undefined) return restoreAfterChildren
   if (!(element instanceof HTMLElement)) {
-    throw new Error('dangerouslySetInnerHTML on SVG and MathML elements is not supported')
+    throw new Error(
+      DEV ? 'dangerouslySetInnerHTML on SVG and MathML elements is not supported' : 'V102',
+    )
   }
   mountRawHtmlProp(element, rawHtml, children)
   return restoreAfterChildren
@@ -156,7 +173,7 @@ function appendChildren(parent: Node, children: readonly DirectChild[]): void {
 function appendChild(parent: Node, child: DirectChild): void {
   if (child === null || child === undefined || typeof child === 'boolean') return
   if (isStructuralBinding(child)) {
-    child.mount(parent, null)
+    child[1](parent, null)
     return
   }
   if (isCompiledBinding(child)) {
@@ -172,7 +189,9 @@ function appendChild(parent: Node, child: DirectChild): void {
     return
   }
   if (typeof child === 'object' || typeof child === 'function' || typeof child === 'symbol') {
-    throw new TypeError('unsupported direct child value; expected a DOM node or owned block')
+    throw new TypeError(
+      DEV ? 'unsupported direct child value; expected a DOM node or owned block' : 'V103',
+    )
   }
   parent.appendChild(document.createTextNode(String(child)))
 }
