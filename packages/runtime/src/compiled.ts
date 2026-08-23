@@ -25,7 +25,7 @@ import {
   noteHydrationStructuralParent,
   withHydrationInsertion,
   withHydrationCursor,
-} from './hydration.ts'
+} from './hydration-bridge.ts'
 import { createIndexedList } from './indexed-list.ts'
 import { createKeyedList } from './keyed-list.ts'
 import { scheduleTask } from './scheduler.ts'

@@ -39,7 +39,7 @@ import {
   finishHydrationArrayRange,
   hydrationFragmentChildren,
   isHydrating,
-} from './hydration.ts'
+} from './hydration-bridge.ts'
 import { mountRawHtmlProp } from './raw-html.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__

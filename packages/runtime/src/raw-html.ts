@@ -3,7 +3,7 @@ import {
   mountCompiledPropTransition,
   type CompiledPropTransition,
 } from './compiled.ts'
-import { HydrationMismatch, isHydrating } from './hydration.ts'
+import { HydrationMismatch, isHydrating } from './hydration-bridge.ts'
 
 const RAW_HTML_PUBLICATION_PRIORITY = 100
 const rawHtmlHosts = new WeakSet<HTMLElement>()

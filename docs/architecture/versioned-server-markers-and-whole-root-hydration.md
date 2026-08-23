@@ -53,6 +53,12 @@ Root identity uses the same `:${identifierPrefix}r${ordinal}:` allocation on the
 server and hydrate targets. The identifier prefix is part of the render/root
 input, and allocation is request/root local.
 
+Core DOM modules call a small hydration-operations bridge. The ordinary client
+entry leaves that bridge inactive; the hydrate entry installs the versioned DOM
+scanner and claimant. This keeps one compiled owner/update ABI without pulling
+the hydrate-only scanner into client chunks. The size gate rejects any client
+fixture containing `hydration.js`.
+
 A missing marker, unsupported protocol version, tag/namespace mismatch, text
 mismatch, or unclaimable range raises a hydration mismatch. The mismatch is
 reported through `onRecoverableError`; the current defined recovery boundary is

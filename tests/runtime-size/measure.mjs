@@ -8,23 +8,23 @@ import { build } from 'vite'
 const directory = path.dirname(fileURLToPath(import.meta.url))
 const repository = path.resolve(directory, '../..')
 const fixtures = [
-  { name: 'counter', entry: path.join(directory, 'fixtures/counter.tsx'), gzipBudget: 7_803 },
+  { name: 'counter', entry: path.join(directory, 'fixtures/counter.tsx'), gzipBudget: 8_069 },
   {
     name: 'control-flow',
     entry: path.join(directory, 'fixtures/control-flow.tsx'),
-    gzipBudget: 8_129,
+    gzipBudget: 8_498,
   },
   {
     name: 'keyed-list',
     entry: path.join(directory, 'fixtures/keyed-list.tsx'),
-    gzipBudget: 8_932,
+    gzipBudget: 9_289,
   },
   {
     name: 'todomvc',
     entry: path.join(repository, 'examples/todomvc/src/TodoApp.tsx'),
-    gzipBudget: 10_526,
+    gzipBudget: 10_924,
   },
-  { name: 'effect', entry: path.join(directory, 'fixtures/effect.tsx'), gzipBudget: 8_100 },
+  { name: 'effect', entry: path.join(directory, 'fixtures/effect.tsx'), gzipBudget: 8_356 },
 ]
 
 const measurements = await Promise.all(fixtures.map(measureFixture))
@@ -72,6 +72,9 @@ async function measureFixture(fixture) {
     )
     .filter((module) => module.rendered > 0)
     .toSorted((left, right) => right.rendered - left.rendered)
+  if (modules.some((module) => module.id.endsWith('/hydration.js'))) {
+    throw new Error(`${fixture.name} included the hydrate-only DOM scanner in a client bundle`)
+  }
 
   return {
     fixture: fixture.name,

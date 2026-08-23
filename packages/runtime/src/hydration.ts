@@ -1,6 +1,10 @@
-const HYDRATION_PREFIX = 'vidact:v1'
+import {
+  HydrationMismatch,
+  installHydrationOperations,
+  type HydrationRange,
+} from './hydration-bridge.ts'
 
-type HydrationRange = readonly [start: Comment, end: Comment]
+const HYDRATION_PREFIX = 'vidact:v1'
 
 interface HydrationState {
   readonly host: ParentNode
@@ -13,17 +17,6 @@ interface HydrationState {
   componentIndex: number
   claimedElementCount: number
   pendingStructuralParents: number
-}
-
-export interface HydrationMismatchInfo {
-  readonly message: string
-}
-
-export class HydrationMismatch extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'HydrationMismatch'
-  }
 }
 
 let activeHydration: HydrationState | undefined
@@ -431,4 +424,30 @@ function containsArrayMarker(element: Element): boolean {
     if (isMarker(node, `${HYDRATION_PREFIX}:a`)) return true
   }
   return false
+}
+
+export function installHydration(): void {
+  installHydrationOperations({
+    begin: beginHydration,
+    finish: finishHydration,
+    rootMarkers: hydrationRootMarkers,
+    active: isHydrating,
+    createFragment: createHydrationFragment,
+    fragmentChildren: hydrationFragmentChildren,
+    claimElement: claimHydrationElement,
+    noteStructuralParent: noteHydrationStructuralParent,
+    claimComponentRange: claimHydrationComponentRange,
+    withCursor: withHydrationCursor,
+    claimNode: claimHydrationNode,
+    claimComponentMount: claimHydrationComponentMount,
+    claimText: claimHydrationText,
+    claimTextRange: claimHydrationTextRange,
+    claimArrayRange: claimHydrationArrayRange,
+    finishArrayRange: finishHydrationArrayRange,
+    claimSlotRange: claimHydrationSlotRange,
+    withInsertion: withHydrationInsertion,
+    insertionPoint: hydrationInsertionPoint,
+    cursor: hydrationCursor,
+    rangeParent: hydrationRangeParent,
+  })
 }
