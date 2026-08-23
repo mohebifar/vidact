@@ -6,6 +6,9 @@
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
+    "./hydrate": "./src/hydrate.ts",
+    "./hydrate/jsx-dev-runtime": "./src/hydrate-jsx-dev-runtime.ts",
+    "./hydrate/jsx-runtime": "./src/hydrate-jsx-runtime.ts",
     "./jsx-runtime": "./src/jsx-runtime.ts",
     "./protocol": "./src/protocol.ts",
     "./server": "./src/server.ts",

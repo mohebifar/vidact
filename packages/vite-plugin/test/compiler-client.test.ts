@@ -82,6 +82,25 @@ describe('vidact compiler client', () => {
     expect(compilation.code).not.toContain('__vidactCompiledRoot')
   })
 
+  it('routes hydration builds through the isolated hydration runtime entry', async () => {
+    const compilation = await compileWithCompiler(
+      `
+        import { useState } from 'react'
+        export function Counter() {
+          const [count, setCount] = useState(0)
+          return <button onClick={() => setCount(count + 1)}>{count}</button>
+        }
+      `,
+      'counter.tsx',
+      manifestPath,
+      { target: 'hydrate', features: [] },
+    )
+
+    expect(compilation.configuration.target).toBe('hydrate')
+    expect(compilation.code).toContain('from "@vidact/runtime/hydrate"')
+    expect(compilation.code).not.toContain('from "@vidact/runtime"')
+  })
+
   it('fingerprints compiler, runtime, target, features, environment, and source inputs', () => {
     const base = {
       source: 'export function App() { return <main /> }',

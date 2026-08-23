@@ -1,4 +1,5 @@
 import {
+  hydrateCompiled,
   mountCompiled,
   type CompiledComponentResult,
   type MountCompiledOptions,
@@ -21,6 +22,26 @@ export function createRoot(host: ParentNode, options?: MountCompiledOptions): Co
         throw new Error(DEV ? 'compiled root already has a mounted application' : 'V025')
       }
       dispose = mountCompiled(application, host, options).dispose
+    },
+    unmount() {
+      if (terminal) return
+      terminal = true
+      dispose?.()
+      dispose = undefined
+    },
+  }
+}
+
+export function hydrateRoot(
+  host: ParentNode,
+  application: () => CompiledComponentResult,
+  options?: MountCompiledOptions,
+): CompiledRoot {
+  let dispose: (() => void) | undefined = hydrateCompiled(application, host, options).dispose
+  let terminal = false
+  return {
+    mount() {
+      throw new Error(DEV ? 'hydration roots are mounted during creation' : 'V029')
     },
     unmount() {
       if (terminal) return

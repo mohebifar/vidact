@@ -27,6 +27,7 @@ export interface ServerRenderOptions {
 }
 
 interface RenderContext {
+  hydrationMarkers: boolean
   identifierPrefix: string
   nextId: number
 }
@@ -124,18 +125,29 @@ const ATTRIBUTE_ALIASES: Readonly<Record<string, string>> = {
 }
 
 const VALID_ATTRIBUTE_NAME = /^[A-Za-z_:][A-Za-z0-9:._-]*$/
+const HYDRATION_PREFIX = 'vidact:v1'
 const UNSAFE_HTML = typeof __VIDACT_UNSAFE_HTML__ !== 'undefined' && __VIDACT_UNSAFE_HTML__
 
 let activeRender: RenderContext | undefined
+const serverBuiltins = new WeakSet<ServerComponent>()
 
 export const Fragment = Symbol('Vidact.ServerFragment')
 
 export function jsx(type: ServerElementType, props: ServerProps, _key?: unknown): ServerNode {
   if (type === Fragment) {
-    return serverNode((context) => serializeChild(props?.children as ServerChild, context))
+    return serverNode((context) =>
+      Object.hasOwn(props ?? {}, 'children')
+        ? serializeChild(props?.children as ServerChild, context)
+        : '',
+    )
   }
   if (typeof type === 'function') {
-    return serverNode((context) => serializeChild(type(props ?? {}), context))
+    return serverNode((context) => {
+      const content = serializeChild(type(props ?? {}), context)
+      return context.hydrationMarkers && !serverBuiltins.has(type)
+        ? hydrationRange('c', content)
+        : content
+    })
   }
 
   if (!VALID_ATTRIBUTE_NAME.test(type)) throw new TypeError(`invalid server element name ${type}`)
@@ -152,7 +164,12 @@ export function jsx(type: ServerElementType, props: ServerProps, _key?: unknown)
     if (rawHtml !== undefined && hasRenderableChild(props?.children as ServerChild)) {
       throw new TypeError('cannot set both children and dangerouslySetInnerHTML')
     }
-    const children = rawHtml ?? serializeChild(props?.children as ServerChild, context)
+    const hasChildren = Object.hasOwn(props ?? {}, 'children')
+    const children =
+      rawHtml ??
+      (hasChildren
+        ? serializeChild(props?.children as ServerChild, context, !isRawTextElement(type))
+        : '')
     return `<${type}${attributes}>${children}</${type}>`
   })
 }
@@ -165,6 +182,28 @@ export function renderToString(
 ): string {
   const previous = activeRender
   const context = {
+    hydrationMarkers: true,
+    identifierPrefix: options.identifierPrefix ?? '',
+    nextId: 0,
+  }
+  activeRender = context
+  try {
+    return hydrationRange(
+      'r',
+      serializeChild(typeof value === 'function' ? value() : value, context),
+    )
+  } finally {
+    activeRender = previous
+  }
+}
+
+export function renderToStaticMarkup(
+  value: ServerChild | (() => ServerChild),
+  options: ServerRenderOptions = {},
+): string {
+  const previous = activeRender
+  const context = {
+    hydrationMarkers: false,
     identifierPrefix: options.identifierPrefix ?? '',
     nextId: 0,
   }
@@ -175,8 +214,6 @@ export function renderToString(
     activeRender = previous
   }
 }
-
-export const renderToStaticMarkup = renderToString
 
 export type StateUpdate<Value> = Value | ((previous: Value) => Value)
 
@@ -239,8 +276,12 @@ export function useSyncExternalStore<Value>(
 }
 
 export function useId(): string {
-  const context = (activeRender ??= { identifierPrefix: '', nextId: 0 })
-  const id = `:${context.identifierPrefix}v${context.nextId.toString(32)}:`
+  const context = (activeRender ??= {
+    hydrationMarkers: true,
+    identifierPrefix: '',
+    nextId: 0,
+  })
+  const id = `:${context.identifierPrefix}r${context.nextId}:`
   context.nextId += 1
   return id
 }
@@ -257,12 +298,13 @@ export function createContext<Value>(defaultValue: Value): ServerContext<Value> 
       }
     })
   context = { [SERVER_CONTEXT]: { defaultValue, stack: [] }, Provider }
+  serverBuiltins.add(Provider)
   return context
 }
 
 export function useContext<Value>(context: ServerContext<Value>): Value {
   const state = context[SERVER_CONTEXT]
-  return state.stack.at(-1) ?? state.defaultValue
+  return state.stack.length === 0 ? state.defaultValue : (state.stack.at(-1) as Value)
 }
 
 export function use<Value>(context: ServerContext<Value>): Value {
@@ -283,14 +325,19 @@ function isServerNode(value: unknown): value is ServerNode {
   return typeof value === 'object' && value !== null && SERVER_NODE in value
 }
 
-function serializeChild(value: ServerChild, context: RenderContext): string {
-  if (value === null || value === undefined || typeof value === 'boolean') return ''
+function serializeChild(value: ServerChild, context: RenderContext, markScalar = true): string {
+  if (value === null || value === undefined || typeof value === 'boolean') {
+    return context.hydrationMarkers && markScalar ? hydrationRange('t', '') : ''
+  }
   if (isServerNode(value)) return value[SERVER_NODE](context)
-  if (Array.isArray(value)) return value.map((child) => serializeChild(child, context)).join('')
+  if (Array.isArray(value)) {
+    return value.map((child) => serializeChild(child, context, markScalar)).join('')
+  }
   if (typeof value === 'object' || typeof value === 'function' || typeof value === 'symbol') {
     throw new TypeError('unsupported server child value')
   }
-  return escapeText(String(value))
+  const content = escapeText(String(value))
+  return context.hydrationMarkers && markScalar ? hydrationRange('t', content) : content
 }
 
 function hasRenderableChild(value: ServerChild): boolean {
@@ -374,6 +421,14 @@ function escapeText(value: string): string {
 
 function escapeAttribute(value: string): string {
   return escapeText(value).replaceAll('"', '&quot;').replaceAll("'", '&#x27;')
+}
+
+function hydrationRange(kind: 'c' | 'r' | 't', content: string): string {
+  return `<!--${HYDRATION_PREFIX}:${kind}-->${content}<!--/${HYDRATION_PREFIX}:${kind}-->`
+}
+
+function isRawTextElement(type: string): boolean {
+  return type === 'script' || type === 'style' || type === 'textarea' || type === 'title'
 }
 
 function serverDispatch(): never {

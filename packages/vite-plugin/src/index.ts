@@ -92,12 +92,12 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       if (id === REACT_MODULE) {
         return configuration.target === 'server'
           ? 'export { createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "@vidact/runtime/server"'
-          : 'export { createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "@vidact/runtime"'
+          : `export { createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "@vidact/runtime${configuration.target === 'hydrate' ? '/hydrate' : ''}"`
       }
       return id === REACT_DOM_MODULE
         ? configuration.target === 'server'
           ? 'export { createPortal } from "@vidact/runtime/server"'
-          : 'export { createPortal } from "@vidact/runtime"'
+          : `export { createPortal } from "@vidact/runtime${configuration.target === 'hydrate' ? '/hydrate' : ''}"`
         : null
     },
     async transform(source, id) {
@@ -130,7 +130,11 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
           jsx: {
             runtime: 'automatic',
             importSource:
-              configuration.target === 'server' ? '@vidact/runtime/server' : '@vidact/runtime',
+              configuration.target === 'server'
+                ? '@vidact/runtime/server'
+                : configuration.target === 'hydrate'
+                  ? '@vidact/runtime/hydrate'
+                  : '@vidact/runtime',
           },
           sourcemap: true,
           target: 'es2022',

@@ -19,7 +19,7 @@ describe('server rendering', () => {
     expect(globalObject.window).toBeUndefined()
 
     expect(
-      renderToString(() => (
+      renderToStaticMarkup(() => (
         <main className="shell" data-label={'a"<&'} hidden style={{ lineHeight: 1.2, width: 4 }}>
           {'Hello <script>& goodbye'}
           <input disabled />
@@ -37,11 +37,11 @@ describe('server rendering', () => {
       return <p id={id}>{count}</p>
     }
 
-    expect(renderToString(() => <Greeting />, { identifierPrefix: 'app-' })).toBe(
-      '<p id=":app-v0:">2</p>',
-    )
     expect(renderToStaticMarkup(() => <Greeting />, { identifierPrefix: 'app-' })).toBe(
-      '<p id=":app-v0:">2</p>',
+      '<p id=":app-r0:">2</p>',
+    )
+    expect(renderToString(() => <Greeting />, { identifierPrefix: 'app-' })).toBe(
+      '<!--vidact:v1:r--><!--vidact:v1:c--><p id=":app-r0:"><!--vidact:v1:t-->2<!--/vidact:v1:t--></p><!--/vidact:v1:c--><!--/vidact:v1:r-->',
     )
   })
 
@@ -53,7 +53,7 @@ describe('server rendering', () => {
     }
 
     expect(
-      renderToString(
+      renderToStaticMarkup(
         <Theme.Provider value="outer">
           <Label />
           <Theme.Provider value="inner">

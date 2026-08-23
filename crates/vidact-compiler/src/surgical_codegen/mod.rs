@@ -276,7 +276,7 @@ fn transform_program<'a>(
             .map_err(|diagnostic| diagnostic.with_fallback_span(component.span))?;
     }
     remove_lowered_react_state_imports(scoping, program)?;
-    let import = runtime_import(&ast, program);
+    let import = runtime_import(&ast, program, options);
     program.body.insert(0, import);
     Ok(())
 }
@@ -3074,7 +3074,11 @@ fn scope_statement<'a>(ast: &AstBuilder<'a>, narrow: bool) -> Statement<'a> {
     )
 }
 
-fn runtime_import<'a>(ast: &AstBuilder<'a>, program: &Program<'a>) -> Statement<'a> {
+fn runtime_import<'a>(
+    ast: &AstBuilder<'a>,
+    program: &Program<'a>,
+    options: &CompilationOptions,
+) -> Statement<'a> {
     let names = [
         ("binding", BINDING),
         ("combineSources", COMBINE_SOURCES),
@@ -3126,7 +3130,16 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>, program: &Program<'a>) -> Statement<
     Statement::new_import_declaration(
         SPAN,
         Some(specifiers),
-        StringLiteral::new(SPAN, "@vidact/runtime", None, ast),
+        StringLiteral::new(
+            SPAN,
+            if options.target() == crate::CompilerTarget::Hydrate {
+                "@vidact/runtime/hydrate"
+            } else {
+                "@vidact/runtime"
+            },
+            None,
+            ast,
+        ),
         None,
         None,
         ImportOrExportKind::Value,

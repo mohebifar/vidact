@@ -3,6 +3,20 @@ import {
   withIntrinsicNamespace,
   type IntrinsicNamespace,
 } from './dom/namespace.ts'
+import {
+  HydrationMismatch,
+  beginHydration,
+  claimHydrationComponentMount,
+  claimHydrationComponentRange,
+  claimHydrationNode,
+  claimHydrationText,
+  claimHydrationTextRange,
+  hydrationRangeParent,
+  hydrationRootMarkers,
+  finishHydration,
+  isHydrating,
+  isHydrationMismatch,
+} from './hydration.ts'
 import { createIndexedList } from './indexed-list.ts'
 import { createKeyedList } from './keyed-list.ts'
 import { scheduleTask } from './scheduler.ts'
@@ -1051,11 +1065,12 @@ export function compiledRoot(
   if (owner === undefined) {
     throw new Error(DEV ? 'compiledRoot received an unknown scope' : 'V004')
   }
-  const start = document.createComment(DEV ? 'vidact:component' : '')
-  const end = document.createComment(DEV ? '/vidact:component' : '')
+  const hydratedRange = claimHydrationComponentRange()
+  const start = hydratedRange?.[0] ?? document.createComment(DEV ? 'vidact:component' : '')
+  const end = hydratedRange?.[1] ?? document.createComment(DEV ? '/vidact:component' : '')
   componentCommitOwners.set(end, owner)
   const fragment = document.createDocumentFragment()
-  fragment.append(start, end)
+  if (hydratedRange === undefined) fragment.append(start, end)
   owner[1].add(() => {
     try {
       removeBetween(start, end)
@@ -1066,7 +1081,10 @@ export function compiledRoot(
   })
 
   try {
-    withOwner(owner, () => withScopeNamespace(scope, () => insertValue(fragment, render(), end)))
+    const renderParent = hydrationRangeParent(start, end) ?? fragment
+    withOwner(owner, () =>
+      withScopeNamespace(scope, () => insertValue(renderParent, render(), end)),
+    )
   } catch (error) {
     try {
       scope[3]()
@@ -1084,7 +1102,9 @@ export function compiledRoot(
       mounted = true
       adoptCompiledRoot(component)
       try {
-        parent.insertBefore(fragment, before)
+        if (!claimHydrationComponentMount(parent, start, end)) {
+          parent.insertBefore(fragment, before)
+        }
       } catch (error) {
         try {
           scope[3]()
@@ -1551,7 +1571,47 @@ export function registerCompiledCleanup(cleanup: () => void): void {
 export interface MountCompiledOptions {
   readonly identifierPrefix?: string
   readonly onCaughtError?: CompiledErrorHandler
+  readonly onRecoverableError?: CompiledErrorHandler
   readonly onUncaughtError?: CompiledErrorHandler
+}
+
+export function hydrateCompiled(
+  component: () => CompiledComponentResult,
+  host: ParentNode,
+  options?: MountCompiledOptions,
+): { dispose: () => void } {
+  let endHydration: (() => void) | undefined
+  let hydratedMount: { dispose: () => void } | undefined
+  try {
+    endHydration = beginHydration(host)
+    hydratedMount = mountCompiled(component, host, options)
+    finishHydration()
+    const rootMarkers = hydrationRootMarkers()
+    return {
+      dispose: () => {
+        try {
+          hydratedMount?.dispose()
+        } finally {
+          rootMarkers[0].remove()
+          rootMarkers[1].remove()
+        }
+      },
+    }
+  } catch (error) {
+    if (!isHydrationMismatch(error)) throw error
+    try {
+      hydratedMount?.dispose()
+    } catch {
+      // Preserve and report the mismatch that forced recovery.
+    }
+    hydratedMount = undefined
+    endHydration?.()
+    endHydration = undefined
+    options?.onRecoverableError?.(error)
+    return mountCompiled(component, host, options)
+  } finally {
+    endHydration?.()
+  }
 }
 
 export function mountCompiled(
@@ -1559,6 +1619,7 @@ export function mountCompiled(
   host: ParentNode,
   options?: MountCompiledOptions,
 ): { dispose: () => void } {
+  const hydrating = isHydrating()
   const previousRootIdentity = activeRootIdentity
   const rootIdentity = createRootIdentity(
     options?.identifierPrefix,
@@ -1570,6 +1631,7 @@ export function mountCompiled(
   try {
     root = constructCompiledComponent(component)
   } catch (error) {
+    if (isHydrationMismatch(error)) throw error
     if (rootIdentity.onUncaughtError === undefined) throw error
     rootIdentity.onUncaughtError(error)
     return { dispose: noop }
@@ -1592,14 +1654,16 @@ export function mountCompiled(
     commitOwnerInsertions(rootOwner)
     commitRangeRefs(range[0], range[1])
     commitOwnerResources(rootOwner)
-    for (const node of previous) host.removeChild(node)
+    if (!hydrating) {
+      for (const node of previous) host.removeChild(node)
+    }
   } catch (error) {
     try {
       range[2][3]()
     } catch {
       // Preserve the mount error while still running every component cleanup.
     }
-    if (rootIdentity.onUncaughtError === undefined) throw error
+    if (isHydrationMismatch(error) || rootIdentity.onUncaughtError === undefined) throw error
     rootIdentity.onUncaughtError(error)
     return { dispose: noop }
   }
@@ -1900,14 +1964,23 @@ function mountCompiledBindingBefore(
   value: CompiledBinding<unknown>,
   before: Node | null,
 ): void {
-  const start = document.createComment(DEV ? 'vidact:binding' : '')
-  const end = document.createComment(DEV ? '/vidact:binding' : '')
-  parent.insertBefore(start, before)
-  parent.insertBefore(end, before)
   const unset = Symbol(DEV ? 'Vidact.UnsetBinding' : undefined)
-  let current: unknown = unset
+  const initial = value[1]()
+  if (isHydrating() && !isScalarRenderValue(initial)) {
+    throw new HydrationMismatch('non-scalar compiled bindings require structural hydration markers')
+  }
+  const hydratedRange = isScalarRenderValue(initial)
+    ? claimHydrationTextRange(parent, toText(initial))
+    : undefined
+  const start = hydratedRange?.[0] ?? document.createComment(DEV ? 'vidact:binding' : '')
+  const end = hydratedRange?.[1] ?? document.createComment(DEV ? '/vidact:binding' : '')
+  if (hydratedRange === undefined) {
+    parent.insertBefore(start, before)
+    parent.insertBefore(end, before)
+  }
+  let current: unknown = hydratedRange === undefined ? unset : initial
   let currentOwner: Owner | null = null
-  let text: Text | null = null
+  let text: Text | null = hydratedRange?.[2] ?? null
 
   const clear = (): void => {
     const owner = currentOwner
@@ -1959,7 +2032,7 @@ function mountCompiledBindingBefore(
     current = next
   }
 
-  update()
+  if (hydratedRange === undefined) update()
   const removeUpdater = subscribeBinding(value, update)
   onCleanup(() => {
     removeUpdater()
@@ -2023,8 +2096,14 @@ function insertValue(
   before: Node | null,
   moves?: NodePosition[],
 ): void {
-  if (value === null || value === undefined || typeof value === 'boolean') return
+  if (value === null || value === undefined || typeof value === 'boolean') {
+    claimHydrationText(parent, '')
+    return
+  }
   if (isStructuralBinding(value)) {
+    if (isHydrating() && !isCompiledComponentResult(value)) {
+      throw new HydrationMismatch('structural binding hydration markers are not available')
+    }
     adoptCompiledRoot(value)
     value[1](parent, before)
     return
@@ -2051,7 +2130,7 @@ function insertValue(
     moves?.push([value, value.parentNode, value.nextSibling])
     adoptCompiledRoot(value)
     claimPendingRefOwners(value)
-    parent.insertBefore(value, before)
+    if (!claimHydrationNode(parent, value)) parent.insertBefore(value, before)
     if (!(parent instanceof DocumentFragment)) commitPendingRefs(value)
     return
   }
@@ -2060,7 +2139,10 @@ function insertValue(
       DEV ? 'unsupported compiled child value; expected a DOM node or owned block' : 'V009',
     )
   }
-  parent.insertBefore(document.createTextNode(String(value)), before)
+  const content = String(value)
+  if (claimHydrationText(parent, content) === undefined) {
+    parent.insertBefore(document.createTextNode(content), before)
+  }
 }
 
 function restoreNodePositions(positions: readonly NodePosition[]): void {

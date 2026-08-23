@@ -30,6 +30,7 @@ import {
   withIntrinsicNamespace,
 } from './dom/namespace.ts'
 import { applyDomProp } from './dom/properties.ts'
+import { claimHydrationElement, claimHydrationNode, claimHydrationText } from './hydration.ts'
 import { mountRawHtmlProp } from './raw-html.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
@@ -96,7 +97,14 @@ export function h(
   }
 
   const namespace = resolveIntrinsicNamespace(type, readIntrinsicNamespace(props))
-  const element = createIntrinsicElement(document, type, namespace)
+  const namespaceUrl =
+    namespace === 'svg'
+      ? 'http://www.w3.org/2000/svg'
+      : namespace === 'mathml'
+        ? 'http://www.w3.org/1998/Math/MathML'
+        : 'http://www.w3.org/1999/xhtml'
+  const element =
+    claimHydrationElement(type, namespaceUrl) ?? createIntrinsicElement(document, type, namespace)
   const restoreAfterChildren = applyProps(element, props, children)
   withIntrinsicNamespace(intrinsicChildrenNamespace(type, namespace), () =>
     appendChildren(element, children),
@@ -194,7 +202,10 @@ function appendChildren(parent: Node, children: readonly DirectChild[]): void {
 }
 
 function appendChild(parent: Node, child: DirectChild): void {
-  if (child === null || child === undefined || typeof child === 'boolean') return
+  if (child === null || child === undefined || typeof child === 'boolean') {
+    claimHydrationText(parent, '')
+    return
+  }
   if (isStructuralBinding(child)) {
     child[1](parent, null)
     return
@@ -208,7 +219,7 @@ function appendChild(parent: Node, child: DirectChild): void {
     return
   }
   if (child instanceof Node) {
-    parent.appendChild(child)
+    if (!claimHydrationNode(parent, child)) parent.appendChild(child)
     return
   }
   if (typeof child === 'object' || typeof child === 'function' || typeof child === 'symbol') {
@@ -216,5 +227,8 @@ function appendChild(parent: Node, child: DirectChild): void {
       DEV ? 'unsupported direct child value; expected a DOM node or owned block' : 'V103',
     )
   }
-  parent.appendChild(document.createTextNode(String(child)))
+  const content = String(child)
+  if (claimHydrationText(parent, content) === undefined) {
+    parent.appendChild(document.createTextNode(content))
+  }
 }
