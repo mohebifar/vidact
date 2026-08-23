@@ -12,9 +12,16 @@ const MAX_FLUSH_PASSES = 100
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 const BINDING = Symbol(DEV ? 'Vidact.Binding' : undefined)
 const STRUCTURAL = Symbol(DEV ? 'Vidact.StructuralBinding' : undefined)
+const CONTEXT = Symbol(DEV ? 'Vidact.Context' : undefined)
 export const COMPONENT_SPREAD_SOURCE = Symbol(DEV ? 'Vidact.ComponentSpreadSource' : undefined)
 
-type Owner = [disposed: boolean, cleanups: Set<() => void>]
+type ContextFrame = {
+  readonly context: CompiledContext<unknown>
+  readonly input: unknown
+  readonly parent: ContextFrame | null
+}
+
+type Owner = [disposed: boolean, cleanups: Set<() => void>, context: ContextFrame | null]
 
 type CompiledUpdater = [
   reads: SourceMask,
@@ -121,6 +128,7 @@ export type CompiledPropTransition = PublicationOperation
 type ComponentRange = readonly [start: Comment, end: Comment, scope: CompiledScope]
 
 let activeOwner: Owner | null = null
+let activeContextFrame: ContextFrame | null = null
 let activeScopeCollector: Set<CompiledScope> | null = null
 let activeConstructionOwner: Owner | null = null
 let transactionDepth = 0
@@ -302,6 +310,50 @@ export function createCompiledMemo<T>(
   }
   owner[1].add(removeUpdater)
   return slot
+}
+
+export interface CompiledContext<T> {
+  (props: {
+    readonly children?: CompiledRenderValue | readonly CompiledRenderValue[]
+    readonly value: T | CompiledBinding<T>
+  }): StructuralBinding
+  Provider: CompiledContext<T>
+  displayName?: string
+  readonly [CONTEXT]: T
+}
+
+export function createContext<T>(defaultValue: T): CompiledContext<T> {
+  let context: CompiledContext<T>
+  const provider = ((props: {
+    readonly children?: CompiledRenderValue | readonly CompiledRenderValue[]
+    readonly value: T | CompiledBinding<T>
+  }): StructuralBinding =>
+    provideContext(context, props.value, props.children)) as CompiledContext<T>
+  context = provider
+  context.Provider = provider
+  Object.defineProperty(context, CONTEXT, { value: defaultValue })
+  return context
+}
+
+export function createCompiledContext<T>(
+  scope: CompiledScope,
+  sourceMask: SourceMask,
+  context: CompiledContext<T>,
+): StateSlot<T> {
+  const input = contextInput(scope, context)
+  return createCompiledProp(scope, sourceMask, input)
+}
+
+export function useContext<T>(context: CompiledContext<T>): T {
+  if (activeConstructionOwner === null) {
+    throw new Error(DEV ? 'useContext must run during compiled component construction' : 'V019')
+  }
+  const input = contextInputFromFrame(activeConstructionOwner[2], context)
+  return isCompiledBinding(input) ? (input[1]() as T) : (input as T)
+}
+
+export function use<T>(context: CompiledContext<T>): T {
+  return useContext(context)
 }
 
 export function useMemo<T>(factory: () => T, _dependencies: readonly unknown[]): T {
@@ -1259,12 +1311,13 @@ export function mountCompiledPropTransition<T>(
 
 function structural(scope: CompiledScope, mount: StructuralBinding[1]): StructuralBinding {
   let mounted = false
+  const context = activeContextFrame ?? activeOwner?.[2] ?? scopeOwners.get(scope)?.[2] ?? null
   return [
     STRUCTURAL,
     (parent, before) => {
       if (mounted) throw new Error(DEV ? 'compiled block is already mounted' : 'V008')
       mounted = true
-      withScopeNamespace(scope, () => mount(parent, before))
+      withContextFrame(context, () => withScopeNamespace(scope, () => mount(parent, before)))
     },
   ]
 }
@@ -1276,9 +1329,14 @@ function subscribe(
   additionalScope?: CompiledScope,
   additionalReads?: SourceMask,
 ): () => void {
-  const removers = [scope[0](reads, run)]
+  const context = activeContextFrame ?? activeOwner?.[2] ?? scopeOwners.get(scope)?.[2] ?? null
+  const removers = [scope[0](reads, () => withContextFrame(context, run))]
   if (additionalScope !== undefined && additionalReads !== undefined) {
-    removers.push(additionalScope[0](additionalReads, () => withScopeNamespace(scope, run)))
+    removers.push(
+      additionalScope[0](additionalReads, () =>
+        withContextFrame(context, () => withScopeNamespace(scope, run)),
+      ),
+    )
   }
   return () => {
     for (const remove of removers) remove()
@@ -1300,16 +1358,73 @@ function withScopeNamespace<Result>(scope: CompiledScope, operation: () => Resul
 }
 
 function createOwner(): Owner {
-  return [false, new Set()]
+  return [false, new Set(), activeContextFrame ?? activeOwner?.[2] ?? null]
+}
+
+function provideContext<T>(
+  context: CompiledContext<T>,
+  input: T | CompiledBinding<T>,
+  children: CompiledRenderValue | readonly CompiledRenderValue[] | undefined,
+): StructuralBinding {
+  const parentContext = activeContextFrame ?? activeOwner?.[2] ?? null
+  let mounted = false
+  return [
+    STRUCTURAL,
+    (parent, before) => {
+      if (mounted) throw new Error(DEV ? 'context provider is already mounted' : 'V008')
+      mounted = true
+      withContextFrame(
+        { context: context as CompiledContext<unknown>, input, parent: parentContext },
+        () => insertValue(parent, children, before),
+      )
+    },
+  ]
+}
+
+function contextInput<T>(
+  scope: CompiledScope,
+  context: CompiledContext<T>,
+): T | CompiledBinding<T> {
+  const owner = scopeOwners.get(scope)
+  if (owner === undefined) {
+    throw new Error(DEV ? 'createCompiledContext received an unknown scope' : 'V003')
+  }
+  return contextInputFromFrame(owner[2], context)
+}
+
+function contextInputFromFrame<T>(
+  frame: ContextFrame | null,
+  context: CompiledContext<T>,
+): T | CompiledBinding<T> {
+  if (typeof context !== 'function' || !(CONTEXT in context)) {
+    throw new TypeError(DEV ? 'useContext requires a context created by createContext' : 'V018')
+  }
+  for (let current = frame; current !== null; current = current.parent) {
+    if (current.context === context) return current.input as T | CompiledBinding<T>
+  }
+  return context[CONTEXT]
 }
 
 function withOwner<T>(owner: Owner, operation: () => T): T {
   const previous = activeOwner
+  const previousContext = activeContextFrame
   activeOwner = owner
+  activeContextFrame = owner[2]
   try {
     return operation()
   } finally {
     activeOwner = previous
+    activeContextFrame = previousContext
+  }
+}
+
+function withContextFrame<T>(frame: ContextFrame | null, operation: () => T): T {
+  const previous = activeContextFrame
+  activeContextFrame = frame
+  try {
+    return operation()
+  } finally {
+    activeContextFrame = previous
   }
 }
 

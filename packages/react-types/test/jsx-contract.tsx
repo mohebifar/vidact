@@ -1,5 +1,5 @@
 import type { VidactNode } from '@vidact/react-types'
-import type { ReactElement } from 'react'
+import { createContext, type ReactElement } from 'react'
 
 const child: VidactNode = 'child'
 
@@ -48,6 +48,17 @@ const mathElement = (
     <mi>x</mi>
   </math>
 )
+const Theme = createContext('light')
+const contextProvider = (
+  <Theme value="dark">
+    <strong>Owned context child</strong>
+  </Theme>
+)
+const legacyContextProvider = (
+  <Theme.Provider value="dark">
+    <strong>Owned provider child</strong>
+  </Theme.Provider>
+)
 
 void nativeElements
 void customElement
@@ -55,6 +66,8 @@ void captureHandler
 void rawHtml
 void namespacedElements
 void mathElement
+void contextProvider
+void legacyContextProvider
 
 // @ts-expect-error `href` is not a button attribute.
 const invalidAttribute = <button href="/not-a-button-link" />

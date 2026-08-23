@@ -30,11 +30,35 @@ pub(crate) enum MemoHook {
     Memo,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ContextHook {
+    Context,
+    Use,
+}
+
 impl StateHook {
     pub(crate) const fn name(self) -> &'static str {
         match self {
             Self::State => "useState",
             Self::Reducer => "useReducer",
+        }
+    }
+}
+
+impl MemoHook {
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::Callback => "useCallback",
+            Self::Memo => "useMemo",
+        }
+    }
+}
+
+impl ContextHook {
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::Context => "useContext",
+            Self::Use => "use",
         }
     }
 }
@@ -108,6 +132,16 @@ impl<'s> ReactBindings<'s> {
             Some(MemoHook::Memo)
         } else if self.is_named_call(call, "useCallback") {
             Some(MemoHook::Callback)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn context_hook_call(&self, call: &CallExpression<'_>) -> Option<ContextHook> {
+        if self.is_named_call(call, "useContext") {
+            Some(ContextHook::Context)
+        } else if self.is_named_call(call, "use") {
+            Some(ContextHook::Use)
         } else {
             None
         }

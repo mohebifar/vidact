@@ -1,4 +1,12 @@
-import type { CSSProperties, HTMLAttributes, JSX as ReactJSX, Key, Ref } from 'react'
+import type {
+  CSSProperties,
+  Context,
+  HTMLAttributes,
+  JSX as ReactJSX,
+  Key,
+  Provider,
+  Ref,
+} from 'react'
 
 export type VidactNode = import('@vidact/runtime').CompiledRenderValue
 
@@ -115,6 +123,8 @@ export namespace JSX {
     | keyof IntrinsicElements
     // Component props are checked from the component's own signature.
     | ((props: never) => VidactNode)
+    | Context<never>
+    | Provider<never>
 
   interface ElementChildrenAttribute extends ReactJSX.ElementChildrenAttribute {}
 
@@ -133,8 +143,9 @@ export namespace JSX {
     [Name in `${string}-${string}`]: CustomElementAttributes
   }
 
-  type LibraryManagedAttributes<Component, Props> = ReactJSX.LibraryManagedAttributes<
-    Component,
-    Props
-  >
+  type LibraryManagedAttributes<Component, Props> = Component extends
+    | Context<infer Value>
+    | Provider<infer Value>
+    ? { children?: VidactNode; value: Value }
+    : ReactJSX.LibraryManagedAttributes<Component, Props>
 }

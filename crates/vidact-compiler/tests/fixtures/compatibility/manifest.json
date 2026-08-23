@@ -124,6 +124,11 @@
       "components": ["MemoCallback"]
     },
     {
+      "path": "accepted/context.tsx",
+      "expectation": "accepted",
+      "components": ["NamedConsumer", "UseConsumer", "ContextApp"]
+    },
+    {
       "path": "rejected/foreign-array-call.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",

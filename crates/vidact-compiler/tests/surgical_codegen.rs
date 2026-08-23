@@ -883,6 +883,44 @@ fn compiles_memo_and_callback_dependencies_into_cached_slots() {
 }
 
 #[test]
+fn compiles_context_reads_into_owner_scoped_slots() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "ContextApp.tsx",
+        source: r#"
+            import * as React from 'react';
+            import { createContext, useContext as useTheme, useState } from 'react';
+            const Theme = createContext('light');
+            function Label(): Node {
+                const theme = useTheme(Theme);
+                return <span>{theme}</span>;
+            }
+            function UseLabel(): Node {
+                const theme = React.use(Theme);
+                return <strong>{theme}</strong>;
+            }
+            export function ContextApp(): Node {
+                const [theme, setTheme] = useState('dark');
+                return <Theme value={theme}><Label /><UseLabel /></Theme>;
+            }
+        "#,
+    })
+    .expect("context reads should lower through named, aliased, and namespace React imports");
+
+    assert_eq!(
+        output.matches("__vidactCreateContext(").count(),
+        2,
+        "{output}"
+    );
+    assert!(
+        output.contains("createCompiledContext as __vidactCreateContext"),
+        "{output}"
+    );
+    assert!(output.contains("() => theme.get()"), "{output}");
+    assert!(!output.contains("useTheme("), "{output}");
+    assert!(!output.contains("React.use("), "{output}");
+}
+
+#[test]
 fn compiles_aliased_props_into_local_updater_slots() {
     let output = compile_surgical_module(ModuleInput {
         filename: "AliasedProp.tsx",
