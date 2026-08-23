@@ -1,13 +1,24 @@
 {
   "name": "@vidact/vite",
   "version": "0.1.0",
-  "private": true,
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/finalize-typescript-package.mjs dist",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"
   },
@@ -22,5 +33,8 @@
   },
   "peerDependencies": {
     "vite": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

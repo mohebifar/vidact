@@ -1,7 +1,13 @@
 {
   "name": "@vidact/react-types",
   "version": "0.1.0",
-  "private": true,
+  "files": [
+    "index.d.ts",
+    "jsx-runtime.d.ts",
+    "jsx-runtime.js",
+    "react-dom.d.ts",
+    "README.md"
+  ],
   "type": "module",
   "sideEffects": false,
   "types": "./index.d.ts",
@@ -13,6 +19,10 @@
       "types": "./jsx-runtime.d.ts",
       "default": "./jsx-runtime.js"
     }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
@@ -26,5 +36,8 @@
   },
   "peerDependencies": {
     "@types/react": "^19.2.18"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

@@ -1,7 +1,5 @@
 /** @jsxImportSource @vidact/runtime/server */
 
-import { describe, expect, it } from 'vitest'
-
 import {
   createPortal,
   createContext,
@@ -11,7 +9,8 @@ import {
   useContext,
   useState,
   type ServerChild,
-} from '../../src/server.ts'
+} from '@vidact/runtime/server'
+import { describe, expect, it } from 'vitest'
 
 describe('server rendering', () => {
   it('serializes deterministic escaped HTML without browser globals', () => {

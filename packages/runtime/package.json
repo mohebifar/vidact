@@ -1,22 +1,60 @@
 {
   "name": "@vidact/runtime",
   "version": "0.1.0",
-  "private": true,
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/index.ts",
-    "./hydrate": "./src/hydrate.ts",
-    "./hydrate/jsx-dev-runtime": "./src/hydrate-jsx-dev-runtime.ts",
-    "./hydrate/jsx-runtime": "./src/hydrate-jsx-runtime.ts",
-    "./jsx-runtime": "./src/jsx-runtime.ts",
-    "./protocol": "./src/protocol.ts",
-    "./server": "./src/server.ts",
-    "./server/jsx-dev-runtime": "./src/server-jsx-dev-runtime.ts",
-    "./server/jsx-runtime": "./src/server-jsx-runtime.ts",
-    "./testing": "./src/testing.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./hydrate": {
+      "types": "./dist/hydrate.d.ts",
+      "import": "./dist/hydrate.js"
+    },
+    "./hydrate/jsx-dev-runtime": {
+      "types": "./dist/hydrate-jsx-dev-runtime.d.ts",
+      "import": "./dist/hydrate-jsx-dev-runtime.js"
+    },
+    "./hydrate/jsx-runtime": {
+      "types": "./dist/hydrate-jsx-runtime.d.ts",
+      "import": "./dist/hydrate-jsx-runtime.js"
+    },
+    "./jsx-runtime": {
+      "types": "./dist/jsx-runtime.d.ts",
+      "import": "./dist/jsx-runtime.js"
+    },
+    "./protocol": {
+      "types": "./dist/protocol.d.ts",
+      "import": "./dist/protocol.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
+    "./server/jsx-dev-runtime": {
+      "types": "./dist/server-jsx-dev-runtime.d.ts",
+      "import": "./dist/server-jsx-dev-runtime.js"
+    },
+    "./server/jsx-runtime": {
+      "types": "./dist/server-jsx-runtime.d.ts",
+      "import": "./dist/server-jsx-runtime.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/finalize-typescript-package.mjs dist src/env.d.ts",
     "test": "vitest run && vitest run --config vitest.server.config.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
@@ -25,5 +63,8 @@
     "@vitest/browser-playwright": "4.1.11",
     "typescript": "7.0.2",
     "vitest": "4.1.11"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

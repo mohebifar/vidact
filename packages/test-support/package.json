@@ -1,20 +1,35 @@
 {
   "name": "@vidact/test-support",
   "version": "0.1.0",
-  "private": true,
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/finalize-typescript-package.mjs dist",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
+    "@vidact/runtime": "workspace:*",
     "typescript": "7.0.2",
     "vitest": "4.1.11"
   },
   "peerDependencies": {
     "@vidact/runtime": "workspace:*"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }
