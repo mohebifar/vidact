@@ -1,8 +1,9 @@
-import { useImperativeHandle, useRef, useState } from 'react'
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 
 let currentOutput: HTMLOutputElement | null = null
 let currentCounterHandle: CounterHandle | null = null
 let secondaryCounterHandle: CounterHandle | null = null
+const effectTrace: string[] = []
 
 type CounterHandle = {
   count: number
@@ -21,6 +22,10 @@ export function readCounterHandle(): CounterHandle | null {
 
 export function readSecondaryCounterHandle(): CounterHandle | null {
   return secondaryCounterHandle
+}
+
+export function takeEffectTrace(): string[] {
+  return effectTrace.splice(0)
 }
 
 function captureCounterHandle(handle: CounterHandle | null): void {
@@ -56,6 +61,18 @@ function ImperativeCounter({ ref }: { ref: (handle: CounterHandle | null) => voi
     }),
     [count],
   )
+  useLayoutEffect(() => {
+    effectTrace.push(`layout:${count}:${output.current?.textContent}`)
+    return () => {
+      effectTrace.push(`layout-cleanup:${count}`)
+    }
+  }, [count])
+  useEffect(() => {
+    effectTrace.push(`passive:${count}:${output.current?.textContent}`)
+    return () => {
+      effectTrace.push(`passive-cleanup:${count}`)
+    }
+  }, [count])
   return (
     <output ref={output} data-imperative-count>
       {count}

@@ -796,6 +796,121 @@ export function useImperativeHandle<T>(
   queueOwnerCommit(owner, () => owner[1].add(attachRef(ref, create())))
 }
 
+type EffectResult = void | (() => void)
+
+export function useLayoutEffect(
+  create: () => EffectResult,
+  dependencies?: readonly unknown[],
+): void {
+  registerEffect(create, dependencies, false)
+}
+
+export function useEffect(create: () => EffectResult, dependencies?: readonly unknown[]): void {
+  registerEffect(create, dependencies, true)
+}
+
+function registerEffect(
+  create: () => EffectResult,
+  dependencies: readonly unknown[] | undefined,
+  passive: boolean,
+): void {
+  const owner = activeConstructionOwner
+  if (owner === null) {
+    throw new Error(DEV ? 'effects must run during compiled component construction' : 'V016')
+  }
+  if (dependencies !== undefined && dependencies.length !== 0) {
+    throw new Error(DEV ? 'reactive effect dependencies require compiler lowering' : 'V017')
+  }
+  let cleanup = (): void => {}
+  let generation = 0
+  const run = (): void => {
+    cleanup()
+    cleanup = readEffectCleanup(create())
+  }
+  queueOwnerCommit(owner, () => {
+    if (passive) {
+      const scheduled = ++generation
+      queueMicrotask(() => {
+        if (!owner[0] && scheduled === generation) run()
+      })
+    } else {
+      run()
+    }
+  })
+  owner[1].add(() => {
+    generation += 1
+    if (passive) queueMicrotask(cleanup)
+    else cleanup()
+  })
+}
+
+export function compiledLayoutEffect(
+  scope: CompiledScope,
+  reads: SourceMask,
+  readCreate: () => () => EffectResult,
+  readDependencies?: () => readonly unknown[],
+): void {
+  compiledEffect(scope, reads, readCreate, readDependencies, false)
+}
+
+export function compiledEffect(
+  scope: CompiledScope,
+  reads: SourceMask,
+  readCreate: () => () => EffectResult,
+  readDependencies?: () => readonly unknown[],
+  passive = true,
+): void {
+  const owner = activeConstructionOwner
+  if (owner === null || scopeOwners.get(scope) !== owner) {
+    throw new Error(DEV ? 'compiled effects must run in their component scope' : 'V016')
+  }
+  let mounted = false
+  let generation = 0
+  let currentDependencies: readonly unknown[] | undefined
+  let cleanup = (): void => {}
+  const run = (): void => {
+    const nextDependencies = readDependencies?.()
+    if (
+      mounted &&
+      readDependencies !== undefined &&
+      equalDependencies(nextDependencies, currentDependencies)
+    ) {
+      return
+    }
+    cleanup()
+    cleanup = readEffectCleanup(readCreate()())
+    currentDependencies = nextDependencies
+    mounted = true
+  }
+  const schedule = (): void => {
+    if (!passive) {
+      run()
+      return
+    }
+    const scheduled = ++generation
+    queueMicrotask(() => {
+      if (!owner[0] && scheduled === generation) run()
+    })
+  }
+  queueOwnerCommit(owner, schedule)
+  const removeUpdater = subscribe(scope, reads, () => {
+    if (passive) schedule()
+    else stagePublication([() => {}, () => {}, undefined, run, 20])
+  })
+  owner[1].add(() => {
+    generation += 1
+    removeUpdater()
+    if (passive) queueMicrotask(cleanup)
+    else cleanup()
+  })
+}
+
+function readEffectCleanup(result: EffectResult): () => void {
+  if (result === undefined) return () => {}
+  if (typeof result === 'function') return result
+  throw new TypeError(DEV ? 'an effect must return a cleanup function or undefined' : 'V018')
+}
+
 export function compiledImperativeHandle<T>(
   scope: CompiledScope,
   reads: SourceMask,

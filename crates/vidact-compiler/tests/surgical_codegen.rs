@@ -817,6 +817,42 @@ fn compiles_imperative_handle_dependencies_into_commit_resources() {
 }
 
 #[test]
+fn compiles_layout_and_passive_effect_dependencies_into_owner_resources() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "Effects.tsx",
+        source: r#"
+            import * as React from 'react';
+            import { useEffect as usePassive, useState } from 'react';
+            export function Effects(): Node {
+                const [count, setCount] = useState(0);
+                React.useLayoutEffect(() => () => console.log(count), [count]);
+                usePassive(() => console.log(count));
+                return <button onClick={() => setCount(count + 1)}>{count}</button>;
+            }
+        "#,
+    })
+    .expect("layout and passive effects should lower through semantic React imports");
+
+    assert!(
+        output.contains("compiledLayoutEffect as __vidactLayoutEffect"),
+        "{output}"
+    );
+    assert!(
+        output.contains("compiledEffect as __vidactEffect"),
+        "{output}"
+    );
+    assert!(
+        output.contains("__vidactLayoutEffect(__vidactScope, 1"),
+        "{output}"
+    );
+    assert!(output.contains("() => [count.get()]"), "{output}");
+    assert!(
+        output.contains("__vidactEffect(__vidactScope, 1"),
+        "{output}"
+    );
+}
+
+#[test]
 fn compiles_aliased_props_into_local_updater_slots() {
     let output = compile_surgical_module(ModuleInput {
         filename: "AliasedProp.tsx",

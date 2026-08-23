@@ -29,7 +29,7 @@ use crate::{
     ir::{ComponentIr, lower_component},
     options::{CompilationOptions, CompilerFeature},
     oxc_react::analyze_program,
-    react_bindings::{ReactBindings, StateHook},
+    react_bindings::{EffectHook, ReactBindings, StateHook},
 };
 
 mod ast;
@@ -46,7 +46,9 @@ const BINDING: &str = "__vidactBinding";
 const COMBINE_SOURCES: &str = "__vidactCombineSources";
 const COMPILED_EVENT: &str = "__vidactEvent";
 const COMPILED_COMPONENT_SPREAD: &str = "__vidactComponentSpread";
+const COMPILED_EFFECT: &str = "__vidactEffect";
 const COMPILED_IMPERATIVE_HANDLE: &str = "__vidactImperativeHandle";
+const COMPILED_LAYOUT_EFFECT: &str = "__vidactLayoutEffect";
 const COMPILED_SPREAD: &str = "__vidactSpread";
 const COMPILED_ROOT: &str = "__vidactCompiledRoot";
 const CHOOSE: &str = "__vidactChoose";
@@ -169,7 +171,9 @@ fn transform_program<'a>(
         COMBINE_SOURCES,
         COMPILED_EVENT,
         COMPILED_COMPONENT_SPREAD,
+        COMPILED_EFFECT,
         COMPILED_IMPERATIVE_HANDLE,
+        COMPILED_LAYOUT_EFFECT,
         COMPILED_SPREAD,
         COMPILED_ROOT,
         CHOOSE,
@@ -861,6 +865,107 @@ enum ReactiveSpreadKind {
 
 impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
     fn visit_call_expression(&mut self, call: &mut CallExpression<'a>) {
+        if let Some(effect) = self.react.effect_hook_call(call) {
+            if !(1..=2).contains(&call.arguments.len())
+                || call.arguments.iter().any(Argument::is_spread)
+            {
+                self.diagnostic = Some(
+                    unsupported("effects require a callback and optional inline dependency array")
+                        .with_span(SourceSpan::new(call.span.start, call.span.end)),
+                );
+                return;
+            }
+            if let Some(dependencies) = call.arguments.get(1) {
+                let dependencies = dependencies
+                    .as_expression()
+                    .expect("spread arguments were rejected");
+                let Expression::ArrayExpression(array) = dependencies.without_parentheses() else {
+                    self.diagnostic = Some(
+                        unsupported("effect dependencies must be an inline array")
+                            .with_span(SourceSpan::from_oxc(dependencies.span())),
+                    );
+                    return;
+                };
+                if array.elements.iter().any(|element| {
+                    matches!(
+                        element,
+                        ArrayExpressionElement::SpreadElement(_)
+                            | ArrayExpressionElement::Elision(_)
+                    )
+                }) {
+                    self.diagnostic = Some(
+                        unsupported("effect dependencies must have a static length")
+                            .with_span(SourceSpan::from_oxc(dependencies.span())),
+                    );
+                    return;
+                }
+            }
+            let reads = call.arguments.get(1).map_or_else(
+                || DependencyReads {
+                    parent: self.source_symbols.values().copied().collect(),
+                    item: BTreeSet::new(),
+                },
+                |dependencies_argument| {
+                    dependencies(
+                        dependencies_argument
+                            .as_expression()
+                            .expect("spread arguments were rejected"),
+                        self.scoping,
+                        self.source_symbols,
+                        self.item_source_symbols,
+                    )
+                },
+            );
+            if !reads.item.is_empty() {
+                self.diagnostic = Some(
+                    unsupported("effects cannot capture keyed item slots")
+                        .with_span(SourceSpan::new(call.span.start, call.span.end)),
+                );
+                return;
+            }
+            walk_call_expression_mut(self, call);
+            let create_expression = call.arguments[0]
+                .as_expression()
+                .expect("spread arguments were rejected");
+            let create = arrow_expression(
+                self.ast,
+                [],
+                snapshot_effect_create(
+                    self.ast,
+                    create_expression,
+                    self.scoping,
+                    self.source_symbols,
+                ),
+            );
+            let mut arguments = vec![
+                ident(self.ast, SCOPE),
+                dependency_mask(self.ast, &reads.parent),
+                create,
+            ];
+            if let Some(dependencies) = call.arguments.get(1) {
+                arguments.push(arrow_expression(
+                    self.ast,
+                    [],
+                    dependencies
+                        .as_expression()
+                        .expect("spread arguments were rejected")
+                        .clone_in_with_semantic_ids(self.ast.allocator()),
+                ));
+            }
+            call.callee = ident(
+                self.ast,
+                match effect {
+                    EffectHook::Layout => COMPILED_LAYOUT_EFFECT,
+                    EffectHook::Passive => COMPILED_EFFECT,
+                },
+            );
+            call.type_arguments = None;
+            call.arguments = oxc_allocator::Vec::from_iter_in(
+                arguments.into_iter().map(Argument::from),
+                self.ast,
+            );
+            return;
+        }
         if !self.react.is_imperative_handle_call(call) {
             walk_call_expression_mut(self, call);
             return;
@@ -1996,6 +2101,68 @@ fn immediate_dependencies(
     finder.reads
 }
 
+fn snapshot_effect_create<'a>(
+    ast: &AstBuilder<'a>,
+    expression: &Expression<'a>,
+    scoping: &Scoping,
+    source_symbols: &BTreeMap<SymbolId, SourceId>,
+) -> Expression<'a> {
+    let mut create = expression.clone_in_with_semantic_ids(ast.allocator());
+    let mut rewriter = EffectSnapshotRewriter {
+        ast,
+        scoping,
+        source_symbols,
+        captures: BTreeMap::new(),
+    };
+    rewriter.visit_expression(&mut create);
+    if rewriter.captures.is_empty() {
+        return create;
+    }
+    let parameters = rewriter
+        .captures
+        .values()
+        .map(|(name, _)| ast.allocator().alloc_str(name))
+        .collect::<Vec<_>>();
+    let arguments = rewriter
+        .captures
+        .into_values()
+        .map(|(_, expression)| expression);
+    call(ast, arrow_expression(ast, parameters, create), arguments)
+}
+
+struct EffectSnapshotRewriter<'a, 'b, 's> {
+    ast: &'b AstBuilder<'a>,
+    scoping: &'s Scoping,
+    source_symbols: &'s BTreeMap<SymbolId, SourceId>,
+    captures: BTreeMap<SymbolId, (String, Expression<'a>)>,
+}
+
+impl<'a> VisitMut<'a> for EffectSnapshotRewriter<'a, '_, '_> {
+    fn visit_expression(&mut self, expression: &mut Expression<'a>) {
+        let Expression::Identifier(identifier) = expression else {
+            walk_expression_mut(self, expression);
+            return;
+        };
+        let Some(reference) = identifier.reference_id.get() else {
+            return;
+        };
+        let Some(symbol) = self.scoping.get_reference(reference).symbol_id() else {
+            return;
+        };
+        if !self.source_symbols.contains_key(&symbol) {
+            return;
+        }
+        let name = identifier.name.to_string();
+        self.captures.entry(symbol).or_insert_with(|| {
+            (
+                name.clone(),
+                Expression::Identifier(identifier.clone_in_with_semantic_ids(self.ast.allocator())),
+            )
+        });
+        *expression = ident(self.ast, &name);
+    }
+}
+
 fn outer_item_reference(
     render: &Expression<'_>,
     scoping: &Scoping,
@@ -2251,8 +2418,10 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>, program: &Program<'a>) -> Statement<
         ("binding", BINDING),
         ("combineSources", COMBINE_SOURCES),
         ("compiledComponentSpread", COMPILED_COMPONENT_SPREAD),
+        ("compiledEffect", COMPILED_EFFECT),
         ("compiledEvent", COMPILED_EVENT),
         ("compiledImperativeHandle", COMPILED_IMPERATIVE_HANDLE),
+        ("compiledLayoutEffect", COMPILED_LAYOUT_EFFECT),
         ("compiledSpread", COMPILED_SPREAD),
         ("compiledRoot", COMPILED_ROOT),
         ("choose", CHOOSE),

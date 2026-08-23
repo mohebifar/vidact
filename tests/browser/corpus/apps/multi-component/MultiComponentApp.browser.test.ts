@@ -11,6 +11,7 @@ import {
   readCounterHandle,
   readCounterValueRef,
   readSecondaryCounterHandle,
+  takeEffectTrace,
 } from './MultiComponentApp.tsx'
 
 let dispose: (() => void) | undefined
@@ -26,6 +27,7 @@ describe('compiled same-module components', () => {
     const host = document.createElement('div')
     document.body.append(host)
     dispose = mountCompiled(MultiComponentApp, host).dispose
+    await Promise.resolve()
 
     const root = host.querySelector<HTMLElement>('[data-multi-component-app]')!
     const output = host.querySelector<HTMLOutputElement>('[data-counter-value]')!
@@ -43,6 +45,7 @@ describe('compiled same-module components', () => {
     expect(initialHandle?.count).toBe(0)
     expect(initialHandle?.output).toBe(imperativeOutput)
     expect(initialHandle?.textAtCreation).toBe('0')
+    expect(takeEffectTrace()).toEqual(['layout:0:0', 'passive:0:0'])
 
     const capture = await captureMutations(host, () => increment.click())
 
@@ -59,12 +62,19 @@ describe('compiled same-module components', () => {
     ).not.toThrow()
 
     const imperativeCapture = await captureMutations(host, () => imperativeIncrement.click())
+    await Promise.resolve()
 
     expect(host.querySelector('[data-imperative-count]')).toBe(imperativeOutput)
     expect(imperativeOutput.textContent).toBe('1')
     expect(readCounterHandle()?.count).toBe(1)
     expect(readCounterHandle()).not.toBe(initialHandle)
     expect(readCounterHandle()?.textAtCreation).toBe('1')
+    expect(takeEffectTrace()).toEqual([
+      'layout-cleanup:0',
+      'layout:1:1',
+      'passive-cleanup:0',
+      'passive:1:1',
+    ])
     expect(() =>
       assertMutationEnvelope(
         imperativeCapture.records,
@@ -85,5 +95,8 @@ describe('compiled same-module components', () => {
     expect(readCounterValueRef()).toBeNull()
     expect(readCounterHandle()).toBeNull()
     expect(readSecondaryCounterHandle()).toBeNull()
+    expect(takeEffectTrace()).toEqual(['layout-cleanup:1'])
+    await Promise.resolve()
+    expect(takeEffectTrace()).toEqual(['passive-cleanup:1'])
   })
 })

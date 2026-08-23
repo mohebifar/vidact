@@ -114,6 +114,11 @@
       "components": ["DestructuredMap"]
     },
     {
+      "path": "accepted/effects.tsx",
+      "expectation": "accepted",
+      "components": ["Effects"]
+    },
+    {
       "path": "rejected/foreign-array-call.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",

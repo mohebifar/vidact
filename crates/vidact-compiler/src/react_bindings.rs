@@ -18,6 +18,12 @@ pub(crate) enum StateHook {
     Reducer,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum EffectHook {
+    Layout,
+    Passive,
+}
+
 impl StateHook {
     pub(crate) const fn name(self) -> &'static str {
         match self {
@@ -79,6 +85,16 @@ impl<'s> ReactBindings<'s> {
 
     pub(crate) fn is_imperative_handle_call(&self, call: &CallExpression<'_>) -> bool {
         self.is_named_call(call, "useImperativeHandle")
+    }
+
+    pub(crate) fn effect_hook_call(&self, call: &CallExpression<'_>) -> Option<EffectHook> {
+        if self.is_named_call(call, "useLayoutEffect") {
+            Some(EffectHook::Layout)
+        } else if self.is_named_call(call, "useEffect") {
+            Some(EffectHook::Passive)
+        } else {
+            None
+        }
     }
 
     fn is_named_call(&self, call: &CallExpression<'_>, name: &str) -> bool {
