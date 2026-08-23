@@ -365,6 +365,30 @@
       "spanContains": "Activity"
     },
     {
+      "path": "accepted/profiling.tsx",
+      "expectation": "accepted",
+      "features": ["profiling"],
+      "components": ["ProfiledChild", "ProfiledApp"]
+    },
+    {
+      "path": "rejected/profiling-disabled.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "Profiler"
+    },
+    {
+      "path": "rejected/debug-value-disabled.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "useDebugValue"
+    },
+    {
+      "path": "rejected/capture-owner-stack-disabled.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "captureOwnerStack"
+    },
+    {
       "path": "rejected/action-hook-disabled.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",

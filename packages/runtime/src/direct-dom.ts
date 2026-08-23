@@ -99,8 +99,9 @@ export function h(
   }
   if (typeof type === 'function') {
     const namespace = readIntrinsicNamespace(props)
-    const root = constructCompiledComponent(() =>
-      withIntrinsicNamespace(namespace, () => type(createComponentProps(props, children))),
+    const root = constructCompiledComponent(
+      () => withIntrinsicNamespace(namespace, () => type(createComponentProps(props, children))),
+      type,
     )
     adoptCompiledRoot(root)
     return root

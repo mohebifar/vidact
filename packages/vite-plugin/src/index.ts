@@ -115,6 +115,7 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
         const concurrentEnabled = configuration.features.includes('concurrent')
         const actionsEnabled = configuration.features.includes('actions')
         const retainedUiEnabled = configuration.features.includes('retained-ui')
+        const profilingEnabled = configuration.features.includes('profiling')
         const clientRuntime = clientRuntimeEntry(
           asyncEnabled,
           concurrentEnabled,
@@ -130,14 +131,28 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
           configuration.target === 'server'
             ? `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "${serverRuntime}"`
             : `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "${clientRuntime}"`
-        if (!retainedUiEnabled) return core
-        const retainedRuntime =
-          configuration.target === 'server'
-            ? '@vidact/runtime/retained-ui/server'
-            : configuration.target === 'hydrate'
-              ? '@vidact/runtime/retained-ui/hydrate'
-              : '@vidact/runtime/retained-ui'
-        return `${core}\nexport { Activity } from "${retainedRuntime}"`
+        const exports = [core]
+        if (retainedUiEnabled) {
+          const retainedRuntime =
+            configuration.target === 'server'
+              ? '@vidact/runtime/retained-ui/server'
+              : configuration.target === 'hydrate'
+                ? '@vidact/runtime/retained-ui/hydrate'
+                : '@vidact/runtime/retained-ui'
+          exports.push(`export { Activity } from "${retainedRuntime}"`)
+        }
+        if (profilingEnabled) {
+          const profilingRuntime =
+            configuration.target === 'server'
+              ? '@vidact/runtime/profiling/server'
+              : configuration.target === 'hydrate'
+                ? '@vidact/runtime/profiling/hydrate'
+                : '@vidact/runtime/profiling'
+          exports.push(
+            `export { Profiler, captureOwnerStack, useDebugValue } from "${profilingRuntime}"`,
+          )
+        }
+        return exports.join('\n')
       }
       const actionsEnabled = configuration.features.includes('actions')
       const concurrentEnabled = configuration.features.includes('concurrent')

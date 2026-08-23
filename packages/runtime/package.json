@@ -68,6 +68,18 @@
       "types": "./dist/retained-ui-server.d.ts",
       "import": "./dist/retained-ui-server.js"
     },
+    "./profiling": {
+      "types": "./dist/profiling.d.ts",
+      "import": "./dist/profiling.js"
+    },
+    "./profiling/hydrate": {
+      "types": "./dist/profiling-hydrate.d.ts",
+      "import": "./dist/profiling-hydrate.js"
+    },
+    "./profiling/server": {
+      "types": "./dist/server-profiling.d.ts",
+      "import": "./dist/server-profiling.js"
+    },
     "./hydrate/jsx-dev-runtime": {
       "types": "./dist/hydrate-jsx-dev-runtime.d.ts",
       "import": "./dist/hydrate-jsx-dev-runtime.js"

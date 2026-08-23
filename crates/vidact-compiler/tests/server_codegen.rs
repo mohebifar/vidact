@@ -125,6 +125,43 @@ fn stages_server_activity_only_when_retained_ui_is_enabled() {
 }
 
 #[test]
+fn stages_server_profiler_only_when_profiling_is_enabled() {
+    let input = ModuleInput {
+        filename: "ServerProfiler.tsx",
+        source: r#"
+            import { Profiler, useDebugValue } from 'react';
+            function Child() {
+                useDebugValue('server');
+                return <p>profiled</p>;
+            }
+            export function ServerProfiler() {
+                return <Profiler id="server" onRender={() => undefined}><Child /></Profiler>;
+            }
+        "#,
+    };
+    let diagnostics =
+        compile_server_module(input).expect_err("server Profiler must remain feature-gated");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.message.contains("`profiling`")
+            && diagnostic.span.is_some()
+    }));
+
+    let compilation = compile_server_module_with_options(
+        input,
+        &CompilationOptions::new(CompilerTarget::Server).with_feature(CompilerFeature::Profiling),
+    )
+    .expect("the profiling server target should preserve a staged child factory");
+    assert!(compilation.code.contains("<Profiler id=\"server\""));
+    assert!(
+        compilation.code.contains("function _temp()")
+            && compilation.code.contains("return <><Child /></>;"),
+        "{}",
+        compilation.code
+    );
+}
+
+#[test]
 fn gates_concurrent_server_hooks_at_their_calls() {
     let input = ModuleInput {
         filename: "ServerConcurrent.tsx",

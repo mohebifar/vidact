@@ -8,12 +8,12 @@ import { build } from 'vite'
 const directory = path.dirname(fileURLToPath(import.meta.url))
 const repository = path.resolve(directory, '../..')
 const fixtures = [
-  { name: 'counter', entry: path.join(directory, 'fixtures/counter.tsx'), gzipBudget: 8_069 },
+  { name: 'counter', entry: path.join(directory, 'fixtures/counter.tsx'), gzipBudget: 8_104 },
   {
     name: 'async-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['async'],
-    gzipBudget: 8_069,
+    gzipBudget: 8_104,
   },
   {
     name: 'concurrent-unused',
@@ -25,25 +25,25 @@ const fixtures = [
     name: 'concurrent',
     entry: path.join(directory, 'fixtures/concurrent.tsx'),
     features: ['concurrent'],
-    gzipBudget: 9_735,
+    gzipBudget: 9_765,
   },
   {
     name: 'actions-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['actions'],
-    gzipBudget: 8_069,
+    gzipBudget: 8_104,
   },
   {
     name: 'actions',
     entry: path.join(directory, 'fixtures/actions.tsx'),
     features: ['actions'],
-    gzipBudget: 11_449,
+    gzipBudget: 11_485,
   },
   {
     name: 'retained-ui-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['retained-ui'],
-    gzipBudget: 8_069,
+    gzipBudget: 8_104,
   },
   {
     name: 'retained-ui',
@@ -52,21 +52,33 @@ const fixtures = [
     gzipBudget: 11_500,
   },
   {
+    name: 'profiling-unused',
+    entry: path.join(directory, 'fixtures/counter.tsx'),
+    features: ['profiling'],
+    gzipBudget: 8_104,
+  },
+  {
+    name: 'profiling',
+    entry: path.join(directory, 'fixtures/profiling.tsx'),
+    features: ['profiling'],
+    gzipBudget: 11_500,
+  },
+  {
     name: 'control-flow',
     entry: path.join(directory, 'fixtures/control-flow.tsx'),
-    gzipBudget: 8_498,
+    gzipBudget: 8_526,
   },
   {
     name: 'keyed-list',
     entry: path.join(directory, 'fixtures/keyed-list.tsx'),
-    gzipBudget: 9_289,
+    gzipBudget: 9_318,
   },
   {
     name: 'todomvc',
     entry: path.join(repository, 'examples/todomvc/src/TodoApp.tsx'),
-    gzipBudget: 10_924,
+    gzipBudget: 10_957,
   },
-  { name: 'effect', entry: path.join(directory, 'fixtures/effect.tsx'), gzipBudget: 8_375 },
+  { name: 'effect', entry: path.join(directory, 'fixtures/effect.tsx'), gzipBudget: 8_409 },
 ]
 
 const measurements = await Promise.all(fixtures.map(measureFixture))
@@ -88,12 +100,16 @@ const actionsUnused = measurements.find((measurement) => measurement.fixture ===
 const retainedUiUnused = measurements.find(
   (measurement) => measurement.fixture === 'retained-ui-unused',
 )
+const profilingUnused = measurements.find(
+  (measurement) => measurement.fixture === 'profiling-unused',
+)
 if (
   counter === undefined ||
   asyncUnused === undefined ||
   concurrentUnused === undefined ||
   actionsUnused === undefined ||
   retainedUiUnused === undefined ||
+  profilingUnused === undefined ||
   counter.minified !== asyncUnused.minified ||
   counter.gzip !== asyncUnused.gzip ||
   counter.minified !== concurrentUnused.minified ||
@@ -101,10 +117,12 @@ if (
   counter.minified !== actionsUnused.minified ||
   counter.gzip !== actionsUnused.gzip ||
   counter.minified !== retainedUiUnused.minified ||
-  counter.gzip !== retainedUiUnused.gzip
+  counter.gzip !== retainedUiUnused.gzip ||
+  counter.minified !== profilingUnused.minified ||
+  counter.gzip !== profilingUnused.gzip
 ) {
   regressions.push(
-    'enabling an unused async, concurrent, Actions, or retained UI family changed the counter artifact',
+    'enabling an unused async, concurrent, Actions, retained UI, or profiling family changed the counter artifact',
   )
 }
 if (regressions.length > 0) {
@@ -132,6 +150,9 @@ async function measureFixture(fixture) {
   const code = chunks[0].code
   if (code.includes('Vidact compiled scope did not stabilize')) {
     throw new Error(`${fixture.name} retained development diagnostics`)
+  }
+  if (code.includes('vidact.updater:') || code.includes('useDebugValue must run')) {
+    throw new Error(`${fixture.name} retained development profiling instrumentation`)
   }
   const modules = chunks
     .flatMap((chunk) =>

@@ -23,6 +23,13 @@ import {
   useOptimistic,
 } from '../../src/server-actions.ts'
 import {
+  Profiler as ServerProfiler,
+  captureOwnerStack as captureServerOwnerStack,
+  jsx as profilingJsx,
+  renderToStaticMarkup as renderProfilingToStaticMarkup,
+  useDebugValue as useServerDebugValue,
+} from '../../src/server-profiling.ts'
+import {
   Activity as ServerActivity,
   jsx as retainedJsx,
   renderToStaticMarkup as renderRetainedToStaticMarkup,
@@ -124,6 +131,29 @@ describe('server rendering', () => {
         retainedJsx(ServerActivity, { mode: 'hidden', children: () => 'private text' }),
       ),
     ).toThrow('initially hidden Activity server children require a host element root')
+  })
+
+  it('renders profiling boundaries transparently without invoking development callbacks', () => {
+    let callbackCalls = 0
+    let formatterCalls = 0
+    const output = renderProfilingToStaticMarkup(() =>
+      profilingJsx(ServerProfiler, {
+        id: 'server',
+        onRender: () => {
+          callbackCalls += 1
+        },
+        children: () => {
+          useServerDebugValue('value', () => {
+            formatterCalls += 1
+            return 'formatted'
+          })
+          return profilingJsx('p', { children: captureServerOwnerStack() ?? 'profiled' })
+        },
+      }),
+    )
+    expect(output).toBe('<p>profiled</p>')
+    expect(callbackCalls).toBe(0)
+    expect(formatterCalls).toBe(0)
   })
 
   it('diagnoses portals on the server target', () => {

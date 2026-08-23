@@ -37,6 +37,7 @@ import { createStateSlot, type StateSlot } from './state-slot.ts'
 const MAX_FLUSH_PASSES = 100
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 let retainedUiEnabled = typeof __VIDACT_RETAINED_UI__ !== 'undefined' && __VIDACT_RETAINED_UI__
+let profilingEnabled = false
 const BINDING = Symbol(DEV ? 'Vidact.Binding' : undefined)
 const STRUCTURAL = Symbol(DEV ? 'Vidact.StructuralBinding' : undefined)
 const CONTEXT = Symbol(DEV ? 'Vidact.Context' : undefined)
@@ -75,7 +76,42 @@ type Owner = [
   rootIdentity: RootIdentity,
   errorBoundary: ErrorBoundaryHandler | null,
   retainedConnection?: RetainedConnection | null,
+  profileContext?: ProfileContext | null,
+  debugName?: string | null,
 ]
+
+type DebugOwnerFrame = {
+  readonly name: string
+  readonly parent: DebugOwnerFrame | null
+  readonly values: unknown[]
+}
+
+type ProfileContext = {
+  readonly frame: DebugOwnerFrame | null
+  readonly boundary: ProfileBoundary | null
+}
+
+type ProfileBoundary = {
+  readonly parent: ProfileBoundary | null
+  id: string
+  onRender: ProfilerOnRender
+  baseDuration: number
+  mounted: boolean
+  pendingDuration: number
+  pendingStart: number
+  scheduled: boolean
+}
+
+export type ProfilerPhase = 'mount' | 'update' | 'nested-update'
+
+export type ProfilerOnRender = (
+  id: string,
+  phase: ProfilerPhase,
+  actualDuration: number,
+  baseDuration: number,
+  startTime: number,
+  commitTime: number,
+) => void
 
 type RetainedResource = {
   readonly owner: Owner
@@ -352,6 +388,158 @@ export function retainedActivity(
 /** @internal */
 export function enableRetainedUi(): void {
   retainedUiEnabled = true
+}
+
+/** @internal */
+export function enableProfiling(): void {
+  profilingEnabled = DEV
+}
+
+/** @internal */
+export function profiled(
+  idInput: string | CompiledBinding<string>,
+  onRenderInput: ProfilerOnRender | CompiledBinding<ProfilerOnRender>,
+  render: () => CompiledRenderValue,
+): StructuralBinding {
+  if (!DEV) return deferred(render)
+  noteHydrationStructuralParent()
+  const context = activeContextFrame ?? activeOwner?.[2] ?? null
+  const rootIdentity = activeOwner?.[3] ?? activeRootIdentity
+  if (rootIdentity === null) {
+    throw new Error(DEV ? 'Profiler must run during compiled root construction' : 'V035')
+  }
+  const parentErrorBoundary = activeOwner?.[4] ?? null
+  const parentConnection = activeOwner?.[5] ?? null
+  const parentProfile = activeOwner?.[6] ?? null
+  let mounted = false
+  return [
+    STRUCTURAL,
+    (parent, before) => {
+      if (mounted) throw new Error(DEV ? 'compiled Profiler is already mounted' : 'V008')
+      mounted = true
+      const readId = (): string => {
+        const id = isCompiledBinding(idInput) ? idInput[1]() : idInput
+        if (typeof id !== 'string') throw new TypeError('Profiler id must be a string')
+        return id
+      }
+      const readOnRender = (): ProfilerOnRender => {
+        const onRender = isCompiledBinding(onRenderInput) ? onRenderInput[1]() : onRenderInput
+        if (typeof onRender !== 'function') {
+          throw new TypeError('Profiler onRender must be a function')
+        }
+        return onRender
+      }
+      const boundary: ProfileBoundary = {
+        parent: parentProfile?.boundary ?? null,
+        id: readId(),
+        onRender: readOnRender(),
+        baseDuration: 0,
+        mounted: false,
+        pendingDuration: 0,
+        pendingStart: 0,
+        scheduled: false,
+      }
+      const childOwner = createOwner(context, rootIdentity, parentErrorBoundary, parentConnection, {
+        frame: parentProfile?.frame ?? null,
+        boundary,
+      })
+      const hydratedRange = claimHydrationSlotRange(parent)
+      const start = hydratedRange?.[0] ?? document.createComment(DEV ? 'vidact:profiler' : '')
+      const end = hydratedRange?.[1] ?? document.createComment(DEV ? '/vidact:profiler' : '')
+      if (hydratedRange === undefined) {
+        parent.insertBefore(start, before)
+        parent.insertBefore(end, before)
+      }
+      const currentParent = rangeParent(start, end, 'Profiler boundary')
+      let stagedNodes: readonly Node[] = []
+      const started = profileNow()
+      try {
+        const [fragment, nodes] =
+          hydratedRange === undefined
+            ? stageRender(render, childOwner)
+            : withHydrationInsertion(currentParent, end, () => stageRender(render, childOwner))
+        stagedNodes = nodes
+        currentParent.insertBefore(fragment, end)
+        commitPublishedNodes(nodes)
+      } catch (error) {
+        disposePublished(childOwner, stagedNodes)
+        throw error
+      }
+      const finished = profileNow()
+      boundary.baseDuration = finished - started
+      boundary.mounted = true
+      emitProfileMeasure(childOwner, 'range', started, finished)
+      runOwnerTask(childOwner, () =>
+        boundary.onRender(
+          boundary.id,
+          'mount',
+          boundary.baseDuration,
+          boundary.baseDuration,
+          started,
+          finished,
+        ),
+      )
+      const removeIdUpdater = isCompiledBinding(idInput)
+        ? subscribeBinding(idInput, () => {
+            boundary.id = readId()
+          })
+        : noop
+      const removeCallbackUpdater = isCompiledBinding(onRenderInput)
+        ? subscribeBinding(onRenderInput, () => {
+            boundary.onRender = readOnRender()
+          })
+        : noop
+      onCleanup(() => {
+        removeCallbackUpdater()
+        removeIdUpdater()
+        disposeRange(childOwner, start, end)
+      })
+    },
+    'slot',
+  ]
+}
+
+/** @internal */
+export function recordCompiledDebugValue<Value>(
+  valueInput: Value | CompiledBinding<Value>,
+  format?: (value: Value) => unknown,
+): void {
+  if (!profilingEnabled) return
+  const owner = activeConstructionOwner ?? activeOwner
+  if (owner === null) {
+    throw new Error(DEV ? 'useDebugValue must run inside a compiled component' : 'V036')
+  }
+  const frame = ensureProfileContext(owner).frame
+  if (frame === null) {
+    throw new Error(DEV ? 'useDebugValue must run inside a compiled component' : 'V036')
+  }
+  const read = (): unknown => {
+    const value = isCompiledBinding(valueInput) ? valueInput[1]() : valueInput
+    return format === undefined ? value : format(value)
+  }
+  const index = frame.values.length
+  frame.values.push(read())
+  if (isCompiledBinding(valueInput)) {
+    const remove = subscribeBinding(valueInput, () => {
+      frame.values[index] = read()
+    })
+    owner[1].add(remove)
+  }
+}
+
+/** @internal */
+export function captureCompiledOwnerStack(): string | null {
+  if (!profilingEnabled) return null
+  const owner = activeConstructionOwner ?? activeOwner
+  let frame = owner === null ? null : ensureProfileContext(owner).frame
+  if (frame === null) return null
+  const lines: string[] = []
+  while (frame !== null) {
+    const values = frame.values.length === 0 ? '' : ` [${frame.values.map(String).join(', ')}]`
+    lines.push(`\n    at ${frame.name}${values}`)
+    frame = frame.parent
+  }
+  return lines.join('')
 }
 
 function validateActivityMode(mode: unknown): 'visible' | 'hidden' {
@@ -674,6 +862,7 @@ let activeRootIdentity: RootIdentity | null = null
 let nextClientRoot = 0
 let activeScopeCollector: Set<CompiledScope> | null = null
 let activeConstructionOwner: Owner | null = null
+let activeProfileName: string | null = null
 let activeErrorOwner: Owner | null = null
 let failedOwner: Owner | null = null
 let transactionDepth = 0
@@ -720,39 +909,47 @@ function createScope(operations: SourceOperations): CompiledScope {
 
   const flush = (): void => {
     if (owner[0] || flushing) return
-    flushing = true
-    try {
-      let pass = 0
-      while (!operations[0](pending)) {
-        pass += 1
-        if (pass > MAX_FLUSH_PASSES) {
-          pending = 0
-          throw new Error(DEV ? 'Vidact compiled scope did not stabilize' : 'V001')
-        }
-
-        let active = pending
-        pending = 0
-        const updaterCount = updaters.length
-        for (let index = 0; index < updaterCount; index += 1) {
-          const updater = updaters[index]
-          if (
-            updater === undefined ||
-            addedDuringFlush.has(updater) ||
-            !updater[3] ||
-            !operations[1](active, updater[0])
-          ) {
-            continue
+    const operation = (): void => {
+      flushing = true
+      try {
+        let pass = 0
+        while (!operations[0](pending)) {
+          pass += 1
+          if (pass > MAX_FLUSH_PASSES) {
+            pending = 0
+            throw new Error(DEV ? 'Vidact compiled scope did not stabilize' : 'V001')
           }
-          updater[2](active)
-          if (updater[1] !== undefined) active = operations[2](active, updater[1])
+
+          let active = pending
+          pending = 0
+          const updaterCount = updaters.length
+          for (let index = 0; index < updaterCount; index += 1) {
+            const updater = updaters[index]
+            if (
+              updater === undefined ||
+              addedDuringFlush.has(updater) ||
+              !updater[3] ||
+              !operations[1](active, updater[0])
+            ) {
+              continue
+            }
+            if (profilingEnabled) {
+              measureProfileWork(owner, 'updater', () => updater[2](active))
+            } else {
+              updater[2](active)
+            }
+            if (updater[1] !== undefined) active = operations[2](active, updater[1])
+          }
+          addedDuringFlush.clear()
         }
+      } finally {
         addedDuringFlush.clear()
+        flushing = false
       }
-    } finally {
-      addedDuringFlush.clear()
-      flushing = false
+      if (retainedUiEnabled) notifyRetainedFlush(owner[5] ?? null)
     }
-    if (retainedUiEnabled) notifyRetainedFlush(owner[5] ?? null)
+    if (profilingEnabled) measureProfileWork(owner, 'scheduler', operation, true)
+    else operation()
   }
 
   const scope: CompiledScope = [
@@ -1230,16 +1427,19 @@ export function binding<T>(
   return [BINDING, evaluate, scope, reads, additionalScope, additionalReads]
 }
 
-export function compiledEvent<T extends Event>(
+export function compiledEvent<Arguments extends unknown[]>(
   scope: CompiledScope,
-  handler: (event: T) => void,
-): (event: T) => void {
+  handler: (...arguments_: Arguments) => void,
+): (...arguments_: Arguments) => void {
   const owner = scopeOwners.get(scope)
   if (owner === undefined) {
     throw new Error(DEV ? 'compiledEvent received an unknown scope' : 'V003')
   }
   const errorOwner = activeOwner ?? owner
-  return (event) => runOwnerTask(errorOwner, () => scope[2](() => handler(event)))
+  return (...arguments_) =>
+    runOwnerTask(errorOwner, () =>
+      withOwner(errorOwner, () => scope[2](() => handler(...arguments_))),
+    )
 }
 
 export interface CompiledTaskController {
@@ -1628,8 +1828,12 @@ export function compiledRoot(
       withOwner(owner, () =>
         withScopeNamespace(scope, () => insertValue(renderParent, render(), end)),
       )
-    if (hydratedRange === undefined) insertRender()
-    else withHydrationCursor(renderParent, start.nextSibling, insertRender)
+    const insert = () => {
+      if (hydratedRange === undefined) insertRender()
+      else withHydrationCursor(renderParent, start.nextSibling, insertRender)
+    }
+    if (profilingEnabled) measureProfileWork(owner, 'range', insert)
+    else insert()
   } catch (error) {
     try {
       scope[3]()
@@ -1674,12 +1878,20 @@ export function adoptCompiledRoot(root: unknown): void {
   }
 }
 
-export function constructCompiledComponent<T extends CompiledRenderValue>(component: () => T): T {
+export function constructCompiledComponent<T extends CompiledRenderValue>(
+  component: () => T,
+  componentType?: unknown,
+): T {
   const previousCollector = activeScopeCollector
   const previousConstructionOwner = activeConstructionOwner
+  const previousProfileName = activeProfileName
   const scopes = new Set<CompiledScope>()
   activeScopeCollector = scopes
   activeConstructionOwner = null
+  const profileType = componentType as
+    | { readonly name?: string; readonly displayName?: string }
+    | undefined
+  if (DEV) activeProfileName = profileType?.displayName ?? profileType?.name ?? 'Anonymous'
   try {
     return component()
   } catch (error) {
@@ -1695,6 +1907,7 @@ export function constructCompiledComponent<T extends CompiledRenderValue>(compon
   } finally {
     activeScopeCollector = previousCollector
     activeConstructionOwner = previousConstructionOwner
+    if (DEV) activeProfileName = previousProfileName
   }
 }
 
@@ -1759,7 +1972,9 @@ export function useInsertionEffect(
     queueInsertionCommit(owner, () => {
       if (lifetimeOwner[0]) return
       cleanup()
-      cleanup = readEffectCleanup(create())
+      cleanup = profilingEnabled
+        ? readProfiledEffectCleanup(owner, create)
+        : readEffectCleanup(create())
     })
     lifetimeOwner[1].add(() => cleanup())
     return
@@ -1773,7 +1988,9 @@ export function useInsertionEffect(
         noop,
         undefined,
         () => {
-          cleanup = readEffectCleanup(create())
+          cleanup = profilingEnabled
+            ? readProfiledEffectCleanup(owner, create)
+            : readEffectCleanup(create())
         },
         -20,
       ])
@@ -1811,7 +2028,9 @@ function registerEffect(
     let generation = 0
     const run = (): void => {
       cleanup()
-      cleanup = readEffectCleanup(create())
+      cleanup = profilingEnabled
+        ? readProfiledEffectCleanup(owner, create)
+        : readEffectCleanup(create())
     }
     queueOwnerCommit(owner, () => {
       if (lifetimeOwner[0]) return
@@ -1846,12 +2065,16 @@ function registerEffect(
             ;(DEV ? scheduleTask : queueMicrotask)(() => {
               if (!lifetimeOwner[0] && scheduled === generation) {
                 runOwnerTask(lifetimeOwner, () => {
-                  cleanup = readEffectCleanup(create())
+                  cleanup = profilingEnabled
+                    ? readProfiledEffectCleanup(owner, create)
+                    : readEffectCleanup(create())
                 })
               }
             })
           } else {
-            cleanup = readEffectCleanup(create())
+            cleanup = profilingEnabled
+              ? readProfiledEffectCleanup(owner, create)
+              : readEffectCleanup(create())
           }
         },
         passive ? 40 : 20,
@@ -1906,7 +2129,9 @@ export function compiledInsertionEffect(
         return
       }
       cleanup()
-      cleanup = readEffectCleanup(readCreate()())
+      cleanup = profilingEnabled
+        ? readProfiledEffectCleanup(owner, () => readCreate()())
+        : readEffectCleanup(readCreate()())
       currentDependencies = nextDependencies
       mounted = true
     }
@@ -1936,7 +2161,9 @@ export function compiledInsertionEffect(
       return
     }
     cleanup()
-    cleanup = readEffectCleanup(readCreate()())
+    cleanup = profilingEnabled
+      ? readProfiledEffectCleanup(owner, () => readCreate()())
+      : readEffectCleanup(readCreate()())
     currentDependencies = nextDependencies
     mounted = true
   }
@@ -2000,7 +2227,9 @@ export function compiledEffect(
         return
       }
       cleanup()
-      cleanup = readEffectCleanup(readCreate()())
+      cleanup = profilingEnabled
+        ? readProfiledEffectCleanup(owner, () => readCreate()())
+        : readEffectCleanup(readCreate()())
       currentDependencies = nextDependencies
       mounted = true
     }
@@ -2044,7 +2273,9 @@ export function compiledEffect(
       return
     }
     cleanup()
-    cleanup = readEffectCleanup(readCreate()())
+    cleanup = profilingEnabled
+      ? readProfiledEffectCleanup(owner, () => readCreate()())
+      : readEffectCleanup(readCreate()())
     currentDependencies = nextDependencies
     mounted = true
   }
@@ -2516,9 +2747,12 @@ function structural(
   const mountOnce: StructuralBinding[1] = (parent, before) => {
     if (mounted) throw new Error(DEV ? 'compiled block is already mounted' : 'V008')
     mounted = true
-    withOwner(owner, () =>
-      withContextFrame(context, () => withScopeNamespace(scope, () => mount(parent, before))),
-    )
+    const operation = () =>
+      withOwner(owner, () =>
+        withContextFrame(context, () => withScopeNamespace(scope, () => mount(parent, before))),
+      )
+    if (profilingEnabled) measureProfileWork(owner, 'range', operation)
+    else operation()
   }
   return hydrationKind === undefined
     ? [STRUCTURAL, mountOnce]
@@ -2574,10 +2808,135 @@ function createOwner(
   rootIdentity = activeOwner?.[3] ?? activeRootIdentity ?? createRootIdentity(),
   boundary = activeOwner?.[4] ?? null,
   retainedConnection = activeOwner?.[5] ?? null,
+  profileContext = activeOwner?.[6] ?? activeConstructionOwner?.[6] ?? null,
 ): Owner {
-  return retainedUiEnabled
+  let nextProfile = profileContext
+  if (profilingEnabled && activeProfileName !== null && activeConstructionOwner === null) {
+    nextProfile = {
+      frame: {
+        name: activeProfileName,
+        parent: profileContext?.frame ?? null,
+        values: [],
+      },
+      boundary: profileContext?.boundary ?? null,
+    }
+  }
+  if (profilingEnabled) {
+    const owner: Owner = [
+      false,
+      new Set(),
+      context,
+      rootIdentity,
+      boundary,
+      retainedUiEnabled ? retainedConnection : null,
+      nextProfile,
+    ]
+    if (DEV) owner[7] = activeConstructionOwner?.[7] ?? activeProfileName
+    return owner
+  }
+  const owner: Owner = retainedUiEnabled
     ? [false, new Set(), context, rootIdentity, boundary, retainedConnection]
     : [false, new Set(), context, rootIdentity, boundary]
+  if (DEV) owner[7] = activeConstructionOwner?.[7] ?? activeProfileName
+  return owner
+}
+
+function ensureProfileContext(owner: Owner): ProfileContext {
+  const current = owner[6]
+  if (current?.frame !== null && current?.frame !== undefined) return current
+  const parent =
+    current ?? (activeOwner !== null && activeOwner !== owner ? (activeOwner[6] ?? null) : null)
+  const next = {
+    frame: {
+      name: owner[7] ?? activeProfileName ?? 'Anonymous',
+      parent: parent?.frame ?? null,
+      values: [],
+    },
+    boundary: parent?.boundary ?? null,
+  }
+  owner[6] = next
+  return next
+}
+
+function profileNow(): number {
+  return typeof performance === 'undefined' ? Date.now() : performance.now()
+}
+
+function measureProfileWork<Result>(
+  owner: Owner,
+  kind: 'effect' | 'range' | 'scheduler' | 'updater',
+  operation: () => Result,
+  contribute = false,
+): Result {
+  const started = profileNow()
+  try {
+    return operation()
+  } finally {
+    const finished = profileNow()
+    emitProfileMeasure(owner, kind, started, finished)
+    if (contribute) recordProfileCommit(owner, started, finished)
+  }
+}
+
+function emitProfileMeasure(
+  owner: Owner,
+  kind: 'effect' | 'range' | 'scheduler' | 'updater',
+  started: number,
+  finished: number,
+): void {
+  if (typeof performance === 'undefined' || typeof performance.measure !== 'function') return
+  const component = owner[6]?.frame?.name ?? 'Anonymous'
+  performance.measure(`vidact.${kind}:${component}`, { start: started, end: finished })
+}
+
+function recordProfileCommit(owner: Owner, started: number, finished: number): void {
+  let boundary = owner[6]?.boundary ?? null
+  while (boundary !== null) {
+    queueProfileBoundaryCommit(boundary, owner, started, finished)
+    boundary = boundary.parent
+  }
+}
+
+function queueProfileBoundaryCommit(
+  boundary: ProfileBoundary,
+  owner: Owner,
+  started: number,
+  finished: number,
+): void {
+  if (!boundary.mounted) return
+  boundary.pendingDuration += finished - started
+  boundary.pendingStart =
+    boundary.pendingStart === 0 ? started : Math.min(boundary.pendingStart, started)
+  if (boundary.scheduled) return
+  boundary.scheduled = true
+  stagePublication([
+    noop,
+    noop,
+    undefined,
+    () => {
+      const actualDuration = boundary.pendingDuration
+      const startTime = boundary.pendingStart
+      boundary.pendingDuration = 0
+      boundary.pendingStart = 0
+      boundary.scheduled = false
+      boundary.onRender(
+        boundary.id,
+        'update',
+        actualDuration,
+        boundary.baseDuration,
+        startTime,
+        profileNow(),
+      )
+    },
+    100,
+    owner,
+  ])
+}
+
+function readProfiledEffectCleanup(owner: Owner, evaluate: () => EffectResult): () => void {
+  const cleanup = measureProfileWork(owner, 'effect', () => readEffectCleanup(evaluate()))
+  if (cleanup === noop) return cleanup
+  return () => measureProfileWork(owner, 'effect', cleanup)
 }
 
 function createRetainedConnection(

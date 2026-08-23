@@ -129,7 +129,15 @@ fn is_compiler_staged_boundary(element: &JSXElement<'_>) -> bool {
                     )
             )
     });
-    (has_fallback_factory || has_mode)
+    let has_profiler_contract = ["id", "onRender"].into_iter().all(|required| {
+        element.opening_element.attributes.iter().any(|item| {
+            matches!(
+                item,
+                JSXAttributeItem::Attribute(attribute) if attribute.is_identifier(required)
+            )
+        })
+    });
+    (has_fallback_factory || has_mode || has_profiler_contract)
         && matches!(
             element.children.as_slice(),
             [JSXChild::ExpressionContainer(container)]

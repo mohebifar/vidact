@@ -316,6 +316,8 @@ fn remove_lowered_react_state_imports(
         remaining_concurrent_call: None,
         actions_enabled: options.feature_enabled(CompilerFeature::Actions),
         remaining_action_call: None,
+        profiling_enabled: options.feature_enabled(CompilerFeature::Profiling),
+        remaining_profiling_call: None,
         remaining_lazy_call: None,
     };
     usage.visit_program(program);
@@ -344,6 +346,12 @@ fn remove_lowered_react_state_imports(
     if let Some((name, span)) = usage.remaining_action_call {
         return Err(
             unsupported(format!("{name} requires the `actions` compiler feature"))
+                .with_span(SourceSpan::new(span.start, span.end)),
+        );
+    }
+    if let Some((name, span)) = usage.remaining_profiling_call {
+        return Err(
+            unsupported(format!("{name} requires the `profiling` compiler feature"))
                 .with_span(SourceSpan::new(span.start, span.end)),
         );
     }
@@ -417,6 +425,8 @@ struct PostTransformReactUsage<'r, 's> {
     remaining_concurrent_call: Option<(&'static str, Span)>,
     actions_enabled: bool,
     remaining_action_call: Option<(&'static str, Span)>,
+    profiling_enabled: bool,
+    remaining_profiling_call: Option<(&'static str, Span)>,
     remaining_lazy_call: Option<Span>,
 }
 
@@ -424,6 +434,20 @@ impl<'a> Visit<'a> for PostTransformReactUsage<'_, '_> {
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
         if self.react.is_lazy_call(call) && !self.async_enabled {
             self.remaining_lazy_call.get_or_insert(call.span);
+            return;
+        }
+        let profiling_name = if self.react.is_debug_value_call(call) {
+            Some("useDebugValue")
+        } else if self.react.is_capture_owner_stack_call(call) {
+            Some("captureOwnerStack")
+        } else {
+            None
+        };
+        if !self.profiling_enabled
+            && let Some(name) = profiling_name
+        {
+            self.remaining_profiling_call
+                .get_or_insert((name, call.span));
             return;
         }
         let action_hook = self
@@ -2310,6 +2334,69 @@ pub(super) fn prepare_activity_element<'a>(
     prepare_known_activity_element(ast, options, element)
 }
 
+pub(super) fn prepare_profiler_element<'a>(
+    ast: &AstBuilder<'a>,
+    react: &ReactBindings<'_>,
+    options: &CompilationOptions,
+    element: &mut JSXElement<'a>,
+) -> Result<(), Diagnostic> {
+    if !react.is_named_jsx_element(&element.opening_element.name, "Profiler") {
+        return Ok(());
+    }
+    prepare_known_profiler_element(ast, options, element)
+}
+
+pub(super) fn prepare_known_profiler_element<'a>(
+    ast: &AstBuilder<'a>,
+    options: &CompilationOptions,
+    element: &mut JSXElement<'a>,
+) -> Result<(), Diagnostic> {
+    if !options.feature_enabled(CompilerFeature::Profiling) {
+        return Err(
+            unsupported("Profiler requires the `profiling` compiler feature")
+                .with_span(SourceSpan::new(element.span.start, element.span.end)),
+        );
+    }
+    for required in ["id", "onRender"] {
+        let present = element.opening_element.attributes.iter().any(|item| {
+            matches!(
+                item,
+                JSXAttributeItem::Attribute(attribute)
+                    if matches!(&attribute.name, JSXAttributeName::Identifier(name) if name.name == required)
+                        && attribute.value.is_some()
+            )
+        });
+        if !present {
+            return Err(
+                unsupported(format!("Profiler requires an {required} prop")).with_span(
+                    SourceSpan::new(
+                        element.opening_element.span.start,
+                        element.opening_element.span.end,
+                    ),
+                ),
+            );
+        }
+    }
+
+    let children = element.children.clone_in_with_semantic_ids(ast.allocator());
+    let fragment = Expression::JSXFragment(JSXFragment::boxed(
+        SPAN,
+        JSXOpeningFragment::new(SPAN, ast),
+        children,
+        JSXClosingFragment::new(SPAN, ast),
+        ast,
+    ));
+    element.children.clear();
+    element.children.push(JSXChild::ExpressionContainer(
+        JSXExpressionContainer::boxed(
+            SPAN,
+            JSXExpression::from(arrow_expression(ast, [], fragment)),
+            ast,
+        ),
+    ));
+    Ok(())
+}
+
 pub(super) fn prepare_known_activity_element<'a>(
     ast: &AstBuilder<'a>,
     options: &CompilationOptions,
@@ -2441,6 +2528,67 @@ pub(super) fn prepare_known_suspense_element<'a>(
 
 impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
     fn visit_call_expression(&mut self, call: &mut CallExpression<'a>) {
+        if !self.options.feature_enabled(CompilerFeature::Profiling) {
+            let name = if self.react.is_debug_value_call(call) {
+                Some("useDebugValue")
+            } else if self.react.is_capture_owner_stack_call(call) {
+                Some("captureOwnerStack")
+            } else {
+                None
+            };
+            if let Some(name) = name {
+                self.diagnostic = Some(
+                    unsupported(format!("{name} requires the `profiling` compiler feature"))
+                        .with_span(SourceSpan::new(call.span.start, call.span.end)),
+                );
+                return;
+            }
+        }
+        if self.react.is_debug_value_call(call) {
+            if !(1..=2).contains(&call.arguments.len())
+                || call.arguments.iter().any(Argument::is_spread)
+            {
+                self.diagnostic = Some(
+                    unsupported("useDebugValue requires a value and optional formatter")
+                        .with_span(SourceSpan::new(call.span.start, call.span.end)),
+                );
+                return;
+            }
+            let value = call.arguments[0]
+                .as_expression()
+                .expect("spread arguments were rejected");
+            let mut reads = dependencies(
+                value,
+                self.scoping,
+                self.source_symbols,
+                self.item_source_symbols,
+            );
+            if let Some(formatter) = call.arguments.get(1).and_then(Argument::as_expression) {
+                let formatter_reads = dependencies(
+                    formatter,
+                    self.scoping,
+                    self.source_symbols,
+                    self.item_source_symbols,
+                );
+                reads.parent.extend(formatter_reads.parent);
+                reads.item.extend(formatter_reads.item);
+            }
+            walk_call_expression_mut(self, call);
+            if !reads.is_empty() {
+                let value = call.arguments[0]
+                    .as_expression()
+                    .expect("spread arguments were rejected")
+                    .clone_in_with_semantic_ids(self.ast.allocator());
+                let mut arguments = vec![
+                    ident(self.ast, SCOPE),
+                    dependency_mask(self.ast, &reads.parent),
+                    arrow_expression(self.ast, [], value),
+                ];
+                append_item_dependency(self.ast, &mut arguments, &reads);
+                call.arguments[0] = Argument::from(call_name(self.ast, BINDING, arguments));
+            }
+            return;
+        }
         if self.react.is_lazy_call(call) && !self.options.feature_enabled(CompilerFeature::Async) {
             self.diagnostic = Some(
                 unsupported("lazy requires the `async` compiler feature")
@@ -2662,6 +2810,12 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
     }
 
     fn visit_jsx_element(&mut self, element: &mut JSXElement<'a>) {
+        if let Err(diagnostic) =
+            prepare_profiler_element(self.ast, self.react, self.options, element)
+        {
+            self.diagnostic = Some(diagnostic);
+            return;
+        }
         if let Err(diagnostic) =
             prepare_activity_element(self.ast, self.react, self.options, element)
         {

@@ -106,8 +106,10 @@ pub fn compile_server_module_with_options(
         async_enabled: options.feature_enabled(CompilerFeature::Async),
         concurrent_enabled: options.feature_enabled(CompilerFeature::Concurrent),
         actions_enabled: options.feature_enabled(CompilerFeature::Actions),
+        profiling_enabled: options.feature_enabled(CompilerFeature::Profiling),
         suspense_spans: BTreeSet::new(),
         activity_spans: BTreeSet::new(),
+        profiler_spans: BTreeSet::new(),
         diagnostic: None,
     };
     validator.visit_program(&parsed.program);
@@ -121,6 +123,7 @@ pub fn compile_server_module_with_options(
         .map_err(|diagnostic| vec![diagnostic])?;
     let suspense_spans = std::mem::take(&mut validator.suspense_spans);
     let activity_spans = std::mem::take(&mut validator.activity_spans);
+    let profiler_spans = std::mem::take(&mut validator.profiler_spans);
     drop(validator);
     drop(react);
     drop(semantic);
@@ -129,6 +132,7 @@ pub fn compile_server_module_with_options(
         options,
         suspense_spans,
         activity_spans,
+        profiler_spans,
         diagnostic: None,
     };
     async_transformer.visit_program(&mut parsed.program);
@@ -194,6 +198,7 @@ struct ServerAsyncTransformer<'a, 's> {
     options: &'s CompilationOptions,
     suspense_spans: BTreeSet<u32>,
     activity_spans: BTreeSet<u32>,
+    profiler_spans: BTreeSet<u32>,
     diagnostic: Option<Diagnostic>,
 }
 
@@ -226,6 +231,16 @@ impl<'a> VisitMut<'a> for ServerAsyncTransformer<'a, '_> {
             self.diagnostic = Some(diagnostic);
             return;
         }
+        if self.profiler_spans.contains(&element.span.start)
+            && let Err(diagnostic) = crate::surgical_codegen::prepare_known_profiler_element(
+                &self.ast,
+                self.options,
+                element,
+            )
+        {
+            self.diagnostic = Some(diagnostic);
+            return;
+        }
         walk_jsx_element_mut(self, element);
     }
 }
@@ -236,8 +251,10 @@ struct ServerSourceValidator<'r, 's> {
     async_enabled: bool,
     concurrent_enabled: bool,
     actions_enabled: bool,
+    profiling_enabled: bool,
     suspense_spans: BTreeSet<u32>,
     activity_spans: BTreeSet<u32>,
+    profiler_spans: BTreeSet<u32>,
     diagnostic: Option<Diagnostic>,
 }
 
@@ -255,6 +272,25 @@ impl<'a> Visit<'a> for ServerSourceValidator<'_, '_> {
                 .with_span(SourceSpan::new(call.span.start, call.span.end)),
             );
             return;
+        }
+        if !self.profiling_enabled {
+            let name = if self.react.is_debug_value_call(call) {
+                Some("useDebugValue")
+            } else if self.react.is_capture_owner_stack_call(call) {
+                Some("captureOwnerStack")
+            } else {
+                None
+            };
+            if let Some(name) = name {
+                self.diagnostic = Some(
+                    Diagnostic::new(
+                        DiagnosticCode::UnsupportedSyntax,
+                        format!("{name} requires the `profiling` compiler feature"),
+                    )
+                    .with_span(SourceSpan::new(call.span.start, call.span.end)),
+                );
+                return;
+            }
         }
         let action_name = self
             .react
@@ -353,6 +389,12 @@ impl<'a> Visit<'a> for ServerSourceValidator<'_, '_> {
             .is_named_jsx_element(&element.opening_element.name, "Activity")
         {
             self.activity_spans.insert(element.span.start);
+        }
+        if self
+            .react
+            .is_named_jsx_element(&element.opening_element.name, "Profiler")
+        {
+            self.profiler_spans.insert(element.span.start);
         }
         if let JSXElementName::Identifier(tag) = &element.opening_element.name {
             for item in &element.opening_element.attributes {

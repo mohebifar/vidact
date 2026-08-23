@@ -38,6 +38,57 @@ fn compile_retained_ui(input: ModuleInput<'_>) -> Result<String, Vec<Diagnostic>
     )
 }
 
+fn compile_profiling(input: ModuleInput<'_>) -> Result<String, Vec<Diagnostic>> {
+    compile_surgical_module_with_options(
+        input,
+        &CompilationOptions::default().with_feature(CompilerFeature::Profiling),
+    )
+}
+
+#[test]
+fn gates_and_stages_profiling_apis() {
+    let source = r#"
+        import { Profiler, captureOwnerStack, useDebugValue, useState } from 'react';
+        function Child({ prefix }) {
+            const [count, setCount] = useState(0);
+            useDebugValue(count, value => `${prefix}:${value}`);
+            return <button onClick={() => setCount(count + 1)} data-stack={captureOwnerStack()}>{count}</button>;
+        }
+        export function App() {
+            return <Profiler id="app" onRender={() => undefined}><Child prefix="count" /></Profiler>;
+        }
+    "#;
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "ProfilingDisabled.tsx",
+        source,
+    })
+    .expect_err("profiling APIs must remain opt-in");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.message.contains("`profiling`")
+            && diagnostic.span.is_some()
+    }));
+
+    let output = compile_profiling(ModuleInput {
+        filename: "Profiling.tsx",
+        source,
+    })
+    .expect("profiling should stage Profiler children and preserve development APIs");
+    assert!(
+        output.contains("<Profiler id=\"app\" onRender="),
+        "{output}"
+    );
+    assert!(
+        output.contains(">{() => <><Child prefix=\"count\" /></>}</Profiler>"),
+        "{output}"
+    );
+    assert!(
+        output.contains("useDebugValue(__vidactBinding(__vidactScope, 3, () => count.get())"),
+        "{output}"
+    );
+    assert!(output.contains("captureOwnerStack()"), "{output}");
+}
+
 #[test]
 fn gates_activity_and_stages_its_children() {
     let source = r#"

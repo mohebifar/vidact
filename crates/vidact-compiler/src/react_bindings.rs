@@ -248,6 +248,14 @@ impl<'s> ReactBindings<'s> {
         self.is_named_call(call, "useId")
     }
 
+    pub(crate) fn is_debug_value_call(&self, call: &CallExpression<'_>) -> bool {
+        self.is_named_call(call, "useDebugValue")
+    }
+
+    pub(crate) fn is_capture_owner_stack_call(&self, call: &CallExpression<'_>) -> bool {
+        self.is_named_call(call, "captureOwnerStack")
+    }
+
     pub(crate) fn is_named_expression(&self, expression: &Expression<'_>, name: &str) -> bool {
         self.is_named_expression_from(expression, name, &self.named, &self.namespaces)
     }

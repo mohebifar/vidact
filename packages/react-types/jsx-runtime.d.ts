@@ -126,6 +126,7 @@ export namespace JSX {
     // Component props are checked from the component's own signature.
     | ((props: never) => VidactNode)
     | typeof import('react').Activity
+    | typeof import('react').Profiler
     | Context<never>
     | Provider<never>
 
@@ -150,11 +151,15 @@ export namespace JSX {
     ? Component extends typeof import('react').Activity
       ? { children?: VidactNode; mode: 'visible' | 'hidden'; name?: string }
       : ReactJSX.LibraryManagedAttributes<Component, Props>
-    : Component extends typeof import('react').Suspense
-      ? Component extends { readonly _result: unknown }
-        ? ReactJSX.LibraryManagedAttributes<Component, Props>
-        : { children?: VidactNode; fallback: VidactNode }
-      : Component extends Context<infer Value> | Provider<infer Value>
-        ? { children?: VidactNode; value: Value }
+    : Props extends import('react').ProfilerProps
+      ? Component extends typeof import('react').Profiler
+        ? Omit<Props, 'children'> & { children?: VidactNode }
         : ReactJSX.LibraryManagedAttributes<Component, Props>
+      : Component extends typeof import('react').Suspense
+        ? Component extends { readonly _result: unknown }
+          ? ReactJSX.LibraryManagedAttributes<Component, Props>
+          : { children?: VidactNode; fallback: VidactNode }
+        : Component extends Context<infer Value> | Provider<infer Value>
+          ? { children?: VidactNode; value: Value }
+          : ReactJSX.LibraryManagedAttributes<Component, Props>
 }

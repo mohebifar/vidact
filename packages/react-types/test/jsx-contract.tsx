@@ -1,6 +1,7 @@
 import type { VidactNode } from '@vidact/react-types'
 import {
   Activity,
+  Profiler,
   Suspense,
   createContext,
   lazy,
@@ -81,6 +82,11 @@ const retainedBoundary = (
     <strong>retained</strong>
   </Activity>
 )
+const profiledBoundary = (
+  <Profiler id="contract" onRender={() => undefined}>
+    <strong>profiled</strong>
+  </Profiler>
+)
 const usedPromise: string = use(Promise.resolve('ready'))
 const [actionState, submitAction, actionPending] = useActionState(
   async (previous: string, data: FormData) => previous + String(data.get('value')),
@@ -105,6 +111,7 @@ void legacyContextProvider
 void portal
 void asyncBoundary
 void retainedBoundary
+void profiledBoundary
 void usedPromise
 void actionPending
 void optimisticState

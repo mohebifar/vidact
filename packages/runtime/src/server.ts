@@ -507,6 +507,26 @@ export function Activity(props: Record<string, unknown>): ServerNode {
 
 serverBuiltins.add(Activity)
 
+export function Profiler(props: Record<string, unknown>): ServerChild {
+  const render = props.children
+  if (typeof render !== 'function') {
+    throw new TypeError('Profiler children must be a compiler-generated render function')
+  }
+  if (typeof props.id !== 'string') throw new TypeError('Profiler id must be a string')
+  if (typeof props.onRender !== 'function') {
+    throw new TypeError('Profiler onRender must be a function')
+  }
+  return (render as () => ServerChild)()
+}
+
+serverBuiltins.add(Profiler)
+
+export function useDebugValue<Value>(_value: Value, _format?: (value: Value) => unknown): void {}
+
+export function captureOwnerStack(): null {
+  return null
+}
+
 export function createPortal(_children: ServerChild, _container: unknown): never {
   throw new Error(
     'portals cannot be emitted by the server target; render portal content in the client root',

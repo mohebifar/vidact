@@ -172,6 +172,19 @@ describe('vidact compiler client', () => {
     expect(virtualReactModule({})).not.toContain('Activity')
   })
 
+  it('exposes development profiling only through target-specific facades', () => {
+    expect(virtualReactModule({ features: ['profiling'] })).toContain(
+      'export { Profiler, captureOwnerStack, useDebugValue } from "@vidact/runtime/profiling"',
+    )
+    expect(virtualReactModule({ target: 'hydrate', features: ['profiling'] })).toContain(
+      '@vidact/runtime/profiling/hydrate',
+    )
+    expect(virtualReactModule({ target: 'server', features: ['profiling'] })).toContain(
+      '@vidact/runtime/profiling/server',
+    )
+    expect(virtualReactModule({})).not.toContain('captureOwnerStack')
+  })
+
   it('selects isolated Actions facades and exposes form APIs only when enabled', () => {
     expect(virtualReactModule({ features: ['actions'] })).toContain('@vidact/runtime/actions"')
     expect(virtualReactModule({ target: 'hydrate', features: ['actions'] })).toContain(
