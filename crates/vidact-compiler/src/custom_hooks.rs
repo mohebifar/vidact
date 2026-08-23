@@ -964,6 +964,7 @@ impl<'a> Visit<'a> for HookCallFinder<'_, '_> {
         if self.react.state_hook_call(call).is_some()
             || self.react.effect_hook_call(call).is_some()
             || self.react.memo_hook_call(call).is_some()
+            || self.react.concurrent_hook_call(call).is_some()
             || self.react.context_hook_call(call).is_some()
             || self.react.is_sync_external_store_call(call)
             || self.react.is_effect_event_call(call)

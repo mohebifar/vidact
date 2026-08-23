@@ -521,6 +521,16 @@ export function createNarrowCompiledScope(): CompiledScope {
   return createScope(narrowSourceOperations)
 }
 
+export function runCompiledTransaction<T>(operation: () => T): T {
+  transactionDepth += 1
+  try {
+    return operation()
+  } finally {
+    transactionDepth -= 1
+    if (transactionDepth === 0) drainFlushes()
+  }
+}
+
 function createScope(operations: SourceOperations): CompiledScope {
   const namespace = currentIntrinsicNamespace()
   const owner = createOwner()

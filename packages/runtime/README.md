@@ -10,6 +10,11 @@ primitives directly.
 - `@vidact/runtime/async`: opt-in resources, `lazy`, and staged Suspense
 - `@vidact/runtime/async/hydrate`: async hydration and pending fallback claiming
 - `@vidact/runtime/async/server`: deterministic async server boundaries
+- `@vidact/runtime/concurrent`: transitions, deferred values, and synchronous flushing
+- `@vidact/runtime/concurrent/hydrate`: concurrent client hydration
+- `@vidact/runtime/concurrent/server`: deterministic concurrent server shims
+- `@vidact/runtime/async/concurrent`: composed async and concurrent capabilities;
+  hydrate and server variants follow the same suffix convention
 - `@vidact/runtime/testing`: deterministic runtime queue draining
 
 The compiler and runtime validate the `vidact-runtime-v1` protocol. Server and

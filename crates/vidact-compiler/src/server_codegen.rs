@@ -101,6 +101,7 @@ pub fn compile_server_module_with_options(
         react: &react,
         unsafe_html: options.feature_enabled(CompilerFeature::UnsafeHtml),
         async_enabled: options.feature_enabled(CompilerFeature::Async),
+        concurrent_enabled: options.feature_enabled(CompilerFeature::Concurrent),
         suspense_spans: BTreeSet::new(),
         diagnostic: None,
     };
@@ -215,6 +216,7 @@ struct ServerSourceValidator<'r, 's> {
     react: &'r ReactBindings<'s>,
     unsafe_html: bool,
     async_enabled: bool,
+    concurrent_enabled: bool,
     suspense_spans: BTreeSet<u32>,
     diagnostic: Option<Diagnostic>,
 }
@@ -229,6 +231,28 @@ impl<'a> Visit<'a> for ServerSourceValidator<'_, '_> {
                 Diagnostic::new(
                     DiagnosticCode::UnsupportedSyntax,
                     "lazy requires the `async` compiler feature",
+                )
+                .with_span(SourceSpan::new(call.span.start, call.span.end)),
+            );
+            return;
+        }
+        let concurrent_name = self
+            .react
+            .concurrent_hook_call(call)
+            .map(crate::react_bindings::ConcurrentHook::name)
+            .or_else(|| {
+                self.react
+                    .is_start_transition_call(call)
+                    .then_some("startTransition")
+            })
+            .or_else(|| self.react.is_flush_sync_call(call).then_some("flushSync"));
+        if !self.concurrent_enabled
+            && let Some(name) = concurrent_name
+        {
+            self.diagnostic = Some(
+                Diagnostic::new(
+                    DiagnosticCode::UnsupportedSyntax,
+                    format!("{name} requires the `concurrent` compiler feature"),
                 )
                 .with_span(SourceSpan::new(call.span.start, call.span.end)),
             );

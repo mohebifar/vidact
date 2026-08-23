@@ -54,6 +54,7 @@ fn verify_fixture(root: &Path, fixture: &Value) {
                 "unsafe-html" => CompilerFeature::UnsafeHtml,
                 "css-insertion" => CompilerFeature::CssInsertion,
                 "async" => CompilerFeature::Async,
+                "concurrent" => CompilerFeature::Concurrent,
                 feature => panic!("unknown compatibility fixture feature {feature}"),
             };
             options.with_feature(feature)

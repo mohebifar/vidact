@@ -12,7 +12,7 @@ use crate::{
         ControlFlowFacts, KeyPath, SourceId, SourceKind, UpdaterFact, UpdaterId, UpdaterKind,
     },
     ast_utils::{component_function_parts, is_event_attribute},
-    react_bindings::{ReactBindings, reference_symbol},
+    react_bindings::{ConcurrentHook, ReactBindings, reference_symbol},
     render_flow::{RenderFlowGraph, lower_render_flow},
 };
 
@@ -324,15 +324,19 @@ fn state_source(
     let Some(Expression::CallExpression(call)) = &declarator.init else {
         return Ok(None);
     };
-    let Some(hook) = react.state_hook_call(call) else {
+    let hook_name = if let Some(hook) = react.state_hook_call(call) {
+        hook.name()
+    } else if react.concurrent_hook_call(call) == Some(ConcurrentHook::Transition) {
+        "useTransition"
+    } else {
         return Err(unsupported_at(
-            "array-destructured calls are unsupported unless the callee resolves to React useState or useReducer",
+            "array-destructured calls are unsupported unless the callee resolves to React useState, useReducer, or useTransition",
             call.span,
         ));
     };
     let Some(Some(BindingPattern::BindingIdentifier(identifier))) = pattern.elements.first() else {
         return Err(unsupported_at(
-            format!("{} must bind a value identifier", hook.name()),
+            format!("{hook_name} must bind a value identifier"),
             pattern.span,
         ));
     };

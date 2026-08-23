@@ -88,6 +88,7 @@ try {
     path.join(consumerDirectory, 'smoke.tsx'),
     `import { source, type CompiledRenderValue } from '@vidact/runtime'
 import { Suspense, createResource, lazy } from '@vidact/runtime/async'
+import { flushSync, startTransition } from '@vidact/runtime/concurrent'
 import { renderToStaticMarkup } from '@vidact/runtime/server'
 import { act } from '@vidact/test-support'
 import { vidact } from '@vidact/vite'
@@ -98,6 +99,8 @@ void source(0)
 void Suspense
 void createResource
 void lazy
+void flushSync
+void startTransition
 void act
 void vidact()
 if (renderToStaticMarkup(() => 'ready') !== 'ready') throw new Error('server entry failed')
@@ -107,6 +110,7 @@ if (renderToStaticMarkup(() => 'ready') !== 'ready') throw new Error('server ent
     path.join(consumerDirectory, 'smoke.mjs'),
     `import { VIDACT_RUNTIME_PROTOCOL } from '@vidact/runtime/protocol'
 import { Suspense, createResource, lazy } from '@vidact/runtime/async'
+import { flushSync, startTransition } from '@vidact/runtime/concurrent'
 import { renderToStaticMarkup } from '@vidact/runtime/server'
 import { act } from '@vidact/test-support'
 import { vidact } from '@vidact/vite'
@@ -114,6 +118,7 @@ import { vidact } from '@vidact/vite'
 if (VIDACT_RUNTIME_PROTOCOL !== 'vidact-runtime-v1') throw new Error('runtime entry failed')
 if (renderToStaticMarkup(() => 'ready') !== 'ready') throw new Error('server entry failed')
 if ([Suspense, createResource, lazy].some((value) => typeof value !== 'function')) throw new Error('async entry failed')
+if ([flushSync, startTransition].some((value) => typeof value !== 'function')) throw new Error('concurrent entry failed')
 if (typeof act !== 'function' || typeof vidact !== 'function') throw new Error('package entry failed')
 `,
   )

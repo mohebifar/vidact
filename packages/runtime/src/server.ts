@@ -285,6 +285,22 @@ export function useReducer<State, Action>(
   return [initialize === undefined ? initial : initialize(initial), serverDispatch]
 }
 
+export function startTransition(action: () => void | PromiseLike<void>): void {
+  void action()
+}
+
+export function useTransition(): [boolean, typeof startTransition] {
+  return [false, startTransition]
+}
+
+export function useDeferredValue<Value>(value: Value, _initialValue?: Value): Value {
+  return value
+}
+
+export function flushSync<Result>(operation?: () => Result): Result | undefined {
+  return operation?.()
+}
+
 export function useMemo<Value>(factory: () => Value, _dependencies: readonly unknown[]): Value {
   return factory()
 }

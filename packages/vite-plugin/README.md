@@ -25,6 +25,12 @@ Use `features: ['async']` to enable compiler-staged `Suspense`, `lazy`, and
 `use(promise)`. The plugin selects isolated async client, hydrate, or server
 runtime entries; disabled syntax receives a source-located diagnostic.
 
+Use `features: ['concurrent']` for `startTransition`, `useTransition`,
+`useDeferredValue`, and `flushSync`. Deferred writes use cancellable scheduler
+lanes and atomic compiled publication. Combine `async` and `concurrent` when an
+application needs both families; the plugin selects a composed entry without
+adding unused capability code.
+
 For production installs, pass `compilerPath` to a version-matched `vidactc`
 artifact. Workspace development builds `target/debug/vidactc` once per process
 and invokes that executable directly for subsequent transforms.

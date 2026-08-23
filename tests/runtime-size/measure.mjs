@@ -16,6 +16,18 @@ const fixtures = [
     gzipBudget: 8_069,
   },
   {
+    name: 'concurrent-unused',
+    entry: path.join(directory, 'fixtures/counter.tsx'),
+    features: ['concurrent'],
+    gzipBudget: 8_200,
+  },
+  {
+    name: 'concurrent',
+    entry: path.join(directory, 'fixtures/concurrent.tsx'),
+    features: ['concurrent'],
+    gzipBudget: 9_730,
+  },
+  {
     name: 'control-flow',
     entry: path.join(directory, 'fixtures/control-flow.tsx'),
     gzipBudget: 8_498,
@@ -45,13 +57,19 @@ const regressions = measurements.flatMap((measurement, index) => {
 })
 const counter = measurements.find((measurement) => measurement.fixture === 'counter')
 const asyncUnused = measurements.find((measurement) => measurement.fixture === 'async-unused')
+const concurrentUnused = measurements.find(
+  (measurement) => measurement.fixture === 'concurrent-unused',
+)
 if (
   counter === undefined ||
   asyncUnused === undefined ||
+  concurrentUnused === undefined ||
   counter.minified !== asyncUnused.minified ||
-  counter.gzip !== asyncUnused.gzip
+  counter.gzip !== asyncUnused.gzip ||
+  counter.minified !== concurrentUnused.minified ||
+  counter.gzip !== concurrentUnused.gzip
 ) {
-  regressions.push('enabling unused async changed the counter client artifact size')
+  regressions.push('enabling an unused async or concurrent family changed the counter artifact')
 }
 if (regressions.length > 0) {
   throw new Error(`gzip budget exceeded:\n${regressions.join('\n')}`)

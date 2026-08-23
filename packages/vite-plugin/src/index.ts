@@ -108,26 +108,25 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
     },
     load(id) {
       if (id === REACT_MODULE) {
-        const clientRuntime = `@vidact/runtime${
-          configuration.features.includes('async')
-            ? configuration.target === 'hydrate'
-              ? '/async/hydrate'
-              : '/async'
-            : configuration.target === 'hydrate'
-              ? '/hydrate'
-              : ''
-        }`
-        const serverRuntime = configuration.features.includes('async')
-          ? '@vidact/runtime/async/server'
-          : '@vidact/runtime/server'
+        const asyncEnabled = configuration.features.includes('async')
+        const concurrentEnabled = configuration.features.includes('concurrent')
+        const clientRuntime = clientRuntimeEntry(
+          asyncEnabled,
+          concurrentEnabled,
+          configuration.target === 'hydrate',
+        )
+        const serverRuntime = serverRuntimeEntry(asyncEnabled, concurrentEnabled)
+        const concurrentExports = concurrentEnabled
+          ? 'startTransition, useDeferredValue, useTransition, '
+          : ''
         return configuration.target === 'server'
-          ? `export { ${configuration.features.includes('async') ? 'Suspense, lazy, ' : ''}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "${serverRuntime}"`
-          : `export { ${configuration.features.includes('async') ? 'Suspense, lazy, ' : ''}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "${clientRuntime}"`
+          ? `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "${serverRuntime}"`
+          : `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "${clientRuntime}"`
       }
       return id === REACT_DOM_MODULE
         ? configuration.target === 'server'
-          ? 'export { createPortal } from "@vidact/runtime/server"'
-          : `export { createPortal } from "@vidact/runtime${configuration.target === 'hydrate' ? '/hydrate' : ''}"`
+          ? `export { createPortal${configuration.features.includes('concurrent') ? ', flushSync' : ''} } from "${serverRuntimeEntry(configuration.features.includes('async'), configuration.features.includes('concurrent'))}"`
+          : `export { createPortal${configuration.features.includes('concurrent') ? ', flushSync' : ''} } from "${clientRuntimeEntry(configuration.features.includes('async'), configuration.features.includes('concurrent'), configuration.target === 'hydrate')}"`
         : null
     },
     async transform(source, id) {
@@ -191,6 +190,24 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       }
     },
   }
+}
+
+function clientRuntimeEntry(asyncEnabled: boolean, concurrentEnabled: boolean, hydrate: boolean) {
+  const family = asyncEnabled
+    ? concurrentEnabled
+      ? '/async/concurrent'
+      : '/async'
+    : concurrentEnabled
+      ? '/concurrent'
+      : ''
+  return `@vidact/runtime${family}${hydrate ? '/hydrate' : ''}`
+}
+
+function serverRuntimeEntry(asyncEnabled: boolean, concurrentEnabled: boolean) {
+  if (asyncEnabled && concurrentEnabled) return '@vidact/runtime/async/concurrent/server'
+  if (asyncEnabled) return '@vidact/runtime/async/server'
+  if (concurrentEnabled) return '@vidact/runtime/concurrent/server'
+  return '@vidact/runtime/server'
 }
 
 function findWorkspaceManifest(start: string): string {

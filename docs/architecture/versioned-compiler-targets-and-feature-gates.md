@@ -77,7 +77,7 @@ Compiler targets and features are now real build inputs rather than permissive
 metadata. Implementing another gated family requires a compiler-side semantic
 check and compatibility fixtures for both disabled and enabled behavior.
 
-`unsafe-html`, `css-insertion`, and `async` now consume feature flags. Async
+`unsafe-html`, `css-insertion`, `async`, and `concurrent` now consume feature flags. Async
 selects isolated client, hydrate, and server entries and enables compiler-owned
 Suspense factories, resource reads, and lazy module records. The other accepted
 names remain reserved configuration values whose syntax is unsupported;

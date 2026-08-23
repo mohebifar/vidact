@@ -11,6 +11,8 @@ pub(crate) struct ReactBindings<'s> {
     scoping: &'s Scoping,
     named: BTreeMap<String, BTreeSet<SymbolId>>,
     namespaces: BTreeSet<SymbolId>,
+    dom_named: BTreeMap<String, BTreeSet<SymbolId>>,
+    dom_namespaces: BTreeSet<SymbolId>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -36,6 +38,12 @@ pub(crate) enum MemoHook {
 pub(crate) enum ContextHook {
     Context,
     Use,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ConcurrentHook {
+    DeferredValue,
+    Transition,
 }
 
 impl StateHook {
@@ -65,20 +73,33 @@ impl ContextHook {
     }
 }
 
+impl ConcurrentHook {
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::DeferredValue => "useDeferredValue",
+            Self::Transition => "useTransition",
+        }
+    }
+}
+
 impl<'s> ReactBindings<'s> {
     pub(crate) fn new(program: &Program<'_>, scoping: &'s Scoping) -> Self {
         let mut bindings = Self {
             scoping,
             named: BTreeMap::new(),
             namespaces: BTreeSet::new(),
+            dom_named: BTreeMap::new(),
+            dom_namespaces: BTreeSet::new(),
         };
         for statement in &program.body {
             let Statement::ImportDeclaration(import) = statement else {
                 continue;
             };
-            if import.source.value != "react" {
-                continue;
-            }
+            let (named, namespaces) = match import.source.value.as_str() {
+                "react" => (&mut bindings.named, &mut bindings.namespaces),
+                "react-dom" => (&mut bindings.dom_named, &mut bindings.dom_namespaces),
+                _ => continue,
+            };
             for specifier in import.specifiers.iter().flatten() {
                 match specifier {
                     ImportDeclarationSpecifier::ImportSpecifier(specifier) => {
@@ -86,8 +107,7 @@ impl<'s> ReactBindings<'s> {
                             continue;
                         };
                         if let Some(symbol) = specifier.local.symbol_id.get() {
-                            bindings
-                                .named
+                            named
                                 .entry(imported.name.to_string())
                                 .or_default()
                                 .insert(symbol);
@@ -95,12 +115,12 @@ impl<'s> ReactBindings<'s> {
                     }
                     ImportDeclarationSpecifier::ImportNamespaceSpecifier(specifier) => {
                         if let Some(symbol) = specifier.local.symbol_id.get() {
-                            bindings.namespaces.insert(symbol);
+                            namespaces.insert(symbol);
                         }
                     }
                     ImportDeclarationSpecifier::ImportDefaultSpecifier(specifier) => {
                         if let Some(symbol) = specifier.local.symbol_id.get() {
-                            bindings.namespaces.insert(symbol);
+                            namespaces.insert(symbol);
                         }
                     }
                 }
@@ -163,6 +183,29 @@ impl<'s> ReactBindings<'s> {
         self.is_named_call(call, "lazy")
     }
 
+    pub(crate) fn concurrent_hook_call(&self, call: &CallExpression<'_>) -> Option<ConcurrentHook> {
+        if self.is_named_call(call, "useTransition") {
+            Some(ConcurrentHook::Transition)
+        } else if self.is_named_call(call, "useDeferredValue") {
+            Some(ConcurrentHook::DeferredValue)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn is_start_transition_call(&self, call: &CallExpression<'_>) -> bool {
+        self.is_named_call(call, "startTransition")
+    }
+
+    pub(crate) fn is_flush_sync_call(&self, call: &CallExpression<'_>) -> bool {
+        self.is_named_expression_from(
+            &call.callee,
+            "flushSync",
+            &self.dom_named,
+            &self.dom_namespaces,
+        )
+    }
+
     pub(crate) fn is_effect_event_call(&self, call: &CallExpression<'_>) -> bool {
         self.is_named_call(call, "useEffectEvent")
     }
@@ -172,19 +215,25 @@ impl<'s> ReactBindings<'s> {
     }
 
     pub(crate) fn is_named_expression(&self, expression: &Expression<'_>, name: &str) -> bool {
+        self.is_named_expression_from(expression, name, &self.named, &self.namespaces)
+    }
+
+    fn is_named_expression_from(
+        &self,
+        expression: &Expression<'_>,
+        name: &str,
+        named: &BTreeMap<String, BTreeSet<SymbolId>>,
+        namespaces: &BTreeSet<SymbolId>,
+    ) -> bool {
         match expression.without_parentheses() {
             Expression::Identifier(identifier) => reference_symbol(identifier, self.scoping)
-                .is_some_and(|symbol| {
-                    self.named
-                        .get(name)
-                        .is_some_and(|set| set.contains(&symbol))
-                }),
+                .is_some_and(|symbol| named.get(name).is_some_and(|set| set.contains(&symbol))),
             Expression::StaticMemberExpression(member) if member.property.name == name => member
                 .object
                 .without_parentheses()
                 .get_identifier_reference()
                 .and_then(|identifier| reference_symbol(identifier, self.scoping))
-                .is_some_and(|symbol| self.namespaces.contains(&symbol)),
+                .is_some_and(|symbol| namespaces.contains(&symbol)),
             _ => false,
         }
     }

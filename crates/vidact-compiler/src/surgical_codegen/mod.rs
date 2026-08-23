@@ -30,7 +30,7 @@ use crate::{
     ir::{ComponentIr, lower_component},
     options::{CompilationOptions, CompilerFeature},
     oxc_react::analyze_program,
-    react_bindings::{ContextHook, EffectHook, MemoHook, ReactBindings, StateHook},
+    react_bindings::{ConcurrentHook, ContextHook, EffectHook, MemoHook, ReactBindings, StateHook},
 };
 
 mod ast;
@@ -56,6 +56,7 @@ const COMPILED_ROOT: &str = "__vidactCompiledRoot";
 const CHOOSE: &str = "__vidactChoose";
 const CREATE_ASYNC: &str = "__vidactCreateAsync";
 const CREATE_CONTEXT: &str = "__vidactCreateContext";
+const CREATE_DEFERRED: &str = "__vidactCreateDeferred";
 const CREATE_EXTERNAL_STORE: &str = "__vidactCreateExternalStore";
 const CREATE_EFFECT_EVENT: &str = "__vidactCreateEffectEvent";
 const CREATE_ID: &str = "__vidactCreateId";
@@ -65,6 +66,7 @@ const CREATE_REDUCER: &str = "__vidactCreateReducer";
 const CREATE_SCOPE: &str = "__vidactCreateScope";
 const CREATE_NARROW_SCOPE: &str = "__vidactCreateNarrowScope";
 const CREATE_STATE: &str = "__vidactCreateState";
+const CREATE_TRANSITION: &str = "__vidactCreateTransition";
 const CREATE_MEMO: &str = "__vidactCreateMemo";
 const DEFERRED: &str = "__vidactDeferred";
 const DISPATCH: &str = "__vidactDispatch";
@@ -242,6 +244,7 @@ fn transform_program<'a>(
         CHOOSE,
         CREATE_ASYNC,
         CREATE_CONTEXT,
+        CREATE_DEFERRED,
         CREATE_EXTERNAL_STORE,
         CREATE_EFFECT_EVENT,
         CREATE_ID,
@@ -251,6 +254,7 @@ fn transform_program<'a>(
         CREATE_SCOPE,
         CREATE_NARROW_SCOPE,
         CREATE_STATE,
+        CREATE_TRANSITION,
         CREATE_MEMO,
         DEFERRED,
         DISPATCH,
@@ -296,6 +300,8 @@ fn remove_lowered_react_state_imports(
         remaining_state_call: None,
         remaining_compiled_hook_call: None,
         async_enabled: options.feature_enabled(CompilerFeature::Async),
+        concurrent_enabled: options.feature_enabled(CompilerFeature::Concurrent),
+        remaining_concurrent_call: None,
         remaining_lazy_call: None,
     };
     usage.visit_program(program);
@@ -314,6 +320,12 @@ fn remove_lowered_react_state_imports(
     if let Some(span) = usage.remaining_lazy_call {
         return Err(unsupported("lazy requires the `async` compiler feature")
             .with_span(SourceSpan::new(span.start, span.end)));
+    }
+    if let Some((name, span)) = usage.remaining_concurrent_call {
+        return Err(
+            unsupported(format!("{name} requires the `concurrent` compiler feature"))
+                .with_span(SourceSpan::new(span.start, span.end)),
+        );
     }
 
     let mut empty_imports = Vec::new();
@@ -381,6 +393,8 @@ struct PostTransformReactUsage<'r, 's> {
     remaining_state_call: Option<Span>,
     remaining_compiled_hook_call: Option<(&'static str, Span)>,
     async_enabled: bool,
+    concurrent_enabled: bool,
+    remaining_concurrent_call: Option<(&'static str, Span)>,
     remaining_lazy_call: Option<Span>,
 }
 
@@ -388,6 +402,34 @@ impl<'a> Visit<'a> for PostTransformReactUsage<'_, '_> {
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
         if self.react.is_lazy_call(call) && !self.async_enabled {
             self.remaining_lazy_call.get_or_insert(call.span);
+            return;
+        }
+        if let Some(hook) = self.react.concurrent_hook_call(call) {
+            if self.concurrent_enabled {
+                self.remaining_compiled_hook_call
+                    .get_or_insert((hook.name(), call.span));
+            } else {
+                self.remaining_concurrent_call
+                    .get_or_insert((hook.name(), call.span));
+            }
+            return;
+        }
+        if self.react.is_start_transition_call(call) {
+            if !self.concurrent_enabled {
+                self.remaining_concurrent_call
+                    .get_or_insert(("startTransition", call.span));
+                return;
+            }
+            walk_call_expression(self, call);
+            return;
+        }
+        if self.react.is_flush_sync_call(call) {
+            if !self.concurrent_enabled {
+                self.remaining_concurrent_call
+                    .get_or_insert(("flushSync", call.span));
+                return;
+            }
+            walk_call_expression(self, call);
             return;
         }
         if self.react.state_hook_call(call).is_some() {
@@ -466,13 +508,29 @@ fn transform_component<'a>(
             continue;
         };
         for declarator in &declaration.declarations {
+            if let BindingPattern::ArrayPattern(pattern) = &declarator.id
+                && let Some(Expression::CallExpression(call)) = &declarator.init
+                && react.concurrent_hook_call(call) == Some(ConcurrentHook::Transition)
+                && let Some(Some(BindingPattern::BindingIdentifier(pending))) =
+                    pattern.elements.first()
+                && !source_ids.contains_key(pending.name.as_str())
+            {
+                source_ids.insert(
+                    allocator.alloc_str(pending.name.as_str()),
+                    SourceId::new(next_source),
+                );
+                next_source += 1;
+                continue;
+            }
             let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
                 continue;
             };
             let Some(Expression::CallExpression(call)) = &declarator.init else {
                 continue;
             };
-            if (react.context_hook_call(call).is_some() || react.is_sync_external_store_call(call))
+            if (react.context_hook_call(call).is_some()
+                || react.is_sync_external_store_call(call)
+                || react.concurrent_hook_call(call) == Some(ConcurrentHook::DeferredValue))
                 && !source_ids.contains_key(identifier.name.as_str())
             {
                 source_ids.insert(
@@ -494,6 +552,7 @@ fn transform_component<'a>(
     let mut effect_event_symbols = BTreeSet::<SymbolId>::new();
     let mut id_sources = BTreeSet::<SourceId>::new();
     let mut memo_sources = BTreeSet::<SourceId>::new();
+    let mut concurrent_sources = BTreeSet::<SourceId>::new();
     let iterative_plans = iterative::collect(&ast, body, scoping)?;
     let (mut item_source_symbols, mut item_state_symbols) = item_parameters(body, &ast);
     iterative::register_item_sources(
@@ -537,6 +596,38 @@ fn transform_component<'a>(
                     StateReference {
                         state_name: ast.allocator().alloc_str(value.name),
                         setter: true,
+                        path: Vec::new(),
+                    },
+                );
+            } else if let Some((pending, starter)) =
+                transition_binding_symbols(declarator, &source_ids, &react)?
+            {
+                concurrent_sources.insert(pending.source);
+                source_symbols.insert(pending.symbol, pending.source);
+                state_symbols.insert(
+                    pending.symbol,
+                    StateReference {
+                        state_name: ast.allocator().alloc_str(pending.name),
+                        setter: false,
+                        path: Vec::new(),
+                    },
+                );
+                state_symbols.insert(
+                    starter.symbol,
+                    StateReference {
+                        state_name: ast.allocator().alloc_str(pending.name),
+                        setter: true,
+                        path: Vec::new(),
+                    },
+                );
+            } else if let Some(value) = deferred_binding_symbol(declarator, &source_ids, &react)? {
+                concurrent_sources.insert(value.source);
+                source_symbols.insert(value.symbol, value.source);
+                state_symbols.insert(
+                    value.symbol,
+                    StateReference {
+                        state_name: ast.allocator().alloc_str(value.name),
+                        setter: false,
                         path: Vec::new(),
                     },
                 );
@@ -633,6 +724,17 @@ fn transform_component<'a>(
         let mut contains_derived = false;
         for declarator in &mut declaration.declarations {
             transform_state_declarator(&ast, declarator, &source_ids, &react)?;
+            transform_transition_declarator(&ast, declarator, &source_ids, &react, options)?;
+            transform_deferred_declarator(
+                &ast,
+                declarator,
+                &source_ids,
+                &react,
+                options,
+                scoping,
+                &source_symbols,
+                &item_source_symbols,
+            )?;
             transform_memo_declarator(
                 &ast,
                 declarator,
@@ -659,6 +761,7 @@ fn transform_component<'a>(
                     source.kind == SourceKind::Derived
                         && source.name == identifier.name.as_str()
                         && !memo_sources.contains(&source.id)
+                        && !concurrent_sources.contains(&source.id)
                         && !context_sources.contains(&source.id)
                         && !external_sources.contains(&source.id)
                         && !effect_event_sources.contains(&source.id)
@@ -791,6 +894,7 @@ fn transform_component<'a>(
             return Err(unsupported("derived updater must write exactly one source"));
         };
         if memo_sources.contains(write)
+            || concurrent_sources.contains(write)
             || context_sources.contains(write)
             || external_sources.contains(write)
             || effect_event_sources.contains(write)
@@ -993,6 +1097,100 @@ fn state_binding_symbols<'a>(
             source,
         },
     )))
+}
+
+fn transition_binding_symbols<'a>(
+    declarator: &'a VariableDeclarator<'a>,
+    sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
+) -> Result<Option<(StateBinding<'a>, StateBinding<'a>)>, Diagnostic> {
+    let BindingPattern::ArrayPattern(pattern) = &declarator.id else {
+        return Ok(None);
+    };
+    let Some(Expression::CallExpression(call)) = &declarator.init else {
+        return Ok(None);
+    };
+    if react.concurrent_hook_call(call) != Some(ConcurrentHook::Transition) {
+        return Ok(None);
+    }
+    let [
+        Some(BindingPattern::BindingIdentifier(pending)),
+        Some(BindingPattern::BindingIdentifier(starter)),
+    ] = pattern.elements.as_slice()
+    else {
+        return Err(
+            unsupported("useTransition must bind [isPending, startTransition]")
+                .with_span(SourceSpan::new(pattern.span.start, pattern.span.end)),
+        );
+    };
+    let source = sources.get(pending.name.as_str()).copied().ok_or_else(|| {
+        unsupported(format!(
+            "transition state {} is absent from analysis",
+            pending.name
+        ))
+        .with_span(SourceSpan::new(pending.span.start, pending.span.end))
+    })?;
+    let pending_symbol = pending.symbol_id.get().ok_or_else(|| {
+        analysis_error(format!(
+            "transition state {} has no semantic symbol",
+            pending.name
+        ))
+    })?;
+    let starter_symbol = starter.symbol_id.get().ok_or_else(|| {
+        analysis_error(format!(
+            "transition starter {} has no semantic symbol",
+            starter.name
+        ))
+    })?;
+    Ok(Some((
+        StateBinding {
+            name: pending.name.as_str(),
+            symbol: pending_symbol,
+            source,
+        },
+        StateBinding {
+            name: starter.name.as_str(),
+            symbol: starter_symbol,
+            source,
+        },
+    )))
+}
+
+fn deferred_binding_symbol<'a>(
+    declarator: &'a VariableDeclarator<'a>,
+    sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
+) -> Result<Option<StateBinding<'a>>, Diagnostic> {
+    let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+        return Ok(None);
+    };
+    let Some(Expression::CallExpression(call)) = &declarator.init else {
+        return Ok(None);
+    };
+    if react.concurrent_hook_call(call) != Some(ConcurrentHook::DeferredValue) {
+        return Ok(None);
+    }
+    let source = sources
+        .get(identifier.name.as_str())
+        .copied()
+        .ok_or_else(|| {
+            unsupported(format!(
+                "deferred value {} is absent from analysis",
+                identifier.name
+            ))
+            .with_span(SourceSpan::new(identifier.span.start, identifier.span.end))
+        })?;
+    let symbol = identifier.symbol_id.get().ok_or_else(|| {
+        analysis_error(format!(
+            "deferred value {} has no semantic symbol",
+            identifier.name
+        ))
+    })?;
+    Ok(Some(StateBinding {
+        name: identifier.name.as_str(),
+        symbol,
+        source,
+    }))
 }
 
 fn memo_binding_symbol<'a>(
@@ -1201,6 +1399,97 @@ fn transform_state_declarator<'a>(
         },
         runtime_arguments,
     ));
+    Ok(())
+}
+
+fn transform_transition_declarator<'a>(
+    ast: &AstBuilder<'a>,
+    declarator: &mut VariableDeclarator<'a>,
+    sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
+    options: &CompilationOptions,
+) -> Result<(), Diagnostic> {
+    let Some((pending, _)) = transition_binding_symbols(declarator, sources, react)? else {
+        return Ok(());
+    };
+    let Some(Expression::CallExpression(call)) = &declarator.init else {
+        unreachable!();
+    };
+    if !options.feature_enabled(CompilerFeature::Concurrent) {
+        return Err(
+            unsupported("useTransition requires the `concurrent` compiler feature")
+                .with_span(SourceSpan::new(call.span.start, call.span.end)),
+        );
+    }
+    if !call.arguments.is_empty() {
+        return Err(unsupported("useTransition does not accept arguments")
+            .with_span(SourceSpan::new(call.span.start, call.span.end)));
+    }
+    let pending_name = atom(ast, pending.name);
+    let pending_source = pending.source;
+    declarator.id = BindingPattern::new_binding_identifier(SPAN, pending_name, ast);
+    declarator.init = Some(call_name(
+        ast,
+        CREATE_TRANSITION,
+        [ident(ast, SCOPE), mask(ast, &[pending_source])],
+    ));
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn transform_deferred_declarator<'a>(
+    ast: &AstBuilder<'a>,
+    declarator: &mut VariableDeclarator<'a>,
+    sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
+    options: &CompilationOptions,
+    scoping: &Scoping,
+    source_symbols: &BTreeMap<SymbolId, SourceId>,
+    item_source_symbols: &BTreeMap<SymbolId, SourceId>,
+) -> Result<(), Diagnostic> {
+    let Some(value) = deferred_binding_symbol(declarator, sources, react)? else {
+        return Ok(());
+    };
+    let Some(Expression::CallExpression(call)) = &declarator.init else {
+        unreachable!();
+    };
+    if !options.feature_enabled(CompilerFeature::Concurrent) {
+        return Err(
+            unsupported("useDeferredValue requires the `concurrent` compiler feature")
+                .with_span(SourceSpan::new(call.span.start, call.span.end)),
+        );
+    }
+    if !matches!(call.arguments.len(), 1 | 2) || call.arguments.iter().any(Argument::is_spread) {
+        return Err(
+            unsupported("useDeferredValue requires a value and optional initial value")
+                .with_span(SourceSpan::new(call.span.start, call.span.end)),
+        );
+    }
+    let input = call.arguments[0]
+        .as_expression()
+        .expect("spread arguments were rejected");
+    let reads = dependencies(input, scoping, source_symbols, item_source_symbols);
+    if !reads.item.is_empty() {
+        return Err(
+            unsupported("component deferred values cannot capture keyed item slots")
+                .with_span(SourceSpan::from_oxc(input.span())),
+        );
+    }
+    let mut arguments = vec![
+        ident(ast, SCOPE),
+        dependency_mask(ast, &reads.parent),
+        mask(ast, &[value.source]),
+        arrow_expression(ast, [], input.clone_in_with_semantic_ids(ast.allocator())),
+    ];
+    if let Some(initial) = call.arguments.get(1) {
+        arguments.push(
+            initial
+                .as_expression()
+                .expect("spread arguments were rejected")
+                .clone_in_with_semantic_ids(ast.allocator()),
+        );
+    }
+    declarator.init = Some(call_name(ast, CREATE_DEFERRED, arguments));
     Ok(())
 }
 
@@ -3259,6 +3548,7 @@ fn runtime_import<'a>(
         ("choose", CHOOSE),
         ("createCompiledAsync", CREATE_ASYNC),
         ("createCompiledContext", CREATE_CONTEXT),
+        ("createCompiledDeferred", CREATE_DEFERRED),
         ("createCompiledExternalStore", CREATE_EXTERNAL_STORE),
         ("createCompiledEffectEvent", CREATE_EFFECT_EVENT),
         ("createCompiledId", CREATE_ID),
@@ -3269,6 +3559,7 @@ fn runtime_import<'a>(
         ("createCompiledScope", CREATE_SCOPE),
         ("createNarrowCompiledScope", CREATE_NARROW_SCOPE),
         ("createCompiledState", CREATE_STATE),
+        ("createCompiledTransition", CREATE_TRANSITION),
         ("deferred", DEFERRED),
         ("dispatch", DISPATCH),
         ("indexed", INDEXED),
@@ -3301,12 +3592,17 @@ fn runtime_import<'a>(
             SPAN,
             match (
                 options.feature_enabled(CompilerFeature::Async),
+                options.feature_enabled(CompilerFeature::Concurrent),
                 options.target() == crate::CompilerTarget::Hydrate,
             ) {
-                (true, true) => "@vidact/runtime/async/hydrate",
-                (true, false) => "@vidact/runtime/async",
-                (false, true) => "@vidact/runtime/hydrate",
-                (false, false) => "@vidact/runtime",
+                (true, true, true) => "@vidact/runtime/async/concurrent/hydrate",
+                (true, true, false) => "@vidact/runtime/async/concurrent",
+                (true, false, true) => "@vidact/runtime/async/hydrate",
+                (true, false, false) => "@vidact/runtime/async",
+                (false, true, true) => "@vidact/runtime/concurrent/hydrate",
+                (false, true, false) => "@vidact/runtime/concurrent",
+                (false, false, true) => "@vidact/runtime/hydrate",
+                (false, false, false) => "@vidact/runtime",
             },
             None,
             ast,

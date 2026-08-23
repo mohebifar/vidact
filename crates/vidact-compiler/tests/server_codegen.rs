@@ -90,3 +90,31 @@ fn stages_async_server_boundaries_only_when_enabled() {
         compilation.code
     );
 }
+
+#[test]
+fn gates_concurrent_server_hooks_at_their_calls() {
+    let input = ModuleInput {
+        filename: "ServerConcurrent.tsx",
+        source: r#"
+            import { useDeferredValue, useTransition } from 'react';
+            export function ServerConcurrent({ value }) {
+                const [isPending] = useTransition();
+                const deferred = useDeferredValue(value);
+                return <p>{isPending ? 'pending' : deferred}</p>;
+            }
+        "#,
+    };
+    let diagnostics =
+        compile_server_module(input).expect_err("server concurrent hooks must remain gated");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.message.contains("`concurrent`")
+            && diagnostic.span.is_some()
+    }));
+
+    compile_server_module_with_options(
+        input,
+        &CompilationOptions::new(CompilerTarget::Server).with_feature(CompilerFeature::Concurrent),
+    )
+    .expect("the concurrent server target should preserve deterministic hook values");
+}

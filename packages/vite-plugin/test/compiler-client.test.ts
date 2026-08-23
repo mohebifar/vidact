@@ -29,6 +29,13 @@ function virtualReactModule(options: Parameters<typeof vidact>[0]): string {
   return load(resolve('react')!)!
 }
 
+function virtualReactDomModule(options: Parameters<typeof vidact>[0]): string {
+  const plugin = vidact(options)
+  const resolve = Reflect.get(plugin, 'resolveId') as (source: string) => string | null
+  const load = Reflect.get(plugin, 'load') as (id: string) => string | null
+  return load(resolve('react-dom')!)!
+}
+
 describe('vidact compiler client', () => {
   it('returns the Rust compiler analysis protocol for TSX arrays', async () => {
     const analysis = await analyzeWithCompiler(
@@ -131,6 +138,25 @@ describe('vidact compiler client', () => {
     )
     expect(virtualReactModule({ features: ['async'] })).toContain('Suspense, lazy')
     expect(virtualReactModule({})).not.toContain('Suspense, lazy')
+  })
+
+  it('selects isolated concurrent facades and exposes scheduler APIs only when enabled', () => {
+    expect(virtualReactModule({ features: ['concurrent'] })).toContain('@vidact/runtime/concurrent')
+    expect(virtualReactModule({ target: 'hydrate', features: ['concurrent'] })).toContain(
+      '@vidact/runtime/concurrent/hydrate',
+    )
+    expect(virtualReactModule({ target: 'server', features: ['concurrent'] })).toContain(
+      '@vidact/runtime/concurrent/server',
+    )
+    expect(virtualReactModule({ features: ['async', 'concurrent'] })).toContain(
+      '@vidact/runtime/async/concurrent',
+    )
+    expect(virtualReactModule({ features: ['concurrent'] })).toContain(
+      'startTransition, useDeferredValue, useTransition',
+    )
+    expect(virtualReactModule({})).not.toContain('startTransition')
+    expect(virtualReactDomModule({ features: ['concurrent'] })).toContain('flushSync')
+    expect(virtualReactDomModule({})).not.toContain('flushSync')
   })
 
   it('fingerprints compiler, runtime, target, features, environment, and source inputs', () => {

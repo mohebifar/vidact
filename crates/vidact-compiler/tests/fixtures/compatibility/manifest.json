@@ -321,6 +321,30 @@
       "expectation": "rejected",
       "code": "UnsupportedSyntax",
       "spanContains": "Promise.resolve"
+    },
+    {
+      "path": "accepted/concurrent-transitions.tsx",
+      "expectation": "accepted",
+      "features": ["concurrent"],
+      "components": ["ConcurrentSearch"]
+    },
+    {
+      "path": "rejected/concurrent-hook-disabled.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "useTransition"
+    },
+    {
+      "path": "rejected/start-transition-disabled.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "startTransition"
+    },
+    {
+      "path": "rejected/flush-sync-disabled.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "flushSync"
     }
   ]
 }

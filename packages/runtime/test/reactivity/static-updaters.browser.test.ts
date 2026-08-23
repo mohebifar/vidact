@@ -91,6 +91,19 @@ describe('compiled updater corpus', () => {
     expect(() => value.set(1)).toThrow('cannot update state after disposal')
   })
 
+  it('replaces internal function values without invoking them as state updaters', () => {
+    const callbackSource = source(0)
+    const scope = createCompiledScope()
+    const first = () => 'first'
+    const second = () => 'second'
+    const callback = createCompiledState(scope, callbackSource, () => first)
+
+    callback.replace(second)
+
+    expect(callback.get()).toBe(second)
+    expect(callback.get()()).toBe('second')
+  })
+
   it('publishes cached values only when memo dependencies change', () => {
     const countSource = source(0)
     const memoSource = source(1)

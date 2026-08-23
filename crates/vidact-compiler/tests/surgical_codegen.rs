@@ -17,6 +17,58 @@ fn compile_async(input: ModuleInput<'_>) -> Result<String, Vec<Diagnostic>> {
     )
 }
 
+fn compile_concurrent(input: ModuleInput<'_>) -> Result<String, Vec<Diagnostic>> {
+    compile_surgical_module_with_options(
+        input,
+        &CompilationOptions::default().with_feature(CompilerFeature::Concurrent),
+    )
+}
+
+#[test]
+fn gates_and_lowers_concurrent_hooks_at_their_source_spans() {
+    let source = r#"
+        import { useDeferredValue, useState, useTransition } from 'react';
+        export function Search(): Node {
+            const [query, setQuery] = useState('');
+            const [isPending, startTransition] = useTransition();
+            const deferredQuery = useDeferredValue(query, 'initial');
+            return <button onClick={() => startTransition(() => setQuery('next'))}>
+                {isPending ? 'pending' : deferredQuery}
+            </button>;
+        }
+    "#;
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "ConcurrentDisabled.tsx",
+        source,
+    })
+    .expect_err("concurrent hooks must be gated");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.span.is_some()
+                && diagnostic.message.contains("`concurrent` compiler feature")
+        }),
+        "{diagnostics:?}"
+    );
+
+    let output = compile_concurrent(ModuleInput {
+        filename: "Concurrent.tsx",
+        source,
+    })
+    .expect("concurrent hooks should lower to scheduler-owned slots");
+    assert!(
+        output.contains("from \"@vidact/runtime/concurrent\""),
+        "{output}"
+    );
+    assert!(output.contains("__vidactCreateTransition("), "{output}");
+    assert!(output.contains("__vidactCreateDeferred("), "{output}");
+    assert!(
+        output.contains("isPending.set(()=>query.set(\"next\"))")
+            || output.contains("isPending.set(() => query.set(\"next\"))"),
+        "{output}"
+    );
+    assert!(output.contains("deferredQuery.get()"), "{output}");
+}
+
 #[test]
 fn turns_todomvc_into_one_time_construction_and_static_bindings() {
     let output = compile_surgical_module(ModuleInput {
