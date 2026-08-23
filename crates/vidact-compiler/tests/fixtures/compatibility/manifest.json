@@ -39,6 +39,16 @@
       "components": ["ArrowCounter"]
     },
     {
+      "path": "accepted/default-function-component.tsx",
+      "expectation": "accepted",
+      "components": ["DefaultFunction"]
+    },
+    {
+      "path": "accepted/function-expression-component.tsx",
+      "expectation": "accepted",
+      "components": ["FunctionExpression"]
+    },
+    {
       "path": "accepted/structural-control-flow.tsx",
       "expectation": "accepted",
       "components": ["Ternary", "Logical", "Nullish", "TerminalSwitch"]

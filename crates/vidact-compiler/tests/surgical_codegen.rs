@@ -586,6 +586,48 @@ fn compiles_named_block_bodied_arrow_components() {
 }
 
 #[test]
+fn compiles_function_expressions_and_default_exports_by_span() {
+    for (filename, source, expected_form) in [
+        (
+            "FunctionExpression.tsx",
+            r#"
+                const FunctionExpression = function ({ label }) {
+                    return <p>{label}</p>;
+                };
+                export { FunctionExpression };
+            "#,
+            "const FunctionExpression = function({ label })",
+        ),
+        (
+            "DefaultFunction.tsx",
+            r#"
+                export default function DefaultFunction({ label }) {
+                    return <p>{label}</p>;
+                }
+            "#,
+            "export default function DefaultFunction({ label })",
+        ),
+        (
+            "DefaultArrow.tsx",
+            r#"
+                const DefaultArrow = ({ label }) => {
+                    return <p>{label}</p>;
+                };
+                export default DefaultArrow;
+            "#,
+            "const DefaultArrow = ({ label }) =>",
+        ),
+    ] {
+        let output = compile_surgical_module(ModuleInput { filename, source })
+            .unwrap_or_else(|diagnostics| panic!("{filename} must compile: {diagnostics:#?}"));
+
+        assert!(output.contains(expected_form), "{output}");
+        assert!(output.contains("__vidactCreateProp"), "{output}");
+        assert!(output.contains("return __vidactCompiledRoot"), "{output}");
+    }
+}
+
+#[test]
 fn compiles_use_reducer_into_the_state_slot_abi() {
     let output = compile_surgical_module(ModuleInput {
         filename: "ReducerCounter.tsx",

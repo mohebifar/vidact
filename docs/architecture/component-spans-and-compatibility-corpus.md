@@ -19,9 +19,10 @@ without a machine-readable accepted/rejected/different contract.
 The owned React Compiler `FunctionAnalysis` snapshot carries the original
 function byte span. Vidact keys classification and surgical lowering by that
 span, with the component name used for diagnostics and public metadata rather
-than identity. All supported named function declarations in a module are
-lowered in source order. If any analyzed function cannot be classified or
-lowered, the module fails instead of compiling a partial set.
+than identity. Supported named declarations, variable-bound arrows and function
+expressions, and named default function declarations in a module are lowered in
+source order. If any analyzed function cannot be classified or lowered, the
+module fails instead of compiling a partial set.
 
 `ComponentFacts`, `ComponentIr`, and diagnostics carry owned source spans. The
 CLI renders a spanned diagnostic as `filename:line:column`; downstream
@@ -65,9 +66,11 @@ app compiled through the Vite plugin.
 - Same-module components each receive independent source IDs and updater graphs.
 - Surgical codegen transforms all accepted components and emits the shared
   runtime import once.
-- Named block-bodied arrow components are lowered through the same parameter,
-  body, and semantic-symbol contract as function declarations. Their source
-  binding and exact arrow span define identity.
+- Named block-bodied arrow and function-expression components are lowered
+  through the same parameter, body, and semantic-symbol contract as function
+  declarations. Their source binding and exact function span define identity.
+- Named default function declarations and default exports of a named component
+  retain their source identity; the export spelling is not used as a join key.
 - Parent-to-child compiled prop updates retain both component instances and
   mutate only the affected child binding.
 
@@ -103,11 +106,12 @@ app compiled through the Vite plugin.
 Ordinary parent/child modules can now compile without splitting components into
 files, and diagnostics can point back to original TSX. The Oxc patch now
 includes an owned control-flow snapshot as well as the function span.
-Expression-bodied arrow and default-export component lowering, plus precise
-spans for internal analysis failures without a single source construct, remain
-follow-up work. DOM-range lowering for multi-return control flow and
-original-TSX source maps are complete. Adding a compatibility fixture requires
-an explicit contract classification, which is intentional maintenance overhead.
+Expression-bodied arrows and anonymous default component declarations, plus
+precise spans for internal analysis failures without a single source construct,
+remain follow-up work. Named default exports, DOM-range lowering for multi-return
+control flow, and original-TSX source maps are complete. Adding a compatibility
+fixture requires an explicit contract classification, which is intentional
+maintenance overhead.
 
 ## Verification
 

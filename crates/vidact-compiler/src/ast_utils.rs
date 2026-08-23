@@ -1,6 +1,6 @@
 use oxc_ast::ast::{
-    ArrowFunctionExpression, BindingPattern, Declaration, Expression, FormalParameters, Function,
-    FunctionBody, Program, Statement, VariableDeclaration,
+    ArrowFunctionExpression, BindingPattern, Declaration, ExportDefaultDeclarationKind, Expression,
+    FormalParameters, Function, FunctionBody, Program, Statement, VariableDeclaration,
 };
 
 use crate::SourceSpan;
@@ -34,6 +34,9 @@ pub(crate) fn component_function_parts<'a>(
             _ => None,
         },
         Statement::VariableDeclaration(declaration) => variable_parts(declaration, name, span),
+        Statement::ExportDefaultDeclaration(export) => {
+            default_export_parts(&export.declaration, name, span)
+        }
         _ => None,
     })
 }
@@ -74,8 +77,66 @@ pub(crate) fn component_function_parts_mut<'p, 'a>(
             Statement::VariableDeclaration(declaration) => {
                 variable_parts_mut(declaration, name, span)
             }
+            Statement::ExportDefaultDeclaration(export) => {
+                default_export_parts_mut(&mut export.declaration, name, span)
+            }
             _ => None,
         })
+}
+
+fn default_export_parts<'a>(
+    declaration: &'a ExportDefaultDeclarationKind<'a>,
+    name: &str,
+    span: Option<SourceSpan>,
+) -> Option<(&'a FormalParameters<'a>, &'a FunctionBody<'a>)> {
+    match declaration {
+        ExportDefaultDeclarationKind::FunctionDeclaration(function)
+            if function.id.as_ref().is_none_or(|id| id.name == name)
+                && matches_span(function.span, span) =>
+        {
+            Some((function.params.as_ref(), function.body.as_deref()?))
+        }
+        ExportDefaultDeclarationKind::ArrowFunctionExpression(function)
+            if matches_span(function.span, span) =>
+        {
+            Some((function.params.as_ref(), function.body.as_function_body()?))
+        }
+        ExportDefaultDeclarationKind::FunctionExpression(function)
+            if matches_span(function.span, span) =>
+        {
+            Some((function.params.as_ref(), function.body.as_deref()?))
+        }
+        _ => None,
+    }
+}
+
+fn default_export_parts_mut<'p, 'a>(
+    declaration: &'p mut ExportDefaultDeclarationKind<'a>,
+    name: &str,
+    span: Option<SourceSpan>,
+) -> Option<(&'p mut FormalParameters<'a>, &'p mut FunctionBody<'a>)> {
+    match declaration {
+        ExportDefaultDeclarationKind::FunctionDeclaration(function)
+            if function.id.as_ref().is_none_or(|id| id.name == name)
+                && matches_span(function.span, span) =>
+        {
+            let Function { params, body, .. } = function.as_mut();
+            Some((params.as_mut(), body.as_deref_mut()?))
+        }
+        ExportDefaultDeclarationKind::ArrowFunctionExpression(function)
+            if matches_span(function.span, span) =>
+        {
+            let ArrowFunctionExpression { params, body, .. } = function.as_mut();
+            Some((params.as_mut(), body.as_function_body_mut()?))
+        }
+        ExportDefaultDeclarationKind::FunctionExpression(function)
+            if matches_span(function.span, span) =>
+        {
+            let Function { params, body, .. } = function.as_mut();
+            Some((params.as_mut(), body.as_deref_mut()?))
+        }
+        _ => None,
+    }
 }
 
 fn variable_parts<'a>(
@@ -87,17 +148,18 @@ fn variable_parts<'a>(
         let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
             return None;
         };
-        let Expression::ArrowFunctionExpression(function) = declarator.init.as_ref()? else {
-            return None;
-        };
-        if identifier.name != name
-            || span.is_some_and(|span| {
-                function.span.start != span.start || function.span.end != span.end
-            })
-        {
+        if identifier.name != name {
             return None;
         }
-        Some((function.params.as_ref(), function.body.as_function_body()?))
+        match declarator.init.as_ref()? {
+            Expression::ArrowFunctionExpression(function) if matches_span(function.span, span) => {
+                Some((function.params.as_ref(), function.body.as_function_body()?))
+            }
+            Expression::FunctionExpression(function) if matches_span(function.span, span) => {
+                Some((function.params.as_ref(), function.body.as_deref()?))
+            }
+            _ => None,
+        }
     })
 }
 
@@ -110,19 +172,25 @@ fn variable_parts_mut<'p, 'a>(
         let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
             return None;
         };
-        let Expression::ArrowFunctionExpression(function) = declarator.init.as_mut()? else {
-            return None;
-        };
-        if identifier.name != name
-            || span.is_some_and(|span| {
-                function.span.start != span.start || function.span.end != span.end
-            })
-        {
+        if identifier.name != name {
             return None;
         }
-        let ArrowFunctionExpression { params, body, .. } = function.as_mut();
-        Some((params.as_mut(), body.as_function_body_mut()?))
+        match declarator.init.as_mut()? {
+            Expression::ArrowFunctionExpression(function) if matches_span(function.span, span) => {
+                let ArrowFunctionExpression { params, body, .. } = function.as_mut();
+                Some((params.as_mut(), body.as_function_body_mut()?))
+            }
+            Expression::FunctionExpression(function) if matches_span(function.span, span) => {
+                let Function { params, body, .. } = function.as_mut();
+                Some((params.as_mut(), body.as_deref_mut()?))
+            }
+            _ => None,
+        }
     })
+}
+
+fn matches_span(candidate: oxc_span::Span, expected: Option<SourceSpan>) -> bool {
+    expected.is_none_or(|span| candidate.start == span.start && candidate.end == span.end)
 }
 
 pub(crate) fn component_name_for_span<'a>(
@@ -146,16 +214,20 @@ fn variable_name_for_span<'a>(
     span: SourceSpan,
 ) -> Option<&'a str> {
     declaration.declarations.iter().find_map(|declarator| {
-        let Expression::ArrowFunctionExpression(function) = declarator.init.as_ref()? else {
-            return None;
-        };
-        if function.span.start != span.start || function.span.end != span.end {
-            return None;
-        }
         let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
             return None;
         };
-        Some(identifier.name.as_str())
+        match declarator.init.as_ref()? {
+            Expression::ArrowFunctionExpression(function)
+                if matches_span(function.span, Some(span)) =>
+            {
+                Some(identifier.name.as_str())
+            }
+            Expression::FunctionExpression(function) if matches_span(function.span, Some(span)) => {
+                Some(identifier.name.as_str())
+            }
+            _ => None,
+        }
     })
 }
 

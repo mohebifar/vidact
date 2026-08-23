@@ -6,7 +6,7 @@ import {
 } from '@vidact/test-support'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { CounterApp } from './CounterApp.tsx'
+import CounterApp from './CounterApp.tsx'
 
 let dispose: (() => void) | undefined
 

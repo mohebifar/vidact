@@ -6,7 +6,7 @@ function countReducer(count: number, action: CounterAction): number {
   return action.type === 'increment' ? count + 1 : Math.max(0, count - 1)
 }
 
-export function CounterApp(): JSX.Element {
+export default function CounterApp(): JSX.Element {
   const [count, dispatch] = useReducer(countReducer, 0, (initial) => initial)
   const doubled = count * 2
 
