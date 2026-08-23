@@ -17,6 +17,12 @@ describe('runtime public surface', () => {
     expect(ref).toEqual({ current: 'initial' })
   })
 
+  it('refuses imperative handles outside compiled component construction', () => {
+    expect(() => runtime.useImperativeHandle(null, () => ({ focus: () => {} }), [])).toThrow(
+      /compiled component construction/i,
+    )
+  })
+
   it('refuses compiled modules built for a different runtime protocol', () => {
     expect(() => runtime.assertRuntimeProtocol('vidact-runtime-v1')).not.toThrow()
     expect(() => runtime.assertRuntimeProtocol('vidact-runtime-v0')).toThrow(

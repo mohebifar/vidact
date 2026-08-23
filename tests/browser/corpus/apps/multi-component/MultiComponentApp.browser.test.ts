@@ -6,7 +6,7 @@ import {
 } from '@vidact/test-support'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { MultiComponentApp, readCounterValueRef } from './MultiComponentApp.tsx'
+import { MultiComponentApp, readCounterHandle, readCounterValueRef } from './MultiComponentApp.tsx'
 
 let dispose: (() => void) | undefined
 
@@ -26,8 +26,14 @@ describe('compiled same-module components', () => {
     const output = host.querySelector<HTMLOutputElement>('[data-counter-value]')!
     const text = requireSingleDirectText(output)
     const increment = host.querySelector<HTMLButtonElement>('[data-increment]')!
+    const imperativeOutput = host.querySelector<HTMLOutputElement>('[data-imperative-count]')!
+    const imperativeText = requireSingleDirectText(imperativeOutput)
+    const imperativeIncrement = host.querySelector<HTMLButtonElement>(
+      '[data-imperative-increment]',
+    )!
 
     expect(readCounterValueRef()).toBe(output)
+    expect(readCounterHandle()?.output).toBe(imperativeOutput)
 
     const capture = await captureMutations(host, () => increment.click())
 
@@ -43,8 +49,21 @@ describe('compiled same-module components', () => {
       ),
     ).not.toThrow()
 
+    const imperativeCapture = await captureMutations(host, () => imperativeIncrement.click())
+
+    expect(host.querySelector('[data-imperative-count]')).toBe(imperativeOutput)
+    expect(imperativeOutput.textContent).toBe('1')
+    expect(() =>
+      assertMutationEnvelope(
+        imperativeCapture.records,
+        [{ type: 'characterData', target: imperativeText }],
+        'imperative handle update',
+      ),
+    ).not.toThrow()
+
     dispose()
     dispose = undefined
     expect(readCounterValueRef()).toBeNull()
+    expect(readCounterHandle()).toBeNull()
   })
 })

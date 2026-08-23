@@ -43,7 +43,9 @@ is a compilation error; there is no runtime fallback.
 `useRef` remains a deliberately small runtime primitive. Because a compiled
 component executes once, creating one mutable cell during that execution makes
 the cell stable for the component's lifetime without hook indexing or component
-replay. The Vite plugin's virtual React module therefore exposes `useRef` only.
+replay. The Vite plugin's virtual React module exposes `useRef` and the
+commit-queued `useImperativeHandle`; state and reducer calls remain compiler
+lowerings rather than runtime hooks.
 
 The `h` and JSX-runtime helpers remain direct DOM construction primitives. They
 materialize the compiler's JSX output and nested compiled components; they are
@@ -64,6 +66,8 @@ not a public root renderer and never rerun a component to discover changes.
   source component function or replace its root as a rendering strategy.
 - `useRef` creates one ordinary mutable cell during one-time component
   execution; ref attachment and cleanup remain owned by compiled DOM ranges.
+- `useImperativeHandle` registers a component-owner commit resource and cannot
+  run outside compiled component construction.
 
 ## Invariants
 

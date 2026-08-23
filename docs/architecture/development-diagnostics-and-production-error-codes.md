@@ -37,7 +37,7 @@ Current code families are grouped by runtime concern:
 
 | Range | Concern |
 |---|---|
-| `V001`–`V012` | compiled scopes, ownership, refs, publication, child values, and disposed state writes |
+| `V001`–`V014` | compiled scopes, ownership, refs, publication, child values, disposed state writes, and imperative-handle lifecycle use |
 | `V101`–`V103` | direct DOM refs, raw HTML namespace limits, and child values |
 | `V201` | event handler values |
 | `V301` | controlled form values |

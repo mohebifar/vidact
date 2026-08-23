@@ -117,6 +117,7 @@ type ComponentRange = readonly [start: Comment, end: Comment, scope: CompiledSco
 
 let activeOwner: Owner | null = null
 let activeScopeCollector: Set<CompiledScope> | null = null
+let activeConstructionOwner: Owner | null = null
 let transactionDepth = 0
 let drainingFlushes = false
 let activePublication: PublicationOperation[] | null = null
@@ -125,6 +126,8 @@ const scopeOwners = new WeakMap<CompiledScope, Owner>()
 const scopeNamespaces = new WeakMap<CompiledScope, IntrinsicNamespace>()
 const componentRanges = new WeakMap<CompiledComponentResult, ComponentRange>()
 const pendingRefs = new WeakMap<Element, PendingRef>()
+const componentCommitOwners = new WeakMap<Comment, Owner>()
+const pendingOwnerCommits = new WeakMap<Owner, Set<() => void>>()
 
 export function createCompiledScope(): CompiledScope {
   return createScope(wideSourceOperations)
@@ -239,6 +242,7 @@ function createScope(operations: SourceOperations): CompiledScope {
   scopeOwners.set(scope, owner)
   scopeNamespaces.set(scope, namespace)
   activeScopeCollector?.add(scope)
+  if (activeScopeCollector !== null) activeConstructionOwner = owner
   return scope
 }
 
@@ -638,6 +642,7 @@ export function compiledRoot(
   }
   const start = document.createComment(DEV ? 'vidact:component' : '')
   const end = document.createComment(DEV ? '/vidact:component' : '')
+  componentCommitOwners.set(end, owner)
   const fragment = document.createDocumentFragment()
   fragment.append(start, end)
   owner[1].add(() => {
@@ -695,8 +700,10 @@ export function adoptCompiledRoot(root: unknown): void {
 
 export function constructCompiledComponent<T extends CompiledRenderValue>(component: () => T): T {
   const previousCollector = activeScopeCollector
+  const previousConstructionOwner = activeConstructionOwner
   const scopes = new Set<CompiledScope>()
   activeScopeCollector = scopes
+  activeConstructionOwner = null
   try {
     return component()
   } catch (error) {
@@ -711,6 +718,7 @@ export function constructCompiledComponent<T extends CompiledRenderValue>(compon
     throw error
   } finally {
     activeScopeCollector = previousCollector
+    activeConstructionOwner = previousConstructionOwner
   }
 }
 
@@ -719,6 +727,35 @@ export function queueElementRef(element: Element, value: unknown): void {
     throw new TypeError(DEV ? 'ref must be a callback or an object with current' : 'V006')
   }
   pendingRefs.set(element, [activeOwner, value])
+}
+
+export function useImperativeHandle<T>(
+  ref: ((value: T | null) => void | (() => void)) | { current: T | null } | null | undefined,
+  create: () => T,
+  dependencies?: readonly unknown[],
+): void {
+  const owner = activeConstructionOwner
+  if (owner === null) {
+    throw new Error(
+      DEV ? 'useImperativeHandle must run during compiled component construction' : 'V013',
+    )
+  }
+  if (!isRefValue(ref)) {
+    throw new TypeError(
+      DEV ? 'imperative ref must be null, a callback, or an object with current' : 'V006',
+    )
+  }
+  if (dependencies !== undefined && dependencies.length !== 0) {
+    throw new Error(
+      DEV ? 'reactive useImperativeHandle dependencies are not supported yet' : 'V014',
+    )
+  }
+  let commits = pendingOwnerCommits.get(owner)
+  if (commits === undefined) {
+    commits = new Set()
+    pendingOwnerCommits.set(owner, commits)
+  }
+  commits.add(() => owner[1].add(attachRef(ref, create())))
 }
 
 export function mountCompiledRef(element: Element, value: CompiledBinding<unknown>): void {
@@ -784,6 +821,7 @@ export function mountCompiled(
   try {
     root[1](host, previous[0] ?? null)
     commitRangeRefs(range[0], range[1])
+    commitOwnerResources(scopeOwners.get(range[2]))
     for (const node of previous) host.removeChild(node)
   } catch (error) {
     try {
@@ -957,6 +995,7 @@ function onCleanup(cleanup: () => void): void {
 function disposeOwner(owner: Owner): void {
   if (owner[0]) return
   owner[0] = true
+  pendingOwnerCommits.delete(owner)
   const cleanups = [...owner[1]]
   owner[1].clear()
   let firstError: unknown
@@ -1213,22 +1252,35 @@ function isRefValue(value: unknown): value is RefValue {
 }
 
 function claimPendingRefOwners(root: Node): void {
-  visitElements(root, (element) => {
-    const pending = pendingRefs.get(element)
+  visitNodes(root, (node) => {
+    if (!(node instanceof Element)) return
+    const pending = pendingRefs.get(node)
     if (pending !== undefined && pending[0] === null) pending[0] = activeOwner
   })
 }
 
 function commitPendingRefs(root: Node): void {
-  visitElements(root, (element) => {
-    const pending = pendingRefs.get(element)
-    if (pending === undefined) return
-    pendingRefs.delete(element)
-    const owner = pending[0] ?? activeOwner
-    const cleanup = attachRef(pending[1], element)
-    if (pending[2] === undefined) owner?.[1].add(cleanup)
-    else pending[2](cleanup)
+  visitNodes(root, (node) => {
+    if (node instanceof Element) {
+      const pending = pendingRefs.get(node)
+      if (pending !== undefined) {
+        pendingRefs.delete(node)
+        const owner = pending[0] ?? activeOwner
+        const cleanup = attachRef(pending[1], node)
+        if (pending[2] === undefined) owner?.[1].add(cleanup)
+        else pending[2](cleanup)
+      }
+    }
+    if (node instanceof Comment) commitOwnerResources(componentCommitOwners.get(node))
   })
+}
+
+function commitOwnerResources(owner: Owner | undefined): void {
+  if (owner === undefined || owner[0]) return
+  const commits = pendingOwnerCommits.get(owner)
+  if (commits === undefined) return
+  pendingOwnerCommits.delete(owner)
+  for (const commit of commits) commit()
 }
 
 function commitRangeRefs(start: Node, end: Node): void {
@@ -1241,20 +1293,23 @@ function commitRangeRefs(start: Node, end: Node): void {
   for (const rangeNode of nodes) commitPendingRefs(rangeNode)
 }
 
-function visitElements(root: Node, visit: (element: Element) => void): void {
-  if (root instanceof Element) visit(root)
-  for (const child of root.childNodes) visitElements(child, visit)
+function visitNodes(root: Node, visit: (node: Node) => void): void {
+  visit(root)
+  for (const child of root.childNodes) visitNodes(child, visit)
 }
 
-function attachRef(value: RefValue, element: Element): () => void {
+function attachRef<T>(
+  value: ((value: T | null) => void | (() => void)) | { current: unknown } | null | undefined,
+  target: T,
+): () => void {
   if (value === null || value === undefined) return () => {}
   if (typeof value === 'function') {
-    const cleanup = value(element)
+    const cleanup = value(target)
     return typeof cleanup === 'function' ? cleanup : () => value(null)
   }
-  value.current = element
+  value.current = target
   return () => {
-    if (value.current === element) value.current = null
+    if (value.current === target) value.current = null
   }
 }
 

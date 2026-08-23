@@ -108,6 +108,17 @@ small default-core cost:
 | Keyed list | 8,213 B | 8,236 B | +23 B |
 | TodoMVC | 9,802 B | 9,822 B | +20 B |
 
+Component commit resources let an imperative handle publish after descendant
+host refs and clean up with its logical owner. The commit-marker lookup and
+pending-resource queue are default-core infrastructure for the lifecycle phase:
+
+| Fixture | Exact prop replacement gzip | Component commit resources gzip | Change |
+| --- | ---: | ---: | ---: |
+| Counter | 7,095 B | 7,181 B | +86 B |
+| Control flow | 7,432 B | 7,516 B | +84 B |
+| Keyed list | 8,236 B | 8,312 B | +76 B |
+| TodoMVC | 9,822 B | 9,906 B | +84 B |
+
 ## Consequences
 
 - Compiler and runtime changes that touch tuple positions must land together.

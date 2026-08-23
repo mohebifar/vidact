@@ -26,6 +26,7 @@ export {
   keyed,
   mountCompiled,
   mountCompiledRef,
+  useImperativeHandle,
   when,
   type CompiledBinding,
   type CompiledComponentResult,

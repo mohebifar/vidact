@@ -62,10 +62,19 @@ destructured by a function component is an ordinary compiled prop, matching the
 React 19 ref-as-prop authoring model; when forwarded to a host element, the
 resolved ref value enters the same host ref commit lifecycle.
 
+`useImperativeHandle` queues an owner resource during component construction.
+After the component range enters its live parent, descendant host refs commit
+in document order and the component end marker publishes the handle. The
+callback cleanup or object-ref clear belongs to that component owner, so a
+conditional removal, keyed-record removal, or root disposal clears the exposed
+handle exactly once. The first accepted form has an omitted or empty dependency
+list. Dependency-driven handle replacement remains fail-closed until lifecycle
+dependency bindings share the compiler's static source-mask contract.
+
 This is a Vidact compiled-value ABI, not arbitrary React element
 reconciliation. Owned structural blocks still mount once. External
-`ReactElement[]`, imperative handles, effects, portals, Suspense, and
-SSR/hydration remain outside the accepted contract.
+`ReactElement[]`, reactive imperative-handle dependencies, effects, portals,
+Suspense, and SSR/hydration remain outside the accepted contract.
 
 ## Compiler and runtime contract
 
@@ -112,7 +121,9 @@ a fallback `ref(null)` clear. Object refs clear only if they still point at the
 element being disposed. A compiled ref binding stages its next attachment before
 clearing the previous ref. A thrown attachment leaves the previous ref owned and
 active; successful transitions retain the host element and transfer cleanup to
-the next ref.
+the next ref. Imperative handles use the same attachment primitive but commit
+at their owning component's end marker, after descendant host refs and before a
+future layout-effect phase.
 
 ## Invariants
 
@@ -138,6 +149,9 @@ the next ref.
   not reattach an unchanged element.
 - A component `ref` prop reaches the child without `forwardRef`, attaches after
   host insertion, and clears when the child owner is disposed.
+- An imperative handle with static lifetime is unavailable during construction,
+  publishes after descendant host refs, updates state through stable setters,
+  survives retained-owner movement, and clears on owner disposal.
 - Prop and DOM subscriptions remain statically declared updaters, not runtime
   signals or observer-tracked dependencies.
 
@@ -174,7 +188,9 @@ The ABI is intentionally narrow. Prop additions/deletions through spreads, rest
 and nested destructuring, and foreign React element objects require separate
 decisions. Multi-root component ranges, aliased direct destructuring, ref-as-prop,
 and reactive host ref identity are supported. `useRef` is naturally stable under
-the compiled construct-once path.
+the compiled construct-once path. `useImperativeHandle` is supported with an
+omitted or empty dependency list; reactive dependency replacement is reserved
+for the shared lifecycle dependency ABI.
 The former rerendering compatibility runtime was removed by
 [Single client compiler and runtime path](compiled-only-client-runtime.md).
 
@@ -193,5 +209,8 @@ The former rerendering compatibility runtime was removed by
   preserving keyed row DOM identity.
 - `tests/browser/corpus/apps/roster/RosterApp.browser.test.ts` verifies compiler-owned
   JSX arrays crossing a component prop with surgical record updates.
+- `tests/browser/corpus/apps/multi-component/MultiComponentApp.browser.test.ts`
+  verifies post-insertion imperative-handle publication, surgical state updates,
+  and disposal clearing through React-shaped TSX.
 - Run `cargo test --workspace`, `pnpm typecheck`, `pnpm test:runtime`,
   `pnpm test:browser`, `pnpm test:examples`, and `pnpm build:examples`.
