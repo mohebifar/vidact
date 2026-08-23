@@ -142,6 +142,24 @@ direct DOM loop:
 | Keyed list | 8,360 B | 8,390 B | +30 B |
 | TodoMVC | 9,948 B | 9,977 B | +29 B |
 
+Default-core function-boundary routing later adds one logical error-owner slot
+and transaction-local failure attribution across computations, publication,
+events, and effects. After subsequent lifecycle, context, root, portal, and
+insertion-phase work, the measured pre-error baseline and explicit revised
+ceilings are:
+
+| Fixture | Pre-error gzip | Error-routing gzip | Revised ceiling |
+| --- | ---: | ---: | ---: |
+| Counter | 7,500 B | 7,725 B | 7,803 B |
+| Control flow | 7,858 B | 8,082 B | 8,129 B |
+| Keyed list | 8,644 B | 8,870 B | 8,932 B |
+| TodoMVC | 10,219 B | 10,445 B | 10,526 B |
+
+The 224-byte ceiling revision is an explicit product-contract cost for routing
+all default-core failures; the lazy fallback renderer still tree-shakes from
+applications that do not import it. See
+`function-error-boundaries-and-root-reporting.md` for the behavior contract.
+
 ## Consequences
 
 - Compiler and runtime changes that touch tuple positions must land together.

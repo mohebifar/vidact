@@ -8,21 +8,21 @@ import { build } from 'vite'
 const directory = path.dirname(fileURLToPath(import.meta.url))
 const repository = path.resolve(directory, '../..')
 const fixtures = [
-  { name: 'counter', entry: path.join(directory, 'fixtures/counter.tsx'), gzipBudget: 7_579 },
+  { name: 'counter', entry: path.join(directory, 'fixtures/counter.tsx'), gzipBudget: 7_803 },
   {
     name: 'control-flow',
     entry: path.join(directory, 'fixtures/control-flow.tsx'),
-    gzipBudget: 7_905,
+    gzipBudget: 8_129,
   },
   {
     name: 'keyed-list',
     entry: path.join(directory, 'fixtures/keyed-list.tsx'),
-    gzipBudget: 8_708,
+    gzipBudget: 8_932,
   },
   {
     name: 'todomvc',
     entry: path.join(repository, 'examples/todomvc/src/TodoApp.tsx'),
-    gzipBudget: 10_302,
+    gzipBudget: 10_526,
   },
 ]
 

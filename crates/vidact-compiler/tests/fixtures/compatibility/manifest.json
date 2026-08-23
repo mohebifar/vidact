@@ -156,6 +156,18 @@
       "components": ["InsertionEffect"]
     },
     {
+      "path": "accepted/function-error-boundary.tsx",
+      "expectation": "different",
+      "difference": "Error recovery uses Vidact's function boundary helper rather than React class boundary syntax.",
+      "components": ["Child"]
+    },
+    {
+      "path": "rejected/class-error-boundary.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "React.Component"
+    },
+    {
       "path": "rejected/foreign-array-call.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",

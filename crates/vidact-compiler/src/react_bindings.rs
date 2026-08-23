@@ -97,6 +97,11 @@ impl<'s> ReactBindings<'s> {
                             bindings.namespaces.insert(symbol);
                         }
                     }
+                    ImportDeclarationSpecifier::ImportDefaultSpecifier(specifier) => {
+                        if let Some(symbol) = specifier.local.symbol_id.get() {
+                            bindings.namespaces.insert(symbol);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -162,8 +167,8 @@ impl<'s> ReactBindings<'s> {
         self.is_named_call(call, "useId")
     }
 
-    fn is_named_call(&self, call: &CallExpression<'_>, name: &str) -> bool {
-        match call.callee.without_parentheses() {
+    pub(crate) fn is_named_expression(&self, expression: &Expression<'_>, name: &str) -> bool {
+        match expression.without_parentheses() {
             Expression::Identifier(identifier) => reference_symbol(identifier, self.scoping)
                 .is_some_and(|symbol| {
                     self.named
@@ -178,6 +183,10 @@ impl<'s> ReactBindings<'s> {
                 .is_some_and(|symbol| self.namespaces.contains(&symbol)),
             _ => false,
         }
+    }
+
+    fn is_named_call(&self, call: &CallExpression<'_>, name: &str) -> bool {
+        self.is_named_expression(&call.callee, name)
     }
 }
 

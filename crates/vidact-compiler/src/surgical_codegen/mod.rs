@@ -7,7 +7,7 @@ use oxc_allocator::{Allocator, CloneIn, GetAllocator};
 use oxc_ast::{ast::*, builder::AstBuilder};
 use oxc_ast_visit::{
     Visit, VisitMut,
-    walk::walk_call_expression,
+    walk::{walk_call_expression, walk_class},
     walk_mut::{
         walk_call_expression as walk_call_expression_mut, walk_expression as walk_expression_mut,
         walk_jsx_attribute, walk_jsx_element, walk_jsx_spread_attribute,
@@ -128,6 +128,19 @@ pub fn compile_surgical_module_with_ir_and_options(
         ))]);
     }
 
+    let react = ReactBindings::new(&parsed.program, semantic.semantic.scoping());
+    let mut class_component = ReactClassComponentFinder {
+        react: &react,
+        span: None,
+    };
+    class_component.visit_program(&parsed.program);
+    if let Some(span) = class_component.span {
+        return Err(vec![unsupported(
+            "React class components are unsupported; use a function component and Vidact errorBoundary",
+        )
+        .with_span(SourceSpan::new(span.start, span.end))]);
+    }
+
     let components = analyze_program(input, &parsed.program, &semantic.semantic, &allocator)?
         .into_iter()
         .map(lower_component)
@@ -161,6 +174,27 @@ pub fn compile_surgical_module_with_ir_and_options(
         source_map,
         components,
     })
+}
+
+struct ReactClassComponentFinder<'r, 's> {
+    react: &'r ReactBindings<'s>,
+    span: Option<Span>,
+}
+
+impl<'a> Visit<'a> for ReactClassComponentFinder<'_, '_> {
+    fn visit_class(&mut self, class: &Class<'a>) {
+        if self.span.is_some() {
+            return;
+        }
+        if let Some(super_class) = &class.super_class
+            && (self.react.is_named_expression(super_class, "Component")
+                || self.react.is_named_expression(super_class, "PureComponent"))
+        {
+            self.span = Some(super_class.span());
+            return;
+        }
+        walk_class(self, class);
+    }
 }
 
 fn transform_program<'a>(

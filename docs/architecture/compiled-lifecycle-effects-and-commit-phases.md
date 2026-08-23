@@ -67,10 +67,9 @@ disposal; passive cleanup is deferred to the passive phase.
 - `createCompiledEffectEvent(scope, callback)` returns one stable owner-bound
   function whose callback reads current slots rather than effect-run snapshots.
 
-Effect errors still propagate through the current synchronous or microtask
-boundary. Routing them to function error boundaries and root error callbacks is
-a later failure-boundary contract; this decision does not silently swallow
-them.
+Effect errors route through the logical function boundary and root callback
+contract. Synchronous layout failures enter that route after publication
+rollback; passive failures enter it from their owned microtask.
 
 ## Invariants
 
@@ -103,9 +102,8 @@ them.
 
 Common subscription, measurement, and imperative-library effects now compose
 with Vidact ownership without component reruns. The runtime pays scheduling
-bytes only in chunks that import an effect capability. Custom hooks,
-error routing, and a public `act` drain API remain follow-up work on this phase
-model.
+bytes only in chunks that import an effect capability. Custom hooks and a
+public `act` drain API remain follow-up work on this phase model.
 
 ## Verification
 

@@ -14,6 +14,7 @@ const BINDING = Symbol(DEV ? 'Vidact.Binding' : undefined)
 const STRUCTURAL = Symbol(DEV ? 'Vidact.StructuralBinding' : undefined)
 const CONTEXT = Symbol(DEV ? 'Vidact.Context' : undefined)
 export const COMPONENT_SPREAD_SOURCE = Symbol(DEV ? 'Vidact.ComponentSpreadSource' : undefined)
+const noop = (): void => {}
 
 type ContextFrame = {
   readonly context: CompiledContext<unknown>
@@ -21,7 +22,20 @@ type ContextFrame = {
   readonly parent: ContextFrame | null
 }
 
-type RootIdentity = { mounted: boolean; nextId: number; readonly prefix: string }
+export type CompiledErrorHandler = (error: unknown) => void
+
+type ErrorBoundaryHandler = {
+  readonly handle: (error: unknown) => void
+  readonly parent: ErrorBoundaryHandler | null
+}
+
+type RootIdentity = {
+  mounted: boolean
+  nextId: number
+  readonly prefix: string
+  readonly onCaughtError: CompiledErrorHandler | undefined
+  readonly onUncaughtError: CompiledErrorHandler | undefined
+}
 
 type PortalPublication = readonly [commit: () => void, rollback: () => void]
 
@@ -30,6 +44,7 @@ type Owner = [
   cleanups: Set<() => void>,
   context: ContextFrame | null,
   rootIdentity: RootIdentity,
+  errorBoundary: ErrorBoundaryHandler | null,
 ]
 
 type CompiledUpdater = [
@@ -112,6 +127,86 @@ export function hasInvalidChild(children: readonly unknown[]): boolean {
 
 export function deferred(render: () => CompiledRenderValue): StructuralBinding {
   return [STRUCTURAL, (parent, before) => insertValue(parent, render(), before)]
+}
+
+export function errorBoundary(
+  render: () => CompiledRenderValue,
+  fallback: (error: unknown, reset: () => void) => CompiledRenderValue,
+  onError?: CompiledErrorHandler,
+): StructuralBinding {
+  const context = activeContextFrame ?? activeOwner?.[2] ?? null
+  const rootIdentity = activeOwner?.[3] ?? activeRootIdentity
+  if (rootIdentity === null) {
+    throw new Error(DEV ? 'errorBoundary must run during compiled root construction' : 'V028')
+  }
+  const parentBoundary = activeOwner?.[4] ?? null
+  let mounted = false
+  return [
+    STRUCTURAL,
+    (parent, before) => {
+      if (mounted) throw new Error(DEV ? 'compiled error boundary is already mounted' : 'V008')
+      mounted = true
+      const start = document.createComment(DEV ? 'vidact:error' : '')
+      const end = document.createComment(DEV ? '/vidact:error' : '')
+      parent.insertBefore(start, before)
+      parent.insertBefore(end, before)
+      let currentOwner: Owner | null = null
+      let currentNodes: readonly Node[] = []
+      let failed = false
+
+      const publish = (
+        read: () => CompiledRenderValue,
+        boundary: ErrorBoundaryHandler | null,
+      ): void => {
+        const currentParent = rangeParent(start, end, 'error boundary')
+        const nextOwner = createOwner(context, rootIdentity, boundary)
+        const [fragment, nodes] = stageRender(read, nextOwner)
+        try {
+          currentParent.insertBefore(fragment, end)
+          commitPublishedNodes(nodes)
+        } catch (error) {
+          disposePublished(nextOwner, nodes)
+          throw error
+        }
+        const previousOwner = currentOwner
+        const previousNodes = currentNodes
+        currentOwner = nextOwner
+        currentNodes = nodes
+        disposePublished(previousOwner, previousNodes)
+      }
+
+      const reset = (): void => {
+        if (!failed) return
+        try {
+          failed = false
+          publish(render, boundary)
+        } catch (error) {
+          recover(error)
+        }
+      }
+      const recover = (error: unknown): void => {
+        failed = true
+        publish(() => fallback(error, reset), parentBoundary)
+        onError?.(error)
+        rootIdentity.onCaughtError?.(error)
+      }
+      const boundary: ErrorBoundaryHandler = { handle: recover, parent: parentBoundary }
+
+      try {
+        publish(render, boundary)
+      } catch (error) {
+        recover(error)
+      }
+      onCleanup(() => {
+        try {
+          disposePublished(currentOwner, currentNodes)
+        } finally {
+          start.remove()
+          end.remove()
+        }
+      })
+    },
+  ]
 }
 
 export function createPortal(
@@ -205,6 +300,7 @@ type PublicationOperation = readonly [
   abort?: (() => void) | undefined,
   finalize?: (() => void) | undefined,
   priority?: number | undefined,
+  errorOwner?: Owner | null | undefined,
 ]
 
 export type CompiledPropTransition = PublicationOperation
@@ -217,6 +313,8 @@ let activeRootIdentity: RootIdentity | null = null
 let nextClientRoot = 0
 let activeScopeCollector: Set<CompiledScope> | null = null
 let activeConstructionOwner: Owner | null = null
+let activeErrorOwner: Owner | null = null
+let failedOwner: Owner | null = null
 let transactionDepth = 0
 let drainingFlushes = false
 let activePublication: PublicationOperation[] | null = null
@@ -289,10 +387,17 @@ function createScope(operations: SourceOperations): CompiledScope {
       if (owner[0]) {
         throw new Error(DEV ? 'cannot add an updater to a disposed scope' : 'V002')
       }
+      const errorOwner = activeOwner ?? owner
+      const context = activeContextFrame ?? errorOwner[2]
       const entry: CompiledUpdater = [
         reads,
         writes,
-        (active) => withScopeNamespace(scope, () => run(active)),
+        (active) =>
+          captureOwnerError(errorOwner, () =>
+            withOwner(errorOwner, () =>
+              withContextFrame(context, () => withScopeNamespace(scope, () => run(active))),
+            ),
+          ),
         true,
       ]
       const reusableIndex = freeUpdaterIndexes.pop()
@@ -449,7 +554,7 @@ export function createCompiledExternalStore<T>(
     if (!active) return
     scope[2](() => slot.replace(getSnapshot()))
   }
-  const unsubscribe = storeSubscribe(checkSnapshot)
+  const unsubscribe = storeSubscribe(() => runOwnerTask(owner, checkSnapshot))
   if (typeof unsubscribe !== 'function') {
     active = false
     throw new TypeError(
@@ -619,7 +724,12 @@ export function compiledEvent<T extends Event>(
   scope: CompiledScope,
   handler: (event: T) => void,
 ): (event: T) => void {
-  return (event) => scope[2](() => handler(event))
+  const owner = scopeOwners.get(scope)
+  if (owner === undefined) {
+    throw new Error(DEV ? 'compiledEvent received an unknown scope' : 'V003')
+  }
+  const errorOwner = activeOwner ?? owner
+  return (event) => runOwnerTask(errorOwner, () => scope[2](() => handler(event)))
 }
 
 export function when(
@@ -1077,12 +1187,14 @@ export function useInsertionEffect(
       DEV ? 'reactive insertion effect dependencies require compiler lowering' : 'V017',
     )
   }
-  let cleanup = (): void => {}
+  const lifetimeOwner = activeOwner ?? owner
+  let cleanup = noop
   queueInsertionCommit(owner, () => {
+    if (lifetimeOwner[0]) return
     cleanup()
     cleanup = readEffectCleanup(create())
   })
-  owner[1].add(() => cleanup())
+  lifetimeOwner[1].add(() => cleanup())
 }
 
 export function useEffect(create: () => EffectResult, dependencies?: readonly unknown[]): void {
@@ -1101,25 +1213,27 @@ function registerEffect(
   if (dependencies !== undefined && dependencies.length !== 0) {
     throw new Error(DEV ? 'reactive effect dependencies require compiler lowering' : 'V017')
   }
-  let cleanup = (): void => {}
+  const lifetimeOwner = activeOwner ?? owner
+  let cleanup = noop
   let generation = 0
   const run = (): void => {
     cleanup()
     cleanup = readEffectCleanup(create())
   }
   queueOwnerCommit(owner, () => {
+    if (lifetimeOwner[0]) return
     if (passive) {
       const scheduled = ++generation
       queueMicrotask(() => {
-        if (!owner[0] && scheduled === generation) run()
+        if (!lifetimeOwner[0] && scheduled === generation) runOwnerTask(lifetimeOwner, run)
       })
     } else {
       run()
     }
   })
-  owner[1].add(() => {
+  lifetimeOwner[1].add(() => {
     generation += 1
-    if (passive) queueMicrotask(cleanup)
+    if (passive) queueMicrotask(() => runOwnerTask(lifetimeOwner, cleanup))
     else cleanup()
   })
 }
@@ -1143,9 +1257,10 @@ export function compiledInsertionEffect(
   if (owner === null || scopeOwners.get(scope) !== owner) {
     throw new Error(DEV ? 'compiled insertion effects must run in their component scope' : 'V016')
   }
+  const lifetimeOwner = activeOwner ?? owner
   let mounted = false
   let currentDependencies: readonly unknown[] | undefined
-  let cleanup = (): void => {}
+  let cleanup = noop
   const run = (): void => {
     const nextDependencies = readDependencies?.()
     if (
@@ -1160,11 +1275,13 @@ export function compiledInsertionEffect(
     currentDependencies = nextDependencies
     mounted = true
   }
-  queueInsertionCommit(owner, run)
+  queueInsertionCommit(owner, () => {
+    if (!lifetimeOwner[0]) run()
+  })
   const removeUpdater = subscribe(scope, reads, () =>
-    stagePublication([() => {}, () => {}, undefined, run, -20]),
+    stagePublication([noop, noop, undefined, run, -20]),
   )
-  owner[1].add(() => {
+  lifetimeOwner[1].add(() => {
     removeUpdater()
     cleanup()
   })
@@ -1181,10 +1298,11 @@ export function compiledEffect(
   if (owner === null || scopeOwners.get(scope) !== owner) {
     throw new Error(DEV ? 'compiled effects must run in their component scope' : 'V016')
   }
+  const lifetimeOwner = activeOwner ?? owner
   let mounted = false
   let generation = 0
   let currentDependencies: readonly unknown[] | undefined
-  let cleanup = (): void => {}
+  let cleanup = noop
   const run = (): void => {
     const nextDependencies = readDependencies?.()
     if (
@@ -1206,24 +1324,26 @@ export function compiledEffect(
     }
     const scheduled = ++generation
     queueMicrotask(() => {
-      if (!owner[0] && scheduled === generation) run()
+      if (!lifetimeOwner[0] && scheduled === generation) runOwnerTask(lifetimeOwner, run)
     })
   }
-  queueOwnerCommit(owner, schedule)
+  queueOwnerCommit(owner, () => {
+    if (!lifetimeOwner[0]) schedule()
+  })
   const removeUpdater = subscribe(scope, reads, () => {
     if (passive) schedule()
-    else stagePublication([() => {}, () => {}, undefined, run, 20])
+    else stagePublication([noop, noop, undefined, run, 20])
   })
-  owner[1].add(() => {
+  lifetimeOwner[1].add(() => {
     generation += 1
     removeUpdater()
-    if (passive) queueMicrotask(cleanup)
+    if (passive) queueMicrotask(() => runOwnerTask(lifetimeOwner, cleanup))
     else cleanup()
   })
 }
 
 function readEffectCleanup(result: EffectResult): () => void {
-  if (result === undefined) return () => {}
+  if (result === undefined) return noop
   if (typeof result === 'function') return result
   throw new TypeError(DEV ? 'an effect must return a cleanup function or undefined' : 'V018')
 }
@@ -1247,7 +1367,7 @@ export function compiledImperativeHandle<T>(
   let currentHandle: T
   let currentDependencies: readonly unknown[] | undefined
   // oxlint-disable-next-line unicorn/consistent-function-scoping -- This placeholder is replaced by the committed resource cleanup.
-  let cleanup = (): void => {}
+  let cleanup = noop
 
   const commitInitial = (): void => {
     currentRef = readImperativeRef(readRef())
@@ -1277,7 +1397,7 @@ export function compiledImperativeHandle<T>(
     let nextCleanup: (() => void) | undefined
     let finalized = false
     stagePublication([
-      () => {},
+      noop,
       () => {
         if (!finalized) return
         nextCleanup?.()
@@ -1383,7 +1503,7 @@ export function mountCompiledRef(element: Element, value: CompiledBinding<unknow
   }
   let current: RefValue = initial
   // oxlint-disable-next-line unicorn/consistent-function-scoping -- This placeholder is replaced when the ref attaches.
-  let cleanup = (): void => {}
+  let cleanup = noop
   const pending: PendingRef = [activeOwner, current, (attached) => (cleanup = attached)]
   pendingRefs.set(element, pending)
 
@@ -1429,6 +1549,8 @@ export function registerCompiledCleanup(cleanup: () => void): void {
 
 export interface MountCompiledOptions {
   readonly identifierPrefix?: string
+  readonly onCaughtError?: CompiledErrorHandler
+  readonly onUncaughtError?: CompiledErrorHandler
 }
 
 export function mountCompiled(
@@ -1437,10 +1559,19 @@ export function mountCompiled(
   options?: MountCompiledOptions,
 ): { dispose: () => void } {
   const previousRootIdentity = activeRootIdentity
-  activeRootIdentity = createRootIdentity(options?.identifierPrefix)
+  const rootIdentity = createRootIdentity(
+    options?.identifierPrefix,
+    options?.onCaughtError,
+    options?.onUncaughtError,
+  )
+  activeRootIdentity = rootIdentity
   let root: CompiledComponentResult
   try {
     root = constructCompiledComponent(component)
+  } catch (error) {
+    if (rootIdentity.onUncaughtError === undefined) throw error
+    rootIdentity.onUncaughtError(error)
+    return { dispose: noop }
   } finally {
     activeRootIdentity = previousRootIdentity
   }
@@ -1452,10 +1583,10 @@ export function mountCompiled(
   try {
     root[1](host, previous[0] ?? null)
     const rootOwner = scopeOwners.get(range[2])
-    const rootIdentity = rootOwner?.[3]
-    if (rootIdentity !== undefined) {
-      rootIdentity.mounted = true
-      commitRootPortals(rootIdentity)
+    const mountedRootIdentity = rootOwner?.[3]
+    if (mountedRootIdentity !== undefined) {
+      mountedRootIdentity.mounted = true
+      commitRootPortals(mountedRootIdentity)
     }
     commitOwnerInsertions(rootOwner)
     commitRangeRefs(range[0], range[1])
@@ -1467,7 +1598,9 @@ export function mountCompiled(
     } catch {
       // Preserve the mount error while still running every component cleanup.
     }
-    throw error
+    if (rootIdentity.onUncaughtError === undefined) throw error
+    rootIdentity.onUncaughtError(error)
+    return { dispose: noop }
   }
   return {
     dispose: range[2][3],
@@ -1572,14 +1705,14 @@ export function mountCompiledPropTransition<T>(
 
 function structural(scope: CompiledScope, mount: StructuralBinding[1]): StructuralBinding {
   let mounted = false
-  const context = activeContextFrame ?? activeOwner?.[2] ?? scopeOwners.get(scope)?.[2] ?? null
-  const rootIdentity = activeOwner?.[3] ?? scopeOwners.get(scope)?.[3] ?? activeRootIdentity
+  const owner = activeOwner ?? scopeOwners.get(scope)!
+  const context = activeContextFrame ?? owner[2]
   return [
     STRUCTURAL,
     (parent, before) => {
       if (mounted) throw new Error(DEV ? 'compiled block is already mounted' : 'V008')
       mounted = true
-      withRootIdentity(rootIdentity, () =>
+      withOwner(owner, () =>
         withContextFrame(context, () => withScopeNamespace(scope, () => mount(parent, before))),
       )
     },
@@ -1593,19 +1726,9 @@ function subscribe(
   additionalScope?: CompiledScope,
   additionalReads?: SourceMask,
 ): () => void {
-  const context = activeContextFrame ?? activeOwner?.[2] ?? scopeOwners.get(scope)?.[2] ?? null
-  const rootIdentity = activeOwner?.[3] ?? scopeOwners.get(scope)?.[3] ?? activeRootIdentity
-  const removers = [
-    scope[0](reads, () => withRootIdentity(rootIdentity, () => withContextFrame(context, run))),
-  ]
+  const removers = [scope[0](reads, run)]
   if (additionalScope !== undefined && additionalReads !== undefined) {
-    removers.push(
-      additionalScope[0](additionalReads, () =>
-        withRootIdentity(rootIdentity, () =>
-          withContextFrame(context, () => withScopeNamespace(scope, run)),
-        ),
-      ),
-    )
+    removers.push(additionalScope[0](additionalReads, () => withScopeNamespace(scope, run)))
   }
   return () => {
     for (const remove of removers) remove()
@@ -1626,20 +1749,25 @@ function withScopeNamespace<Result>(scope: CompiledScope, operation: () => Resul
   return withIntrinsicNamespace(scopeNamespaces.get(scope), operation)
 }
 
-function createOwner(): Owner {
-  return [
-    false,
-    new Set(),
-    activeContextFrame ?? activeOwner?.[2] ?? null,
-    activeOwner?.[3] ?? activeRootIdentity ?? createRootIdentity(),
-  ]
+function createOwner(
+  context = activeContextFrame ?? activeOwner?.[2] ?? null,
+  rootIdentity = activeOwner?.[3] ?? activeRootIdentity ?? createRootIdentity(),
+  boundary = activeOwner?.[4] ?? null,
+): Owner {
+  return [false, new Set(), context, rootIdentity, boundary]
 }
 
-function createRootIdentity(identifierPrefix?: string): RootIdentity {
+function createRootIdentity(
+  identifierPrefix?: string,
+  onCaughtError?: CompiledErrorHandler,
+  onUncaughtError?: CompiledErrorHandler,
+): RootIdentity {
   return {
     mounted: false,
     nextId: 0,
     prefix: identifierPrefix ?? `v${nextClientRoot++}-`,
+    onCaughtError,
+    onUncaughtError,
   }
 }
 
@@ -1707,15 +1835,18 @@ function withOwner<T>(owner: Owner, operation: () => T): T {
   const previous = activeOwner
   const previousContext = activeContextFrame
   const previousRootIdentity = activeRootIdentity
+  const previousErrorOwner = activeErrorOwner
   activeOwner = owner
   activeContextFrame = owner[2]
   activeRootIdentity = owner[3]
+  activeErrorOwner = owner
   try {
     return operation()
   } finally {
     activeOwner = previous
     activeContextFrame = previousContext
     activeRootIdentity = previousRootIdentity
+    activeErrorOwner = previousErrorOwner
   }
 }
 
@@ -2080,7 +2211,7 @@ function visitNodes(root: Node, visit: (node: Node) => void): void {
 }
 
 function attachRef<T>(value: RefValue<T>, target: T): () => void {
-  if (value === null || value === undefined) return () => {}
+  if (value === null || value === undefined) return noop
   if (typeof value === 'function') {
     const cleanup = value(target)
     return typeof cleanup === 'function' ? cleanup : () => value(null)
@@ -2103,6 +2234,8 @@ function drainFlushes(): void {
   activePublication = publication
   const runs = new Map<() => void, number>()
   let committing = false
+  let failure: unknown
+  let failed = false
   try {
     while (scheduledFlushes.size > 0) {
       const flush = scheduledFlushes.values().next().value
@@ -2122,11 +2255,18 @@ function drainFlushes(): void {
   } catch (error) {
     activePublication = null
     if (!committing) abortPublication(publication)
-    throw error
+    failure = error
+    failed = true
   } finally {
     activePublication = null
     drainingFlushes = false
   }
+  if (failed) {
+    const owner = failedOwner
+    failedOwner = null
+    if (!routeOwnerError(owner, failure)) throw failure
+  }
+  if (scheduledFlushes.size > 0) drainFlushes()
 }
 
 function stagePublication(operation: PublicationOperation): void {
@@ -2140,7 +2280,14 @@ function stagePublication(operation: PublicationOperation): void {
     }
     return
   }
-  activePublication.push(operation)
+  activePublication.push([
+    operation[0],
+    operation[1],
+    operation[2],
+    operation[3],
+    operation[4],
+    operation[5] ?? activeErrorOwner,
+  ])
 }
 
 function commitPublication(operations: readonly PublicationOperation[]): void {
@@ -2148,8 +2295,10 @@ function commitPublication(operations: readonly PublicationOperation[]): void {
     ? operations.toSorted((left, right) => (left[4] ?? 0) - (right[4] ?? 0))
     : operations
   const applied: PublicationOperation[] = []
+  let current: PublicationOperation | undefined
   try {
     for (const operation of ordered) {
+      current = operation
       applied.push(operation)
       operation[0]()
     }
@@ -2168,10 +2317,14 @@ function commitPublication(operations: readonly PublicationOperation[]): void {
         // Preserve the publication error while disposing every staged value.
       }
     }
+    failedOwner = current?.[5] ?? null
     throw error
   }
   try {
-    for (const operation of ordered) operation[3]?.()
+    for (const operation of ordered) {
+      current = operation
+      operation[3]?.()
+    }
   } catch (error) {
     for (let index = applied.length - 1; index >= 0; index -= 1) {
       try {
@@ -2180,8 +2333,44 @@ function commitPublication(operations: readonly PublicationOperation[]): void {
         // Preserve the finalization error while attempting every inverse.
       }
     }
+    failedOwner = current?.[5] ?? null
     throw error
   }
+}
+
+function captureOwnerError<T>(owner: Owner, operation: () => T): T {
+  try {
+    return operation()
+  } catch (error) {
+    failedOwner = owner
+    throw error
+  }
+}
+
+function runOwnerTask(owner: Owner, operation: () => void): void {
+  try {
+    operation()
+  } catch (error) {
+    if (!routeOwnerError(owner, error)) throw error
+  }
+}
+
+function routeOwnerError(owner: Owner | null, failure: unknown): boolean {
+  let error = failure
+  let boundary = owner?.[4] ?? null
+  while (boundary !== null) {
+    try {
+      boundary.handle(error)
+      return true
+    } catch (nextError) {
+      error = nextError
+      boundary = boundary.parent
+    }
+  }
+  const onUncaughtError = owner?.[3].onUncaughtError
+  if (onUncaughtError === undefined) return false
+  onUncaughtError(error)
+  return true
 }
 
 function abortPublication(operations: readonly PublicationOperation[]): void {
