@@ -17,6 +17,7 @@ import {
 } from './compiler-client.ts'
 
 const REACT_MODULE = '\0vidact:react'
+const REACT_DOM_MODULE = '\0vidact:react-dom'
 
 export interface VidactPluginOptions {
   /** Path to the Rust workspace Cargo.toml. Relative paths resolve from Vite's root. */
@@ -84,12 +85,14 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
           : path.resolve(config.root, options.manifestPath)
     },
     resolveId(source) {
-      return source === 'react' ? REACT_MODULE : null
+      if (source === 'react') return REACT_MODULE
+      return source === 'react-dom' ? REACT_DOM_MODULE : null
     },
     load(id) {
-      return id === REACT_MODULE
-        ? 'export { createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "@vidact/runtime"'
-        : null
+      if (id === REACT_MODULE) {
+        return 'export { createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "@vidact/runtime"'
+      }
+      return id === REACT_DOM_MODULE ? 'export { createPortal } from "@vidact/runtime"' : null
     },
     async transform(source, id) {
       const filename = id.split('?', 1)[0] ?? id

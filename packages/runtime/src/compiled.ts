@@ -21,7 +21,9 @@ type ContextFrame = {
   readonly parent: ContextFrame | null
 }
 
-type RootIdentity = { nextId: number; readonly prefix: string }
+type RootIdentity = { mounted: boolean; nextId: number; readonly prefix: string }
+
+type PortalPublication = readonly [commit: () => void, rollback: () => void]
 
 type Owner = [
   disposed: boolean,
@@ -112,6 +114,81 @@ export function deferred(render: () => CompiledRenderValue): StructuralBinding {
   return [STRUCTURAL, (parent, before) => insertValue(parent, render(), before)]
 }
 
+export function createPortal(
+  children: CompiledRenderValue | readonly CompiledRenderValue[],
+  container: ParentNode,
+  _key?: string | number | bigint | null,
+): StructuralBinding {
+  if (!(container instanceof Node) || typeof container.insertBefore !== 'function') {
+    throw new TypeError(DEV ? 'createPortal requires a DOM container' : 'V026')
+  }
+  const context = activeContextFrame ?? activeOwner?.[2] ?? null
+  const rootIdentity = activeOwner?.[3] ?? activeRootIdentity
+  if (rootIdentity === null) {
+    throw new Error(DEV ? 'createPortal must run during compiled root construction' : 'V027')
+  }
+  let mounted = false
+  return [
+    STRUCTURAL,
+    (logicalParent, before) => {
+      if (mounted) throw new Error(DEV ? 'compiled portal is already mounted' : 'V008')
+      mounted = true
+      const logicalMarker = document.createComment(DEV ? 'vidact:portal' : '')
+      logicalParent.insertBefore(logicalMarker, before)
+      const start = document.createComment(DEV ? 'vidact:portal:start' : '')
+      const end = document.createComment(DEV ? 'vidact:portal:end' : '')
+      const fragment = document.createDocumentFragment()
+      fragment.append(start, end)
+      const portalOwner = withRootIdentity(rootIdentity, () =>
+        withContextFrame(context, createOwner),
+      )
+      try {
+        withOwner(portalOwner, () => insertValue(fragment, children, end))
+      } catch (error) {
+        disposeOwner(portalOwner)
+        logicalMarker.remove()
+        throw error
+      }
+      const rollback = (): void => {
+        removeBetween(start, end)
+        start.remove()
+        end.remove()
+      }
+      const publication: PortalPublication = [
+        () => {
+          container.insertBefore(fragment, null)
+          try {
+            commitRangeRefs(start, end)
+          } catch (error) {
+            rollback()
+            throw error
+          }
+        },
+        rollback,
+      ]
+      if (rootIdentity.mounted) {
+        stagePublication([publication[0], publication[1], () => disposeOwner(portalOwner)])
+      } else {
+        let pending = pendingRootPortals.get(rootIdentity)
+        if (pending === undefined) {
+          pending = new Set()
+          pendingRootPortals.set(rootIdentity, pending)
+        }
+        pending.add(publication)
+      }
+      onCleanup(() => {
+        pendingRootPortals.get(rootIdentity)?.delete(publication)
+        try {
+          disposeOwner(portalOwner)
+        } finally {
+          publication[1]()
+          logicalMarker.remove()
+        }
+      })
+    },
+  ]
+}
+
 type RefValue<T = Element> =
   | ((value: T | null) => void | (() => void))
   | { current: unknown }
@@ -150,6 +227,7 @@ const componentRanges = new WeakMap<CompiledComponentResult, ComponentRange>()
 const pendingRefs = new WeakMap<Element, PendingRef>()
 const componentCommitOwners = new WeakMap<Comment, Owner>()
 const pendingOwnerCommits = new WeakMap<Owner, Set<() => void>>()
+const pendingRootPortals = new WeakMap<RootIdentity, Set<PortalPublication>>()
 
 export function createCompiledScope(): CompiledScope {
   return createScope(wideSourceOperations)
@@ -1303,6 +1381,11 @@ export function mountCompiled(
   const previous = [...host.childNodes]
   try {
     root[1](host, previous[0] ?? null)
+    const rootIdentity = scopeOwners.get(range[2])?.[3]
+    if (rootIdentity !== undefined) {
+      rootIdentity.mounted = true
+      commitRootPortals(rootIdentity)
+    }
     commitRangeRefs(range[0], range[1])
     commitOwnerResources(scopeOwners.get(range[2]))
     for (const node of previous) host.removeChild(node)
@@ -1482,8 +1565,25 @@ function createOwner(): Owner {
 
 function createRootIdentity(identifierPrefix?: string): RootIdentity {
   return {
+    mounted: false,
     nextId: 0,
     prefix: identifierPrefix ?? `v${nextClientRoot++}-`,
+  }
+}
+
+function commitRootPortals(rootIdentity: RootIdentity): void {
+  const pending = pendingRootPortals.get(rootIdentity)
+  if (pending === undefined) return
+  pendingRootPortals.delete(rootIdentity)
+  const committed: PortalPublication[] = []
+  try {
+    for (const publication of pending) {
+      publication[0]()
+      committed.push(publication)
+    }
+  } catch (error) {
+    for (const publication of committed.toReversed()) publication[1]()
+    throw error
   }
 }
 

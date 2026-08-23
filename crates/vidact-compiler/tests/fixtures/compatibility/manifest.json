@@ -144,6 +144,12 @@
       "components": ["IdentifiedField"]
     },
     {
+      "path": "accepted/portal.tsx",
+      "expectation": "different",
+      "difference": "Portal events use native physical DOM bubbling rather than React-tree synthetic bubbling.",
+      "components": ["PortalChild", "Portal"]
+    },
+    {
       "path": "rejected/foreign-array-call.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",

@@ -1,5 +1,6 @@
 import type { VidactNode } from '@vidact/react-types'
 import { createContext, type ReactElement } from 'react'
+import { createPortal } from 'react-dom'
 
 const child: VidactNode = 'child'
 
@@ -59,6 +60,7 @@ const legacyContextProvider = (
     <strong>Owned provider child</strong>
   </Theme.Provider>
 )
+const portal = createPortal(<strong>Portal child</strong>, document.body)
 
 void nativeElements
 void customElement
@@ -68,6 +70,7 @@ void namespacedElements
 void mathElement
 void contextProvider
 void legacyContextProvider
+void portal
 
 // @ts-expect-error `href` is not a button attribute.
 const invalidAttribute = <button href="/not-a-button-link" />

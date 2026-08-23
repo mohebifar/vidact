@@ -23,6 +23,7 @@ export {
   compiledImperativeHandle,
   compiledLayoutEffect,
   compiledRoot,
+  createPortal,
   createCompiledContext,
   createCompiledEffectEvent,
   createCompiledExternalStore,

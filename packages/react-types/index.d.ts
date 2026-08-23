@@ -1,4 +1,6 @@
 import type { JSX as VidactJSX } from './jsx-runtime.d.ts'
+// oxlint-disable-next-line import/no-unassigned-import -- Register the react-dom compatibility module.
+import './react-dom.d.ts'
 
 export type { VidactNode } from './jsx-runtime.d.ts'
 
