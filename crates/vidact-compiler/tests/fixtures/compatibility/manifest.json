@@ -297,6 +297,30 @@
       "path": "accepted/imperative-handle-imports.tsx",
       "expectation": "accepted",
       "components": ["AliasedImperativeHandle", "NamespacedImperativeHandle"]
+    },
+    {
+      "path": "accepted/async-suspense.tsx",
+      "expectation": "accepted",
+      "features": ["async"],
+      "components": ["AsyncMessage", "AsyncSuspense"]
+    },
+    {
+      "path": "rejected/suspense-disabled.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "Suspense"
+    },
+    {
+      "path": "rejected/lazy-disabled.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "lazy"
+    },
+    {
+      "path": "rejected/promise-use-disabled.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "Promise.resolve"
     }
   ]
 }

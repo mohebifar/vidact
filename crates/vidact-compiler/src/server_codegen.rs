@@ -1,10 +1,14 @@
-use std::path::Path;
+use std::{collections::BTreeSet, path::Path};
 
 use oxc_allocator::Allocator;
-use oxc_ast::ast::{Class, JSXAttributeItem, JSXAttributeName, JSXElement};
+use oxc_ast::{
+    ast::{CallExpression, Class, JSXAttributeItem, JSXAttributeName, JSXElement, Program},
+    builder::AstBuilder,
+};
 use oxc_ast_visit::{
-    Visit,
-    walk::{walk_class, walk_jsx_element},
+    Visit, VisitMut,
+    walk::{walk_call_expression, walk_class, walk_jsx_element},
+    walk_mut::walk_jsx_element as walk_jsx_element_mut,
 };
 use oxc_codegen::{Codegen, CodegenOptions};
 use oxc_parser::Parser;
@@ -96,6 +100,8 @@ pub fn compile_server_module_with_options(
     let mut validator = ServerSourceValidator {
         react: &react,
         unsafe_html: options.feature_enabled(CompilerFeature::UnsafeHtml),
+        async_enabled: options.feature_enabled(CompilerFeature::Async),
+        suspense_spans: BTreeSet::new(),
         diagnostic: None,
     };
     validator.visit_program(&parsed.program);
@@ -107,6 +113,33 @@ pub fn compile_server_module_with_options(
         .map(lower_component)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|diagnostic| vec![diagnostic])?;
+    let suspense_spans = std::mem::take(&mut validator.suspense_spans);
+    drop(validator);
+    drop(react);
+    drop(semantic);
+    let mut async_transformer = ServerAsyncTransformer {
+        ast: AstBuilder::new(&allocator),
+        options,
+        suspense_spans,
+        diagnostic: None,
+    };
+    async_transformer.visit_program(&mut parsed.program);
+    if let Some(diagnostic) = async_transformer.diagnostic {
+        return Err(vec![diagnostic]);
+    }
+    let semantic = SemanticBuilder::new()
+        .with_build_nodes(true)
+        .with_check_syntax_error(true)
+        .build(&parsed.program);
+    if !semantic.diagnostics.is_empty() {
+        return Err(vec![Diagnostic::new(
+            DiagnosticCode::AnalysisFailed,
+            format!(
+                "OXC semantic analysis failed after async server lowering for {}: {:?}",
+                input.filename, semantic.diagnostics
+            ),
+        )]);
+    }
 
     let options = PluginOptions {
         output_mode: Some(CompilerOutputMode::Ssr),
@@ -148,13 +181,77 @@ pub fn compile_server_module_with_options(
     })
 }
 
+struct ServerAsyncTransformer<'a, 's> {
+    ast: AstBuilder<'a>,
+    options: &'s CompilationOptions,
+    suspense_spans: BTreeSet<u32>,
+    diagnostic: Option<Diagnostic>,
+}
+
+impl<'a> VisitMut<'a> for ServerAsyncTransformer<'a, '_> {
+    fn visit_program(&mut self, program: &mut Program<'a>) {
+        oxc_ast_visit::walk_mut::walk_program(self, program);
+    }
+
+    fn visit_jsx_element(&mut self, element: &mut JSXElement<'a>) {
+        if self.diagnostic.is_some() {
+            return;
+        }
+        if self.suspense_spans.contains(&element.span.start)
+            && let Err(diagnostic) = crate::surgical_codegen::prepare_known_suspense_element(
+                &self.ast,
+                self.options,
+                element,
+            )
+        {
+            self.diagnostic = Some(diagnostic);
+            return;
+        }
+        walk_jsx_element_mut(self, element);
+    }
+}
+
 struct ServerSourceValidator<'r, 's> {
     react: &'r ReactBindings<'s>,
     unsafe_html: bool,
+    async_enabled: bool,
+    suspense_spans: BTreeSet<u32>,
     diagnostic: Option<Diagnostic>,
 }
 
 impl<'a> Visit<'a> for ServerSourceValidator<'_, '_> {
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if self.diagnostic.is_some() {
+            return;
+        }
+        if self.react.is_lazy_call(call) && !self.async_enabled {
+            self.diagnostic = Some(
+                Diagnostic::new(
+                    DiagnosticCode::UnsupportedSyntax,
+                    "lazy requires the `async` compiler feature",
+                )
+                .with_span(SourceSpan::new(call.span.start, call.span.end)),
+            );
+            return;
+        }
+        if !self.async_enabled
+            && self.react.context_hook_call(call) == Some(crate::react_bindings::ContextHook::Use)
+            && call.arguments.len() == 1
+            && let Some(argument) = call.arguments[0].as_expression()
+            && crate::surgical_codegen::is_obvious_promise_expression(argument)
+        {
+            self.diagnostic = Some(
+                Diagnostic::new(
+                    DiagnosticCode::UnsupportedSyntax,
+                    "use(promise) requires the `async` compiler feature",
+                )
+                .with_span(SourceSpan::new(call.span.start, call.span.end)),
+            );
+            return;
+        }
+        walk_call_expression(self, call);
+    }
+
     fn visit_class(&mut self, class: &Class<'a>) {
         if self.diagnostic.is_some() {
             return;
@@ -179,6 +276,12 @@ impl<'a> Visit<'a> for ServerSourceValidator<'_, '_> {
     fn visit_jsx_element(&mut self, element: &JSXElement<'a>) {
         if self.diagnostic.is_some() {
             return;
+        }
+        if self
+            .react
+            .is_named_jsx_element(&element.opening_element.name, "Suspense")
+        {
+            self.suspense_spans.insert(element.span.start);
         }
         if !self.unsafe_html
             && let Some(attribute) = element.opening_element.attributes.iter().find_map(|item| {

@@ -143,9 +143,12 @@ export namespace JSX {
     [Name in `${string}-${string}`]: CustomElementAttributes
   }
 
-  type LibraryManagedAttributes<Component, Props> = Component extends
-    | Context<infer Value>
-    | Provider<infer Value>
-    ? { children?: VidactNode; value: Value }
-    : ReactJSX.LibraryManagedAttributes<Component, Props>
+  type LibraryManagedAttributes<Component, Props> =
+    Component extends typeof import('react').Suspense
+      ? Component extends { readonly _result: unknown }
+        ? ReactJSX.LibraryManagedAttributes<Component, Props>
+        : { children?: VidactNode; fallback: VidactNode }
+      : Component extends Context<infer Value> | Provider<infer Value>
+        ? { children?: VidactNode; value: Value }
+        : ReactJSX.LibraryManagedAttributes<Component, Props>
 }

@@ -4,6 +4,8 @@
 const SERVER_NODE = Symbol('Vidact.ServerNode')
 const SERVER_NODE_KIND = Symbol('Vidact.ServerNodeKind')
 const SERVER_CONTEXT = Symbol('Vidact.ServerContext')
+const SERVER_ASYNC_RESOURCE = Symbol('Vidact.ServerAsyncResource')
+const SERVER_SUSPENSION = Symbol('Vidact.ServerSuspension')
 
 export interface ServerNode {
   readonly [SERVER_NODE]: (context: RenderContext) => string
@@ -42,6 +44,24 @@ interface ContextState<Value> {
 export interface ServerContext<Value> {
   readonly Provider: ServerComponent
   readonly [SERVER_CONTEXT]: ContextState<Value>
+}
+
+type ServerAsyncState<Value> =
+  | { readonly status: 'pending' }
+  | { readonly status: 'fulfilled'; readonly value: Value }
+  | { readonly status: 'rejected'; readonly reason: unknown }
+
+export interface ServerAsyncResource<Value> {
+  readonly [SERVER_ASYNC_RESOURCE]: ServerAsyncState<Value>
+}
+
+type ServerSuspension = {
+  readonly [SERVER_SUSPENSION]: true
+  readonly resource: ServerAsyncResource<unknown>
+}
+
+export type ServerLazyModule<Props extends Record<string, unknown>> = {
+  readonly default: (props: Props) => ServerChild
 }
 
 const VOID_ELEMENTS = new Set([
@@ -132,6 +152,7 @@ const UNSAFE_HTML = typeof __VIDACT_UNSAFE_HTML__ !== 'undefined' && __VIDACT_UN
 
 let activeRender: RenderContext | undefined
 const serverBuiltins = new WeakSet<ServerComponent>()
+const serverPromiseResources = new WeakMap<object, ServerAsyncResource<unknown>>()
 
 export const Fragment = Symbol('Vidact.ServerFragment')
 
@@ -339,9 +360,72 @@ export function useContext<Value>(context: ServerContext<Value>): Value {
   return state.stack.length === 0 ? state.defaultValue : (state.stack.at(-1) as Value)
 }
 
-export function use<Value>(context: ServerContext<Value>): Value {
-  return useContext(context)
+export function createResource<Value>(input: PromiseLike<Value>): ServerAsyncResource<Value> {
+  if (!isPromiseLike(input)) throw new TypeError('createResource requires a promise-like value')
+  const existing = serverPromiseResources.get(input as object) as
+    | ServerAsyncResource<Value>
+    | undefined
+  if (existing !== undefined) return existing
+  let state: ServerAsyncState<Value> = { status: 'pending' }
+  const resource = {} as ServerAsyncResource<Value>
+  Object.defineProperty(resource, SERVER_ASYNC_RESOURCE, { get: () => state })
+  serverPromiseResources.set(input as object, resource as ServerAsyncResource<unknown>)
+  void Promise.resolve(input).then(
+    (value) => {
+      if (state.status === 'pending') state = { status: 'fulfilled', value }
+    },
+    (reason: unknown) => {
+      if (state.status === 'pending') state = { status: 'rejected', reason }
+    },
+  )
+  return resource
 }
+
+export function use<Value>(
+  input: ServerContext<Value> | ServerAsyncResource<Value> | PromiseLike<Value>,
+): Value {
+  if (isServerContext<Value>(input)) return useContext(input)
+  const resource = isServerAsyncResource<Value>(input) ? input : createResource(input)
+  const state = resource[SERVER_ASYNC_RESOURCE]
+  if (state.status === 'fulfilled') return state.value
+  if (state.status === 'rejected') throw state.reason
+  throw { [SERVER_SUSPENSION]: true, resource } satisfies ServerSuspension
+}
+
+export function lazy<Props extends Record<string, unknown>>(
+  load: () => PromiseLike<ServerLazyModule<Props>>,
+): ServerComponent {
+  let resource: ServerAsyncResource<ServerLazyModule<Props>> | undefined
+  return (props) => {
+    resource ??= createResource(load())
+    const module = use(resource)
+    if (typeof module?.default !== 'function') {
+      throw new TypeError('lazy loader must resolve to a default component export')
+    }
+    return module.default(props as Props)
+  }
+}
+
+export function Suspense(props: Record<string, unknown>): ServerNode {
+  const render = props.children
+  const fallback = props.fallback
+  if (typeof render !== 'function' || typeof fallback !== 'function') {
+    throw new TypeError(
+      'Suspense children and fallback must be compiler-generated render functions',
+    )
+  }
+  return serverNode((context) => {
+    try {
+      return serializeChild((render as () => ServerChild)(), context)
+    } catch (error) {
+      if (!isServerSuspension(error)) throw error
+      const pendingMarker = context.hydrationMarkers ? `<!--${HYDRATION_PREFIX}:p-->` : ''
+      return pendingMarker + serializeChild((fallback as () => ServerChild)(), context)
+    }
+  }, 'transparent')
+}
+
+serverBuiltins.add(Suspense)
 
 export function createPortal(_children: ServerChild, _container: unknown): never {
   throw new Error(
@@ -358,6 +442,25 @@ function serverNode(
 
 function isServerNode(value: unknown): value is ServerNode {
   return typeof value === 'object' && value !== null && SERVER_NODE in value
+}
+
+function isServerContext<Value>(value: unknown): value is ServerContext<Value> {
+  return typeof value === 'object' && value !== null && SERVER_CONTEXT in value
+}
+
+function isPromiseLike<Value>(value: unknown): value is PromiseLike<Value> {
+  return (
+    ((typeof value === 'object' && value !== null) || typeof value === 'function') &&
+    typeof (value as PromiseLike<Value>).then === 'function'
+  )
+}
+
+function isServerAsyncResource<Value>(value: unknown): value is ServerAsyncResource<Value> {
+  return typeof value === 'object' && value !== null && SERVER_ASYNC_RESOURCE in value
+}
+
+function isServerSuspension(value: unknown): value is ServerSuspension {
+  return typeof value === 'object' && value !== null && SERVER_SUSPENSION in value
 }
 
 function serializeChild(value: ServerChild, context: RenderContext, markScalar = true): string {

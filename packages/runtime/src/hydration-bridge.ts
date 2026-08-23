@@ -21,6 +21,8 @@ export interface HydrationOperations {
   readonly claimArrayRange: (parent: Node) => HydrationRange | undefined
   readonly finishArrayRange: (parent: Node, end: Comment) => void
   readonly claimSlotRange: (parent: Node) => HydrationRange | undefined
+  readonly claimSuspenseFallback: (parent: Node) => Comment | undefined
+  readonly withoutHydration: <Result>(operation: () => Result) => Result
   readonly withInsertion: <Result>(parent: Node, before: Node, operation: () => Result) => Result
   readonly insertionPoint: () => readonly [parent: Node, before: Node] | undefined
   readonly cursor: (parent: Node) => Node | null | undefined
@@ -121,6 +123,14 @@ export function finishHydrationArrayRange(parent: Node, end: Comment): void {
 
 export function claimHydrationSlotRange(parent: Node): HydrationRange | undefined {
   return hydration?.claimSlotRange(parent)
+}
+
+export function claimHydrationSuspenseFallback(parent: Node): Comment | undefined {
+  return hydration?.claimSuspenseFallback(parent)
+}
+
+export function withoutHydration<Result>(operation: () => Result): Result {
+  return hydration === undefined ? operation() : hydration.withoutHydration(operation)
 }
 
 export function withHydrationInsertion<Result>(

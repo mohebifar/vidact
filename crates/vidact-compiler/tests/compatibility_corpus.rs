@@ -53,6 +53,7 @@ fn verify_fixture(root: &Path, fixture: &Value) {
             let feature = match feature.as_str().expect("feature name") {
                 "unsafe-html" => CompilerFeature::UnsafeHtml,
                 "css-insertion" => CompilerFeature::CssInsertion,
+                "async" => CompilerFeature::Async,
                 feature => panic!("unknown compatibility fixture feature {feature}"),
             };
             options.with_feature(feature)

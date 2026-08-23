@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use oxc_ast::ast::{
-    CallExpression, Expression, ImportDeclarationSpecifier, ModuleExportName, Program, Statement,
+    CallExpression, Expression, ImportDeclarationSpecifier, JSXElementName,
+    JSXMemberExpressionObject, ModuleExportName, Program, Statement,
 };
 use oxc_semantic::Scoping;
 use oxc_syntax::symbol::SymbolId;
@@ -158,6 +159,10 @@ impl<'s> ReactBindings<'s> {
         self.is_named_call(call, "useSyncExternalStore")
     }
 
+    pub(crate) fn is_lazy_call(&self, call: &CallExpression<'_>) -> bool {
+        self.is_named_call(call, "lazy")
+    }
+
     pub(crate) fn is_effect_event_call(&self, call: &CallExpression<'_>) -> bool {
         self.is_named_call(call, "useEffectEvent")
     }
@@ -180,6 +185,27 @@ impl<'s> ReactBindings<'s> {
                 .get_identifier_reference()
                 .and_then(|identifier| reference_symbol(identifier, self.scoping))
                 .is_some_and(|symbol| self.namespaces.contains(&symbol)),
+            _ => false,
+        }
+    }
+
+    pub(crate) fn is_named_jsx_element(&self, element: &JSXElementName<'_>, name: &str) -> bool {
+        match element {
+            JSXElementName::IdentifierReference(identifier) => {
+                reference_symbol(identifier, self.scoping).is_some_and(|symbol| {
+                    self.named
+                        .get(name)
+                        .is_some_and(|set| set.contains(&symbol))
+                })
+            }
+            JSXElementName::MemberExpression(member) if member.property.name == name => {
+                let JSXMemberExpressionObject::IdentifierReference(identifier) = &member.object
+                else {
+                    return false;
+                };
+                reference_symbol(identifier, self.scoping)
+                    .is_some_and(|symbol| self.namespaces.contains(&symbol))
+            }
             _ => false,
         }
     }

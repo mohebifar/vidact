@@ -10,6 +10,13 @@ fn compile_unsafe_html(input: ModuleInput<'_>) -> Result<String, Vec<Diagnostic>
     )
 }
 
+fn compile_async(input: ModuleInput<'_>) -> Result<String, Vec<Diagnostic>> {
+    compile_surgical_module_with_options(
+        input,
+        &CompilationOptions::default().with_feature(CompilerFeature::Async),
+    )
+}
+
 #[test]
 fn turns_todomvc_into_one_time_construction_and_static_bindings() {
     let output = compile_surgical_module(ModuleInput {
@@ -1025,6 +1032,74 @@ fn compiles_context_reads_into_owner_scoped_slots() {
     assert!(output.contains("() => theme.get()"), "{output}");
     assert!(!output.contains("useTheme("), "{output}");
     assert!(!output.contains("React.use("), "{output}");
+}
+
+#[test]
+fn gates_and_lowers_suspense_and_promise_use_as_staged_async_work() {
+    let source = r#"
+        import { Suspense, use } from 'react';
+        const message = Promise.resolve('ready');
+        function Message(): Node {
+            const value = use(message);
+            return <strong>{value}</strong>;
+        }
+        export function AsyncApp(): Node {
+            return <Suspense fallback={<p>loading</p>}><Message /></Suspense>;
+        }
+    "#;
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "AsyncApp.tsx",
+        source,
+    })
+    .expect_err("Suspense is disabled without the async feature");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.message.contains("`async`")
+            && diagnostic.span.is_some()
+    }));
+
+    let output = compile_async(ModuleInput {
+        filename: "AsyncApp.tsx",
+        source,
+    })
+    .expect("the async feature should stage Suspense children and lower promise reads");
+    assert!(
+        output.contains("from \"@vidact/runtime/async\""),
+        "{output}"
+    );
+    assert!(
+        output.contains("createCompiledAsync as __vidactCreateAsync"),
+        "{output}"
+    );
+    assert!(
+        output.contains("fallback={() => <p>loading</p>"),
+        "{output}"
+    );
+    assert!(output.contains("{() => <><Message /></>}"), "{output}");
+}
+
+#[test]
+fn gates_lazy_at_its_call_site() {
+    let source = r#"
+        import { lazy } from 'react';
+        const Deferred = lazy(() => import('./Deferred'));
+        export function App(): Node { return <Deferred />; }
+    "#;
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "LazyApp.tsx",
+        source,
+    })
+    .expect_err("lazy is disabled without the async feature");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.message.contains("`async`")
+            && diagnostic.span.is_some()
+    }));
+    compile_async(ModuleInput {
+        filename: "LazyApp.tsx",
+        source,
+    })
+    .expect("the async feature enables lazy module factories");
 }
 
 #[test]

@@ -6,5 +6,5 @@
     "lib": ["ES2024", "ESNext.Disposable", "DOM", "DOM.Iterable"],
     "types": ["node", "vitest/globals", "@vidact/react-types"]
   },
-  "include": ["corpus/**/*.ts", "corpus/**/*.tsx", "vitest.config.ts"]
+  "include": ["corpus/**/*.ts", "corpus/**/*.tsx", "vitest*.config.ts"]
 }

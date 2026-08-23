@@ -7,6 +7,9 @@ primitives directly.
 - `@vidact/runtime`: client mounting and direct DOM operations
 - `@vidact/runtime/hydrate`: client hydration and hydration JSX runtimes
 - `@vidact/runtime/server`: deterministic string/static server rendering
+- `@vidact/runtime/async`: opt-in resources, `lazy`, and staged Suspense
+- `@vidact/runtime/async/hydrate`: async hydration and pending fallback claiming
+- `@vidact/runtime/async/server`: deterministic async server boundaries
 - `@vidact/runtime/testing`: deterministic runtime queue draining
 
 The compiler and runtime validate the `vidact-runtime-v1` protocol. Server and

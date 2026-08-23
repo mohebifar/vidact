@@ -54,6 +54,7 @@ const COMPILED_LAYOUT_EFFECT: &str = "__vidactLayoutEffect";
 const COMPILED_SPREAD: &str = "__vidactSpread";
 const COMPILED_ROOT: &str = "__vidactCompiledRoot";
 const CHOOSE: &str = "__vidactChoose";
+const CREATE_ASYNC: &str = "__vidactCreateAsync";
 const CREATE_CONTEXT: &str = "__vidactCreateContext";
 const CREATE_EXTERNAL_STORE: &str = "__vidactCreateExternalStore";
 const CREATE_EFFECT_EVENT: &str = "__vidactCreateEffectEvent";
@@ -239,6 +240,7 @@ fn transform_program<'a>(
         COMPILED_SPREAD,
         COMPILED_ROOT,
         CHOOSE,
+        CREATE_ASYNC,
         CREATE_CONTEXT,
         CREATE_EXTERNAL_STORE,
         CREATE_EFFECT_EVENT,
@@ -275,7 +277,7 @@ fn transform_program<'a>(
         transform_component(allocator, scoping, component, options, program)
             .map_err(|diagnostic| diagnostic.with_fallback_span(component.span))?;
     }
-    remove_lowered_react_state_imports(scoping, program)?;
+    remove_lowered_react_state_imports(scoping, options, program)?;
     let import = runtime_import(&ast, program, options);
     program.body.insert(0, import);
     Ok(())
@@ -283,6 +285,7 @@ fn transform_program<'a>(
 
 fn remove_lowered_react_state_imports(
     scoping: &Scoping,
+    options: &CompilationOptions,
     program: &mut Program<'_>,
 ) -> Result<(), Diagnostic> {
     let react = ReactBindings::new(program, scoping);
@@ -292,6 +295,8 @@ fn remove_lowered_react_state_imports(
         live_symbols: BTreeSet::new(),
         remaining_state_call: None,
         remaining_compiled_hook_call: None,
+        async_enabled: options.feature_enabled(CompilerFeature::Async),
+        remaining_lazy_call: None,
     };
     usage.visit_program(program);
     if let Some(span) = usage.remaining_state_call {
@@ -305,6 +310,10 @@ fn remove_lowered_react_state_imports(
             "{name} is only supported in direct compiled component declarations"
         ))
         .with_span(SourceSpan::new(span.start, span.end)));
+    }
+    if let Some(span) = usage.remaining_lazy_call {
+        return Err(unsupported("lazy requires the `async` compiler feature")
+            .with_span(SourceSpan::new(span.start, span.end)));
     }
 
     let mut empty_imports = Vec::new();
@@ -371,10 +380,16 @@ struct PostTransformReactUsage<'r, 's> {
     live_symbols: BTreeSet<SymbolId>,
     remaining_state_call: Option<Span>,
     remaining_compiled_hook_call: Option<(&'static str, Span)>,
+    async_enabled: bool,
+    remaining_lazy_call: Option<Span>,
 }
 
 impl<'a> Visit<'a> for PostTransformReactUsage<'_, '_> {
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if self.react.is_lazy_call(call) && !self.async_enabled {
+            self.remaining_lazy_call.get_or_insert(call.span);
+            return;
+        }
         if self.react.state_hook_call(call).is_some() {
             self.remaining_state_call.get_or_insert(call.span);
             return;
@@ -385,6 +400,10 @@ impl<'a> Visit<'a> for PostTransformReactUsage<'_, '_> {
             return;
         }
         if let Some(hook) = self.react.context_hook_call(call) {
+            if hook == ContextHook::Use {
+                walk_call_expression(self, call);
+                return;
+            }
             self.remaining_compiled_hook_call
                 .get_or_insert((hook.name(), call.span));
             return;
@@ -623,7 +642,7 @@ fn transform_component<'a>(
                 &source_symbols,
                 &item_source_symbols,
             )?;
-            transform_context_declarator(&ast, declarator, &source_ids, &react)?;
+            transform_context_declarator(&ast, declarator, &source_ids, &react, options)?;
             transform_external_store_declarator(
                 &ast,
                 declarator,
@@ -1272,8 +1291,9 @@ fn transform_context_declarator<'a>(
     declarator: &mut VariableDeclarator<'a>,
     sources: &BTreeMap<&str, SourceId>,
     react: &ReactBindings<'_>,
+    options: &CompilationOptions,
 ) -> Result<(), Diagnostic> {
-    let Some((_, value)) = context_binding_symbol(declarator, sources, react)? else {
+    let Some((hook, value)) = context_binding_symbol(declarator, sources, react)? else {
         return Ok(());
     };
     let Some(Expression::CallExpression(hook_call)) = &declarator.init else {
@@ -1289,12 +1309,51 @@ fn transform_context_declarator<'a>(
         .as_expression()
         .expect("spread arguments were rejected")
         .clone_in_with_semantic_ids(ast.allocator());
+    if hook == ContextHook::Use
+        && !options.feature_enabled(CompilerFeature::Async)
+        && is_obvious_promise_expression(&context)
+    {
+        return Err(
+            unsupported("use(promise) requires the `async` compiler feature")
+                .with_span(SourceSpan::new(hook_call.span.start, hook_call.span.end)),
+        );
+    }
     declarator.init = Some(call_name(
         ast,
-        CREATE_CONTEXT,
+        if hook == ContextHook::Use && options.feature_enabled(CompilerFeature::Async) {
+            CREATE_ASYNC
+        } else {
+            CREATE_CONTEXT
+        },
         [ident(ast, SCOPE), mask(ast, &[value.source]), context],
     ));
     Ok(())
+}
+
+pub(super) fn is_obvious_promise_expression(expression: &Expression<'_>) -> bool {
+    match expression.without_parentheses() {
+        Expression::NewExpression(expression) => expression
+            .callee
+            .get_identifier_reference()
+            .is_some_and(|identifier| identifier.name == "Promise"),
+        Expression::CallExpression(expression) => {
+            let Expression::StaticMemberExpression(member) =
+                expression.callee.without_parentheses()
+            else {
+                return false;
+            };
+            member
+                .object
+                .without_parentheses()
+                .get_identifier_reference()
+                .is_some_and(|identifier| identifier.name == "Promise")
+                && matches!(
+                    member.property.name.as_str(),
+                    "resolve" | "reject" | "all" | "allSettled" | "any" | "race"
+                )
+        }
+        _ => false,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1514,8 +1573,109 @@ enum ReactiveSpreadKind {
     Intrinsic,
 }
 
+pub(super) fn prepare_suspense_element<'a>(
+    ast: &AstBuilder<'a>,
+    react: &ReactBindings<'_>,
+    options: &CompilationOptions,
+    element: &mut JSXElement<'a>,
+) -> Result<(), Diagnostic> {
+    if !react.is_named_jsx_element(&element.opening_element.name, "Suspense") {
+        return Ok(());
+    }
+    prepare_known_suspense_element(ast, options, element)
+}
+
+pub(super) fn prepare_known_suspense_element<'a>(
+    ast: &AstBuilder<'a>,
+    options: &CompilationOptions,
+    element: &mut JSXElement<'a>,
+) -> Result<(), Diagnostic> {
+    if !options.feature_enabled(CompilerFeature::Async) {
+        return Err(
+            unsupported("Suspense requires the `async` compiler feature")
+                .with_span(SourceSpan::new(element.span.start, element.span.end)),
+        );
+    }
+    let Some(fallback) = element
+        .opening_element
+        .attributes
+        .iter_mut()
+        .find_map(|item| {
+            let JSXAttributeItem::Attribute(attribute) = item else {
+                return None;
+            };
+            matches!(
+                &attribute.name,
+                JSXAttributeName::Identifier(name) if name.name == "fallback"
+            )
+            .then_some(attribute)
+        })
+    else {
+        return Err(
+            unsupported("Suspense requires a fallback prop").with_span(SourceSpan::new(
+                element.opening_element.span.start,
+                element.opening_element.span.end,
+            )),
+        );
+    };
+    let Some(fallback_value) = fallback.value.as_ref() else {
+        return Err(unsupported("Suspense fallback must have a value")
+            .with_span(SourceSpan::new(fallback.span.start, fallback.span.end)));
+    };
+    let fallback_expression = match fallback_value {
+        JSXAttributeValue::StringLiteral(value) => {
+            Expression::StringLiteral(value.clone_in_with_semantic_ids(ast.allocator()))
+        }
+        JSXAttributeValue::ExpressionContainer(container) => {
+            let Some(expression) = container.expression.as_expression() else {
+                return Err(unsupported("Suspense fallback must have a value")
+                    .with_span(SourceSpan::new(container.span.start, container.span.end)));
+            };
+            expression.clone_in_with_semantic_ids(ast.allocator())
+        }
+        JSXAttributeValue::Element(value) => {
+            Expression::JSXElement(value.clone_in_with_semantic_ids(ast.allocator()))
+        }
+        JSXAttributeValue::Fragment(value) => {
+            Expression::JSXFragment(value.clone_in_with_semantic_ids(ast.allocator()))
+        }
+    };
+    fallback.value = Some(JSXAttributeValue::ExpressionContainer(
+        JSXExpressionContainer::boxed(
+            SPAN,
+            JSXExpression::from(arrow_expression(ast, [], fallback_expression)),
+            ast,
+        ),
+    ));
+
+    let children = element.children.clone_in_with_semantic_ids(ast.allocator());
+    let fragment = Expression::JSXFragment(JSXFragment::boxed(
+        SPAN,
+        JSXOpeningFragment::new(SPAN, ast),
+        children,
+        JSXClosingFragment::new(SPAN, ast),
+        ast,
+    ));
+    element.children.clear();
+    element.children.push(JSXChild::ExpressionContainer(
+        JSXExpressionContainer::boxed(
+            SPAN,
+            JSXExpression::from(arrow_expression(ast, [], fragment)),
+            ast,
+        ),
+    ));
+    Ok(())
+}
+
 impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
     fn visit_call_expression(&mut self, call: &mut CallExpression<'a>) {
+        if self.react.is_lazy_call(call) && !self.options.feature_enabled(CompilerFeature::Async) {
+            self.diagnostic = Some(
+                unsupported("lazy requires the `async` compiler feature")
+                    .with_span(SourceSpan::new(call.span.start, call.span.end)),
+            );
+            return;
+        }
         if let Some(effect) = self.react.effect_hook_call(call) {
             if effect == EffectHook::Insertion
                 && !self.options.feature_enabled(CompilerFeature::CssInsertion)
@@ -1730,6 +1890,12 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
     }
 
     fn visit_jsx_element(&mut self, element: &mut JSXElement<'a>) {
+        if let Err(diagnostic) =
+            prepare_suspense_element(self.ast, self.react, self.options, element)
+        {
+            self.diagnostic = Some(diagnostic);
+            return;
+        }
         if !self.options.feature_enabled(CompilerFeature::UnsafeHtml)
             && let Some(span) = raw_html::attribute_span(element)
         {
@@ -3091,6 +3257,7 @@ fn runtime_import<'a>(
         ("compiledSpread", COMPILED_SPREAD),
         ("compiledRoot", COMPILED_ROOT),
         ("choose", CHOOSE),
+        ("createCompiledAsync", CREATE_ASYNC),
         ("createCompiledContext", CREATE_CONTEXT),
         ("createCompiledExternalStore", CREATE_EXTERNAL_STORE),
         ("createCompiledEffectEvent", CREATE_EFFECT_EVENT),
@@ -3132,10 +3299,14 @@ fn runtime_import<'a>(
         Some(specifiers),
         StringLiteral::new(
             SPAN,
-            if options.target() == crate::CompilerTarget::Hydrate {
-                "@vidact/runtime/hydrate"
-            } else {
-                "@vidact/runtime"
+            match (
+                options.feature_enabled(CompilerFeature::Async),
+                options.target() == crate::CompilerTarget::Hydrate,
+            ) {
+                (true, true) => "@vidact/runtime/async/hydrate",
+                (true, false) => "@vidact/runtime/async",
+                (false, true) => "@vidact/runtime/hydrate",
+                (false, false) => "@vidact/runtime",
             },
             None,
             ast,

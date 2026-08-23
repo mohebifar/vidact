@@ -1,10 +1,13 @@
 /** @jsxImportSource @vidact/runtime/server */
 
 import {
+  Suspense,
   createPortal,
   createContext,
+  lazy,
   renderToStaticMarkup,
   renderToString,
+  use as useAsync,
   useId,
   useContext,
   useState,
@@ -89,5 +92,50 @@ describe('server rendering', () => {
     expect(() => renderToString(() => createPortal('content', {}))).toThrow(
       'portals cannot be emitted by the server target',
     )
+  })
+
+  it('renders deterministic async fallbacks and fulfilled resources', async () => {
+    let resolve!: (value: string) => void
+    const pending = new Promise<string>((resolvePromise) => {
+      resolve = resolvePromise
+    })
+    const AsyncMessage = (): ServerChild => <strong>{useAsync(pending)}</strong>
+    const boundary = () =>
+      Suspense({
+        children: () => <AsyncMessage />,
+        fallback: () => <p>loading</p>,
+      })
+
+    expect(renderToStaticMarkup(boundary)).toBe('<p>loading</p>')
+    resolve('ready')
+    await pending
+    await Promise.resolve()
+    expect(renderToStaticMarkup(boundary)).toBe('<strong>ready</strong>')
+  })
+
+  it('deduplicates lazy module work across server boundary attempts', async () => {
+    let resolve!: (module: { default: () => ServerChild }) => void
+    const module = new Promise<{ default: () => ServerChild }>((resolvePromise) => {
+      resolve = resolvePromise
+    })
+    let loads = 0
+    const Lazy = lazy(() => {
+      loads += 1
+      return module
+    })
+    const boundary = () =>
+      Suspense({
+        children: () => <Lazy />,
+        fallback: () => 'pending',
+      })
+
+    expect(renderToStaticMarkup(boundary)).toBe('pending')
+    expect(renderToStaticMarkup(boundary)).toBe('pending')
+    expect(loads).toBe(1)
+    resolve({ default: () => <em>loaded</em> })
+    await module
+    await Promise.resolve()
+    expect(renderToStaticMarkup(boundary)).toBe('<em>loaded</em>')
+    expect(loads).toBe(1)
   })
 })

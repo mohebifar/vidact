@@ -75,7 +75,7 @@ impl<'a> VisitMut<'a> for NamespaceTransformer<'a, '_> {
         let tag = super::raw_html::intrinsic_jsx_name(&element.opening_element.name)
             .filter(|name| name.chars().next().is_some_and(char::is_lowercase));
         let is_component = tag.is_none();
-        if is_component {
+        if is_component && !is_compiler_suspense(element) {
             for child in &mut element.children {
                 defer_child(self.ast, child);
             }
@@ -106,6 +106,32 @@ impl<'a> VisitMut<'a> for NamespaceTransformer<'a, '_> {
         walk_jsx_element(self, element);
         self.context = previous;
     }
+}
+
+fn is_compiler_suspense(element: &JSXElement<'_>) -> bool {
+    let has_fallback_factory = element.opening_element.attributes.iter().any(|item| {
+        let JSXAttributeItem::Attribute(attribute) = item else {
+            return false;
+        };
+        attribute.is_identifier("fallback")
+            && matches!(
+                attribute.value.as_ref(),
+                Some(JSXAttributeValue::ExpressionContainer(container))
+                    if matches!(
+                        container.expression.as_expression(),
+                        Some(Expression::ArrowFunctionExpression(_))
+                    )
+            )
+    });
+    has_fallback_factory
+        && matches!(
+            element.children.as_slice(),
+            [JSXChild::ExpressionContainer(container)]
+                if matches!(
+                    container.expression.as_expression(),
+                    Some(Expression::ArrowFunctionExpression(_))
+                )
+        )
 }
 
 fn defer_child<'a>(ast: &AstBuilder<'a>, child: &mut JSXChild<'a>) {

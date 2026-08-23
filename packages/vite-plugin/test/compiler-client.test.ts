@@ -22,6 +22,13 @@ function transformHook(options: Parameters<typeof vidact>[0]): TransformHook {
   return Reflect.get(plugin, 'transform') as TransformHook
 }
 
+function virtualReactModule(options: Parameters<typeof vidact>[0]): string {
+  const plugin = vidact(options)
+  const resolve = Reflect.get(plugin, 'resolveId') as (source: string) => string | null
+  const load = Reflect.get(plugin, 'load') as (id: string) => string | null
+  return load(resolve('react')!)!
+}
+
 describe('vidact compiler client', () => {
   it('returns the Rust compiler analysis protocol for TSX arrays', async () => {
     const analysis = await analyzeWithCompiler(
@@ -112,6 +119,18 @@ describe('vidact compiler client', () => {
     expect(compilation.configuration.target).toBe('hydrate')
     expect(compilation.code).toContain('from "@vidact/runtime/hydrate"')
     expect(compilation.code).not.toContain('from "@vidact/runtime"')
+  })
+
+  it('selects isolated async React facades for every compiler target', () => {
+    expect(virtualReactModule({ features: ['async'] })).toContain('@vidact/runtime/async"')
+    expect(virtualReactModule({ target: 'hydrate', features: ['async'] })).toContain(
+      '@vidact/runtime/async/hydrate',
+    )
+    expect(virtualReactModule({ target: 'server', features: ['async'] })).toContain(
+      '@vidact/runtime/async/server',
+    )
+    expect(virtualReactModule({ features: ['async'] })).toContain('Suspense, lazy')
+    expect(virtualReactModule({})).not.toContain('Suspense, lazy')
   })
 
   it('fingerprints compiler, runtime, target, features, environment, and source inputs', () => {

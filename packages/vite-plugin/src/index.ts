@@ -108,9 +108,21 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
     },
     load(id) {
       if (id === REACT_MODULE) {
+        const clientRuntime = `@vidact/runtime${
+          configuration.features.includes('async')
+            ? configuration.target === 'hydrate'
+              ? '/async/hydrate'
+              : '/async'
+            : configuration.target === 'hydrate'
+              ? '/hydrate'
+              : ''
+        }`
+        const serverRuntime = configuration.features.includes('async')
+          ? '@vidact/runtime/async/server'
+          : '@vidact/runtime/server'
         return configuration.target === 'server'
-          ? 'export { createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "@vidact/runtime/server"'
-          : `export { createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "@vidact/runtime${configuration.target === 'hydrate' ? '/hydrate' : ''}"`
+          ? `export { ${configuration.features.includes('async') ? 'Suspense, lazy, ' : ''}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "${serverRuntime}"`
+          : `export { ${configuration.features.includes('async') ? 'Suspense, lazy, ' : ''}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "${clientRuntime}"`
       }
       return id === REACT_DOM_MODULE
         ? configuration.target === 'server'

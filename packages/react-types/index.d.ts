@@ -4,6 +4,12 @@ import './react-dom.d.ts'
 
 export type { VidactNode } from './jsx-runtime.d.ts'
 
+declare module 'react' {
+  export function lazy<Component extends (props: never) => import('./jsx-runtime.d.ts').VidactNode>(
+    load: () => PromiseLike<{ default: Component }>,
+  ): Component
+}
+
 declare global {
   namespace JSX {
     type Element = VidactJSX.Element

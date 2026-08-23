@@ -21,6 +21,10 @@ vidact({
 })
 ```
 
+Use `features: ['async']` to enable compiler-staged `Suspense`, `lazy`, and
+`use(promise)`. The plugin selects isolated async client, hydrate, or server
+runtime entries; disabled syntax receives a source-located diagnostic.
+
 For production installs, pass `compilerPath` to a version-matched `vidactc`
 artifact. Workspace development builds `target/debug/vidactc` once per process
 and invokes that executable directly for subsequent transforms.

@@ -259,6 +259,25 @@ export function claimHydrationSlotRange(parent: Node): HydrationRange | undefine
   return [start, end]
 }
 
+export function claimHydrationSuspenseFallback(parent: Node): Comment | undefined {
+  const state = activeHydration
+  if (state === undefined) return undefined
+  const marker = cursor(state, parent)
+  if (!isMarker(marker, `${HYDRATION_PREFIX}:p`)) return undefined
+  setHydrationCursor(state, parent, marker.nextSibling)
+  return marker
+}
+
+export function withoutHydration<Result>(operation: () => Result): Result {
+  const previous = activeHydration
+  activeHydration = undefined
+  try {
+    return operation()
+  } finally {
+    activeHydration = previous
+  }
+}
+
 export function withHydrationInsertion<Result>(
   parent: Node,
   before: Node,
@@ -378,6 +397,12 @@ function scanRanges(host: ParentNode): {
   if ([...stacks.values()].some((stack) => stack.length !== 0)) {
     throw mismatch('unclosed vidact:v1 hydration marker')
   }
+  components.sort(([left], [right]) => {
+    const position = left.compareDocumentPosition(right)
+    if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1
+    if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1
+    return 0
+  })
   return { roots, components }
 }
 
@@ -445,6 +470,8 @@ export function installHydration(): void {
     claimArrayRange: claimHydrationArrayRange,
     finishArrayRange: finishHydrationArrayRange,
     claimSlotRange: claimHydrationSlotRange,
+    claimSuspenseFallback: claimHydrationSuspenseFallback,
+    withoutHydration,
     withInsertion: withHydrationInsertion,
     insertionPoint: hydrationInsertionPoint,
     cursor: hydrationCursor,

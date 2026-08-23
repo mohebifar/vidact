@@ -11,6 +11,7 @@ import {
   claimHydrationComponentRange,
   claimHydrationNode,
   claimHydrationSlotRange,
+  claimHydrationSuspenseFallback,
   claimHydrationText,
   claimHydrationTextRange,
   hydrationRangeParent,
@@ -23,6 +24,7 @@ import {
   isHydrating,
   isHydrationMismatch,
   noteHydrationStructuralParent,
+  withoutHydration,
   withHydrationInsertion,
   withHydrationCursor,
 } from './hydration-bridge.ts'
@@ -37,6 +39,8 @@ const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 const BINDING = Symbol(DEV ? 'Vidact.Binding' : undefined)
 const STRUCTURAL = Symbol(DEV ? 'Vidact.StructuralBinding' : undefined)
 const CONTEXT = Symbol(DEV ? 'Vidact.Context' : undefined)
+const ASYNC_RESOURCE = Symbol(DEV ? 'Vidact.AsyncResource' : undefined)
+const SUSPENSION = Symbol(DEV ? 'Vidact.Suspension' : undefined)
 export const COMPONENT_SPREAD_SOURCE = Symbol(DEV ? 'Vidact.ComponentSpreadSource' : undefined)
 const noop = (): void => {}
 
@@ -70,6 +74,32 @@ type Owner = [
   rootIdentity: RootIdentity,
   errorBoundary: ErrorBoundaryHandler | null,
 ]
+
+type AsyncResourceState<Value> = {
+  status: 'pending' | 'fulfilled' | 'rejected'
+  value: Value | undefined
+  reason: unknown
+  readonly listeners: Set<() => void>
+  readonly cancel: (() => void) | undefined
+  subscribers: number
+}
+
+export interface AsyncResource<Value> {
+  readonly [ASYNC_RESOURCE]: AsyncResourceState<Value>
+}
+
+export interface ResourceOptions {
+  readonly cancel?: () => void
+}
+
+type Suspension = {
+  readonly [SUSPENSION]: true
+  readonly resource: AsyncResource<unknown>
+}
+
+export type LazyModule<Props extends Record<string, unknown>> = {
+  readonly default: (props: Props) => CompiledRenderValue
+}
 
 type CompiledUpdater = [
   reads: SourceMask,
@@ -251,6 +281,118 @@ export function errorBoundary(
   ]
 }
 
+export function suspense(
+  render: () => CompiledRenderValue,
+  fallback: () => CompiledRenderValue,
+): StructuralBinding {
+  noteHydrationStructuralParent()
+  const context = activeContextFrame ?? activeOwner?.[2] ?? null
+  const rootIdentity = activeOwner?.[3] ?? activeRootIdentity
+  if (rootIdentity === null) {
+    throw new Error(DEV ? 'Suspense must run during compiled root construction' : 'V032')
+  }
+  const parentErrorBoundary = activeOwner?.[4] ?? null
+  let mounted = false
+  return [
+    STRUCTURAL,
+    (parent, before) => {
+      if (mounted) throw new Error(DEV ? 'compiled Suspense boundary is already mounted' : 'V008')
+      mounted = true
+      const lifetimeOwner = activeOwner
+      if (lifetimeOwner === null) {
+        throw new Error(DEV ? 'Suspense must mount inside an owned compiled root' : 'V032')
+      }
+      const hydratedRange = claimHydrationSlotRange(parent)
+      const start = hydratedRange?.[0] ?? document.createComment(DEV ? 'vidact:suspense' : '')
+      const end = hydratedRange?.[1] ?? document.createComment(DEV ? '/vidact:suspense' : '')
+      if (hydratedRange === undefined) {
+        parent.insertBefore(start, before)
+        parent.insertBefore(end, before)
+      }
+      const pendingMarker =
+        hydratedRange === undefined ? undefined : claimHydrationSuspenseFallback(parent)
+      let currentOwner: Owner | null = null
+      let currentNodes: readonly Node[] = []
+      let currentKind: 'content' | 'fallback' | null = null
+      let removeResourceListener = noop
+      let generation = 0
+
+      const publish = (
+        read: () => CompiledRenderValue,
+        kind: 'content' | 'fallback',
+        detachedHydrationProbe = false,
+      ): void => {
+        const currentParent = rangeParent(start, end, 'Suspense boundary')
+        const nextOwner = createOwner(context, rootIdentity, parentErrorBoundary)
+        const serverNodes = detachedHydrationProbe ? nodesBetween(start, end) : []
+        const [fragment, nodes] = detachedHydrationProbe
+          ? withoutHydration(() => stageRender(read, nextOwner))
+          : hydratedRange === undefined || currentKind !== null
+            ? stageRender(read, nextOwner)
+            : withHydrationInsertion(currentParent, end, () => stageRender(read, nextOwner))
+        try {
+          currentParent.insertBefore(fragment, end)
+          commitPublishedNodes(nodes)
+        } catch (error) {
+          disposePublished(nextOwner, nodes)
+          throw error
+        }
+        const previousOwner = currentOwner
+        const previousNodes = currentNodes
+        currentOwner = nextOwner
+        currentNodes = nodes
+        currentKind = kind
+        disposePublished(previousOwner, previousNodes)
+        for (const node of serverNodes) node.parentNode?.removeChild(node)
+      }
+
+      const attempt = (initial: boolean): void => {
+        const attemptGeneration = ++generation
+        removeResourceListener()
+        removeResourceListener = noop
+        try {
+          publish(render, 'content', initial && pendingMarker !== undefined)
+        } catch (error) {
+          if (!isSuspension(error)) {
+            if (initial || !routeOwnerError(lifetimeOwner, error)) throw error
+            return
+          }
+          const retry = (): void => {
+            if (lifetimeOwner[0] || attemptGeneration !== generation) return
+            runOwnerTask(lifetimeOwner, () => attempt(false))
+          }
+          removeResourceListener = subscribeResource(error.resource, retry)
+          if (currentKind !== 'fallback') {
+            try {
+              publish(fallback, 'fallback')
+              if (pendingMarker !== undefined) {
+                currentNodes = [pendingMarker, ...currentNodes]
+              }
+            } catch (fallbackError) {
+              removeResourceListener()
+              removeResourceListener = noop
+              throw fallbackError
+            }
+          }
+        }
+      }
+
+      attempt(true)
+      onCleanup(() => {
+        generation += 1
+        removeResourceListener()
+        try {
+          disposePublished(currentOwner, currentNodes)
+        } finally {
+          start.remove()
+          end.remove()
+        }
+      })
+    },
+    'slot',
+  ]
+}
+
 export function createPortal(
   children: CompiledRenderValue | readonly CompiledRenderValue[],
   container: ParentNode,
@@ -369,6 +511,7 @@ const componentCommitOwners = new WeakMap<Comment, Owner>()
 const pendingInsertionCommits = new WeakMap<Owner, Set<() => void>>()
 const pendingOwnerCommits = new WeakMap<Owner, Set<() => void>>()
 const pendingRootPortals = new WeakMap<RootIdentity, Set<PortalPublication>>()
+const promiseResources = new WeakMap<object, AsyncResource<unknown>>()
 
 export function createCompiledScope(): CompiledScope {
   return createScope(wideSourceOperations)
@@ -651,6 +794,79 @@ export function useContext<T>(context: CompiledContext<T>): T {
 
 export function use<T>(context: CompiledContext<T>): T {
   return useContext(context)
+}
+
+export function createResource<Value>(
+  input: PromiseLike<Value>,
+  options: ResourceOptions = {},
+): AsyncResource<Value> {
+  if (!isPromiseLike(input)) {
+    throw new TypeError(DEV ? 'createResource requires a promise-like value' : 'V029')
+  }
+  const existing = promiseResources.get(input as object) as AsyncResource<Value> | undefined
+  if (existing !== undefined) return existing
+  const state: AsyncResourceState<Value> = {
+    status: 'pending',
+    value: undefined,
+    reason: undefined,
+    listeners: new Set(),
+    cancel: options.cancel,
+    subscribers: 0,
+  }
+  const resource: AsyncResource<Value> = { [ASYNC_RESOURCE]: state }
+  promiseResources.set(input as object, resource as AsyncResource<unknown>)
+  void Promise.resolve(input).then(
+    (value) => settleResource(state, 'fulfilled', value),
+    (reason: unknown) => settleResource(state, 'rejected', reason),
+  )
+  return resource
+}
+
+export function useAsync<Value>(
+  input: CompiledContext<Value> | AsyncResource<Value> | PromiseLike<Value>,
+): Value {
+  if (isCompiledContext<Value>(input)) return useContext(input)
+  return readResource(
+    isAsyncResource<Value>(input) ? input : createResource(input as PromiseLike<Value>),
+  )
+}
+
+export function createCompiledAsync<Value>(
+  scope: CompiledScope,
+  sourceMask: SourceMask,
+  input: CompiledContext<Value> | AsyncResource<Value> | PromiseLike<Value>,
+): StateSlot<Value> {
+  if (isCompiledContext<Value>(input)) return createCompiledContext(scope, sourceMask, input)
+  return createCompiledState(scope, sourceMask, useAsync(input))
+}
+
+export function lazy<Props extends Record<string, unknown>>(
+  load: () => PromiseLike<LazyModule<Props>>,
+): (props: Props) => CompiledRenderValue {
+  let resource: AsyncResource<LazyModule<Props>> | undefined
+  return (props) => {
+    resource ??= createResource(load())
+    const module = readResource(resource)
+    if (typeof module?.default !== 'function') {
+      throw new TypeError(DEV ? 'lazy loader must resolve to a default component export' : 'V030')
+    }
+    return module.default(props)
+  }
+}
+
+export function Suspense(props: {
+  readonly children?: (() => CompiledRenderValue) | readonly [() => CompiledRenderValue] | undefined
+  readonly fallback: () => CompiledRenderValue
+}): StructuralBinding {
+  const render = Array.isArray(props.children) ? props.children[0] : props.children
+  if (typeof render !== 'function' || typeof props.fallback !== 'function') {
+    throw new TypeError(
+      DEV
+        ? `Suspense children and fallback must be compiler-generated render functions; received ${typeof render} and ${typeof props.fallback}`
+        : 'V031',
+    )
+  }
+  return suspense(render, props.fallback)
 }
 
 export function useSyncExternalStore<T>(
@@ -2279,6 +2495,14 @@ function removeBetween(start: Node, end: Node): void {
   }
 }
 
+function nodesBetween(start: Node, end: Node): Node[] {
+  const nodes: Node[] = []
+  for (let node = start.nextSibling; node !== null && node !== end; node = node.nextSibling) {
+    nodes.push(node)
+  }
+  return nodes
+}
+
 function rangeParent(start: Node, end: Node, description: string): Node {
   const parent = end.parentNode
   if (parent === null || start.parentNode !== parent) {
@@ -2566,6 +2790,64 @@ function routeOwnerError(owner: Owner | null, failure: unknown): boolean {
   if (onUncaughtError === undefined) return false
   onUncaughtError(error)
   return true
+}
+
+function isCompiledContext<Value>(value: unknown): value is CompiledContext<Value> {
+  return typeof value === 'function' && CONTEXT in value
+}
+
+function isPromiseLike<Value>(value: unknown): value is PromiseLike<Value> {
+  return (
+    ((typeof value === 'object' && value !== null) || typeof value === 'function') &&
+    typeof (value as PromiseLike<Value>).then === 'function'
+  )
+}
+
+function isAsyncResource<Value>(value: unknown): value is AsyncResource<Value> {
+  return typeof value === 'object' && value !== null && ASYNC_RESOURCE in value
+}
+
+function isSuspension(value: unknown): value is Suspension {
+  return typeof value === 'object' && value !== null && SUSPENSION in value
+}
+
+function readResource<Value>(resource: AsyncResource<Value>): Value {
+  const state = resource[ASYNC_RESOURCE]
+  if (state.status === 'fulfilled') return state.value as Value
+  if (state.status === 'rejected') throw state.reason
+  throw { [SUSPENSION]: true, resource } satisfies Suspension
+}
+
+function subscribeResource(resource: AsyncResource<unknown>, listener: () => void): () => void {
+  const state = resource[ASYNC_RESOURCE]
+  if (state.status !== 'pending') {
+    queueMicrotask(listener)
+    return noop
+  }
+  let active = true
+  state.subscribers += 1
+  state.listeners.add(listener)
+  return () => {
+    if (!active) return
+    active = false
+    if (state.listeners.delete(listener)) state.subscribers -= 1
+    if (state.status === 'pending' && state.subscribers === 0) state.cancel?.()
+  }
+}
+
+function settleResource<Value>(
+  state: AsyncResourceState<Value>,
+  status: 'fulfilled' | 'rejected',
+  result: Value | unknown,
+): void {
+  if (state.status !== 'pending') return
+  state.status = status
+  if (status === 'fulfilled') state.value = result as Value
+  else state.reason = result
+  const listeners = [...state.listeners]
+  state.listeners.clear()
+  state.subscribers = 0
+  for (const listener of listeners) listener()
 }
 
 function abortPublication(operations: readonly PublicationOperation[]): void {

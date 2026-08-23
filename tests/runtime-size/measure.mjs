@@ -10,6 +10,12 @@ const repository = path.resolve(directory, '../..')
 const fixtures = [
   { name: 'counter', entry: path.join(directory, 'fixtures/counter.tsx'), gzipBudget: 8_069 },
   {
+    name: 'async-unused',
+    entry: path.join(directory, 'fixtures/counter.tsx'),
+    features: ['async'],
+    gzipBudget: 8_069,
+  },
+  {
     name: 'control-flow',
     entry: path.join(directory, 'fixtures/control-flow.tsx'),
     gzipBudget: 8_498,
@@ -37,6 +43,16 @@ const regressions = measurements.flatMap((measurement, index) => {
     ? [`${fixture.name}: ${measurement.gzip} B > ${fixture.gzipBudget} B`]
     : []
 })
+const counter = measurements.find((measurement) => measurement.fixture === 'counter')
+const asyncUnused = measurements.find((measurement) => measurement.fixture === 'async-unused')
+if (
+  counter === undefined ||
+  asyncUnused === undefined ||
+  counter.minified !== asyncUnused.minified ||
+  counter.gzip !== asyncUnused.gzip
+) {
+  regressions.push('enabling unused async changed the counter client artifact size')
+}
 if (regressions.length > 0) {
   throw new Error(`gzip budget exceeded:\n${regressions.join('\n')}`)
 }
@@ -46,7 +62,9 @@ async function measureFixture(fixture) {
     root: directory,
     configFile: false,
     logLevel: 'silent',
-    plugins: [vidact({ manifestPath: '../../Cargo.toml' })],
+    plugins: [
+      vidact({ manifestPath: '../../Cargo.toml', features: fixture.features ?? [] }),
+    ],
     build: {
       write: false,
       minify: 'oxc',

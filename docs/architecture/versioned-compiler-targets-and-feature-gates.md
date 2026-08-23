@@ -77,11 +77,12 @@ Compiler targets and features are now real build inputs rather than permissive
 metadata. Implementing another gated family requires a compiler-side semantic
 check and compatibility fixtures for both disabled and enabled behavior.
 
-Only `unsafe-html` consumes a feature flag today. The other accepted names are
-reserved configuration values whose corresponding syntax remains unsupported;
-transporting them does not claim runtime parity. Likewise, `hydrate` and
-`server` are distinct cache/protocol inputs but do not yet provide hydration or
-SSR lowering.
+`unsafe-html`, `css-insertion`, and `async` now consume feature flags. Async
+selects isolated client, hydrate, and server entries and enables compiler-owned
+Suspense factories, resource reads, and lazy module records. The other accepted
+names remain reserved configuration values whose syntax is unsupported;
+transporting them does not claim runtime parity. `hydrate` and `server` now
+select implemented hydration and SSR lowering targets.
 
 The `unsafe-html` implementation is absent from chunks built without the
 feature. Forms, styles, namespaces, events, and refs still share the default DOM

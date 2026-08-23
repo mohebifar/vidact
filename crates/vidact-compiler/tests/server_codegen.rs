@@ -45,3 +45,48 @@ fn unsafe_html_requires_the_server_feature_at_the_attribute() {
     )
     .expect("the explicit server feature permits raw HTML");
 }
+
+#[test]
+fn stages_async_server_boundaries_only_when_enabled() {
+    let input = ModuleInput {
+        filename: "ServerAsync.tsx",
+        source: r#"
+            import { Suspense, use } from 'react';
+            const value = Promise.resolve('ready');
+            function Message() {
+                return <strong>{use(value)}</strong>;
+            }
+            export function ServerAsync() {
+                return <Suspense fallback={<p>loading</p>}><Message /></Suspense>;
+            }
+        "#,
+    };
+    let diagnostics =
+        compile_server_module(input).expect_err("server Suspense must remain feature-gated");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.message.contains("`async`")
+            && diagnostic.span.is_some()
+    }));
+
+    let compilation = compile_server_module_with_options(
+        input,
+        &CompilationOptions::new(CompilerTarget::Server).with_feature(CompilerFeature::Async),
+    )
+    .expect("the async server target should preserve staged boundary factories");
+    assert!(
+        compilation
+            .code
+            .contains("<Suspense fallback={_temp}>{_temp2}</Suspense>"),
+        "{}",
+        compilation.code
+    );
+    assert!(
+        compilation.code.contains("function _temp2()")
+            && compilation.code.contains("return <><Message /></>;")
+            && compilation.code.contains("function _temp()")
+            && compilation.code.contains("return <p>loading</p>;"),
+        "{}",
+        compilation.code
+    );
+}

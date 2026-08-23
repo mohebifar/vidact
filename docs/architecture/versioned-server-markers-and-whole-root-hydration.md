@@ -76,6 +76,12 @@ position, while `jsxs` and development JSX with static children pass sibling
 positions separately. A static sibling list is not interchangeable with one
 dynamic array child because only the latter owns an array range.
 
+The opt-in `async` target extends the version-one marker vocabulary with a
+pending-boundary marker inside a child slot. Its hydrate claimant probes staged
+content without consuming descendant component markers, then claims the server
+fallback without mutation. The complete ownership contract is recorded in
+[Staged async resources and Suspense](staged-async-resources-and-suspense.md).
+
 ## Invariants
 
 - Server entry points do not read `window`, `document`, `Node`, or other browser

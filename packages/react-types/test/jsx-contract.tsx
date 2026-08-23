@@ -1,5 +1,5 @@
 import type { VidactNode } from '@vidact/react-types'
-import { createContext, type ReactElement } from 'react'
+import { Suspense, createContext, lazy, use, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 
 const child: VidactNode = 'child'
@@ -61,6 +61,13 @@ const legacyContextProvider = (
   </Theme.Provider>
 )
 const portal = createPortal(<strong>Portal child</strong>, document.body)
+const LazyMessage = lazy(async () => ({ default: () => <strong>lazy</strong> }))
+const asyncBoundary = (
+  <Suspense fallback={<p>loading</p>}>
+    <LazyMessage />
+  </Suspense>
+)
+const usedPromise: string = use(Promise.resolve('ready'))
 
 void nativeElements
 void customElement
@@ -71,6 +78,8 @@ void mathElement
 void contextProvider
 void legacyContextProvider
 void portal
+void asyncBoundary
+void usedPromise
 
 // @ts-expect-error `href` is not a button attribute.
 const invalidAttribute = <button href="/not-a-button-link" />
