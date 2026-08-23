@@ -6,7 +6,7 @@ import {
 } from '@vidact/test-support'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { MultiComponentApp } from './MultiComponentApp.tsx'
+import { MultiComponentApp, readCounterValueRef } from './MultiComponentApp.tsx'
 
 let dispose: (() => void) | undefined
 
@@ -27,6 +27,8 @@ describe('compiled same-module components', () => {
     const text = requireSingleDirectText(output)
     const increment = host.querySelector<HTMLButtonElement>('[data-increment]')!
 
+    expect(readCounterValueRef()).toBe(output)
+
     const capture = await captureMutations(host, () => increment.click())
 
     expect(host.querySelector('[data-multi-component-app]')).toBe(root)
@@ -40,5 +42,9 @@ describe('compiled same-module components', () => {
         'same-module child prop update',
       ),
     ).not.toThrow()
+
+    dispose()
+    dispose = undefined
+    expect(readCounterValueRef()).toBeNull()
   })
 })

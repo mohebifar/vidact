@@ -57,7 +57,10 @@ previous committed range.
 Host object refs and callback refs attach only after their element enters the
 committed DOM range. Their clear or callback-cleanup operation belongs to the
 same owner as the element. `useRef` is an ordinary stable cell in compiled
-components because a supported component function executes once.
+components because a supported component function executes once. A `ref`
+destructured by a function component is an ordinary compiled prop, matching the
+React 19 ref-as-prop authoring model; when forwarded to a host element, the
+resolved ref value enters the same host ref commit lifecycle.
 
 This is a Vidact compiled-value ABI, not arbitrary React element
 reconciliation. Owned structural blocks still mount once. External
@@ -124,6 +127,8 @@ element being disposed.
 - An owned block still has exactly one legal mount.
 - Refs attach after insertion and clear with their element owner; keyed moves do
   not reattach an unchanged element.
+- A component `ref` prop reaches the child without `forwardRef`, attaches after
+  host insertion, and clears when the child owner is disposed.
 - Prop and DOM subscriptions remain statically declared updaters, not runtime
   signals or observer-tracked dependencies.
 

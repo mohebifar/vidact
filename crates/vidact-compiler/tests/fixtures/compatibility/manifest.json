@@ -49,6 +49,11 @@
       "components": ["FunctionExpression"]
     },
     {
+      "path": "accepted/ref-as-prop.tsx",
+      "expectation": "accepted",
+      "components": ["Input", "RefAsProp"]
+    },
+    {
       "path": "accepted/structural-control-flow.tsx",
       "expectation": "accepted",
       "components": ["Ternary", "Logical", "Nullish", "TerminalSwitch"]
