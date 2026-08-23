@@ -10,6 +10,7 @@ import {
   binding,
   combineSources,
   compiledEvent,
+  compiledImperativeHandle,
   compiledRoot,
   createCompiledProp,
   createCompiledScope,
@@ -858,6 +859,49 @@ describe('compiled DOM corpus', () => {
 
     mounted.dispose()
     expect(previousCleanups).toBe(1)
+  })
+
+  it('rolls back DOM and retains the previous imperative handle when its factory throws', () => {
+    const countSource = source(0)
+    let setCount!: ReturnType<typeof createCompiledState<number>>['set']
+    const handleRef: { current: { count: number } | null } = { current: null }
+    const host = document.createElement('div')
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const count = createCompiledState(scope, countSource, 0)
+      setCount = count.set
+      compiledImperativeHandle(
+        scope,
+        countSource,
+        () => handleRef,
+        () => {
+          const value = count.get()
+          if (value === 2) throw new Error('imperative handle failed')
+          return { count: value }
+        },
+        () => [count.get()],
+      )
+      return compiledRoot(scope, () =>
+        h(
+          'output',
+          null,
+          binding(scope, countSource, () => count.get()),
+        ),
+      )
+    }, host)
+
+    expect(handleRef.current?.count).toBe(0)
+    setCount(1)
+    const previousHandle = handleRef.current
+    expect(previousHandle?.count).toBe(1)
+    expect(host.textContent).toBe('1')
+
+    expect(() => setCount(2)).toThrow('imperative handle failed')
+    expect(handleRef.current).toBe(previousHandle)
+    expect(host.textContent).toBe('1')
+
+    mounted.dispose()
+    expect(handleRef.current).toBeNull()
   })
 
   it('removes the compiled root even when ref cleanup throws', () => {

@@ -2,10 +2,13 @@ import { useImperativeHandle, useRef, useState } from 'react'
 
 let currentOutput: HTMLOutputElement | null = null
 let currentCounterHandle: CounterHandle | null = null
+let secondaryCounterHandle: CounterHandle | null = null
 
 type CounterHandle = {
+  count: number
   increment: () => void
   output: HTMLOutputElement | null
+  textAtCreation: string | null | undefined
 }
 
 export function readCounterValueRef(): HTMLOutputElement | null {
@@ -14,6 +17,18 @@ export function readCounterValueRef(): HTMLOutputElement | null {
 
 export function readCounterHandle(): CounterHandle | null {
   return currentCounterHandle
+}
+
+export function readSecondaryCounterHandle(): CounterHandle | null {
+  return secondaryCounterHandle
+}
+
+function captureCounterHandle(handle: CounterHandle | null): void {
+  currentCounterHandle = handle
+}
+
+function captureSecondaryCounterHandle(handle: CounterHandle | null): void {
+  secondaryCounterHandle = handle
 }
 
 const CounterValue = ({
@@ -34,10 +49,12 @@ function ImperativeCounter({ ref }: { ref: (handle: CounterHandle | null) => voi
   useImperativeHandle(
     ref,
     () => ({
+      count,
       increment: () => setCount((current) => current + 1),
       output: output.current,
+      textAtCreation: output.current?.textContent,
     }),
-    [],
+    [count],
   )
   return (
     <output ref={output} data-imperative-count>
@@ -48,6 +65,7 @@ function ImperativeCounter({ ref }: { ref: (handle: CounterHandle | null) => voi
 
 export function MultiComponentApp(): JSX.Element {
   const [count, setCount] = useState(0)
+  const [useSecondaryHandle, setUseSecondaryHandle] = useState(false)
   return (
     <section data-multi-component-app>
       <CounterValue
@@ -60,12 +78,13 @@ export function MultiComponentApp(): JSX.Element {
         Increment
       </button>
       <ImperativeCounter
-        ref={(handle) => {
-          currentCounterHandle = handle
-        }}
+        ref={useSecondaryHandle ? captureSecondaryCounterHandle : captureCounterHandle}
       />
       <button data-imperative-increment onClick={() => currentCounterHandle?.increment()}>
         Increment imperative counter
+      </button>
+      <button data-switch-handle-ref onClick={() => setUseSecondaryHandle(true)}>
+        Switch handle ref
       </button>
     </section>
   )

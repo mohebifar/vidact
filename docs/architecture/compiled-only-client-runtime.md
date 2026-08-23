@@ -67,7 +67,8 @@ not a public root renderer and never rerun a component to discover changes.
 - `useRef` creates one ordinary mutable cell during one-time component
   execution; ref attachment and cleanup remain owned by compiled DOM ranges.
 - `useImperativeHandle` registers a component-owner commit resource and cannot
-  run outside compiled component construction.
+  run outside compiled component construction. Surgical lowering supplies its
+  source mask and deferred ref/dependency readers.
 
 ## Invariants
 

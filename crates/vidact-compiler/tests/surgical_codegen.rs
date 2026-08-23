@@ -674,6 +674,32 @@ fn compiles_use_reducer_into_the_state_slot_abi() {
 }
 
 #[test]
+fn compiles_imperative_handle_dependencies_into_commit_resources() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "ImperativeCounter.tsx",
+        source: r#"
+            import { useImperativeHandle as useHandle, useState } from 'react';
+            export function ImperativeCounter({ ref }): Node {
+                const [count, setCount] = useState(0);
+                useHandle(ref, () => ({ count, increment: () => setCount(count + 1) }), [count]);
+                return <output>{count}</output>;
+            }
+        "#,
+    })
+    .expect("imperative handles should lower through semantic import identity");
+
+    assert!(
+        output.contains("compiledImperativeHandle as __vidactImperativeHandle"),
+        "{output}"
+    );
+    assert!(
+        output.contains("__vidactImperativeHandle(__vidactScope, 3, () => ref.get()"),
+        "{output}"
+    );
+    assert!(output.contains("() => [count.get()]"), "{output}");
+}
+
+#[test]
 fn compiles_aliased_props_into_local_updater_slots() {
     let output = compile_surgical_module(ModuleInput {
         filename: "AliasedProp.tsx",

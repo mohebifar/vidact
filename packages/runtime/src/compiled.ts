@@ -93,8 +93,8 @@ export function hasInvalidChild(children: readonly unknown[]): boolean {
   return false
 }
 
-type RefValue =
-  | ((value: Element | null) => void | (() => void))
+type RefValue<T = Element> =
+  | ((value: T | null) => void | (() => void))
   | { current: unknown }
   | null
   | undefined
@@ -730,7 +730,7 @@ export function queueElementRef(element: Element, value: unknown): void {
 }
 
 export function useImperativeHandle<T>(
-  ref: ((value: T | null) => void | (() => void)) | { current: T | null } | null | undefined,
+  ref: RefValue<T>,
   create: () => T,
   dependencies?: readonly unknown[],
 ): void {
@@ -750,12 +750,146 @@ export function useImperativeHandle<T>(
       DEV ? 'reactive useImperativeHandle dependencies are not supported yet' : 'V014',
     )
   }
+  queueOwnerCommit(owner, () => owner[1].add(attachRef(ref, create())))
+}
+
+export function compiledImperativeHandle<T>(
+  scope: CompiledScope,
+  reads: SourceMask,
+  readRef: () => RefValue<T>,
+  create: () => T,
+  readDependencies?: () => readonly unknown[],
+): void {
+  const owner = activeConstructionOwner
+  if (owner === null || scopeOwners.get(scope) !== owner) {
+    throw new Error(
+      DEV ? 'compiledImperativeHandle must run in its compiled component scope' : 'V013',
+    )
+  }
+
+  let mounted = false
+  let currentRef: RefValue<T>
+  let currentHandle: T
+  let currentDependencies: readonly unknown[] | undefined
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- This placeholder is replaced by the committed resource cleanup.
+  let cleanup = (): void => {}
+
+  const commitInitial = (): void => {
+    currentRef = readImperativeRef(readRef())
+    currentDependencies = readDependencies?.()
+    currentHandle = create()
+    cleanup = attachRef(currentRef, currentHandle)
+    mounted = true
+  }
+  queueOwnerCommit(owner, commitInitial)
+
+  const update = (): void => {
+    if (!mounted) return
+    const nextRef = readImperativeRef(readRef())
+    const nextDependencies = readDependencies?.()
+    if (
+      Object.is(nextRef, currentRef) &&
+      readDependencies !== undefined &&
+      equalDependencies(nextDependencies, currentDependencies)
+    ) {
+      return
+    }
+
+    const previousRef = currentRef
+    const previousHandle = currentHandle
+    const previousDependencies = currentDependencies
+    const previousCleanup = cleanup
+    let nextCleanup: (() => void) | undefined
+    let finalized = false
+    stagePublication([
+      () => {},
+      () => {
+        if (!finalized) return
+        nextCleanup?.()
+        cleanup = attachRef(previousRef, previousHandle)
+        currentRef = previousRef
+        currentHandle = previousHandle
+        currentDependencies = previousDependencies
+        finalized = false
+      },
+      undefined,
+      () => {
+        const nextHandle = create()
+        if (Object.is(nextRef, previousRef)) {
+          try {
+            previousCleanup()
+          } catch (error) {
+            try {
+              cleanup = attachRef(previousRef, previousHandle)
+            } catch {
+              // Preserve the cleanup error that aborted publication.
+            }
+            throw error
+          }
+          try {
+            nextCleanup = attachRef(nextRef, nextHandle)
+          } catch (error) {
+            try {
+              cleanup = attachRef(previousRef, previousHandle)
+            } catch {
+              // Preserve the next-ref attachment error.
+            }
+            throw error
+          }
+        } else {
+          nextCleanup = attachRef(nextRef, nextHandle)
+          try {
+            previousCleanup()
+          } catch (error) {
+            nextCleanup()
+            try {
+              cleanup = attachRef(previousRef, previousHandle)
+            } catch {
+              // Preserve the previous-ref cleanup error.
+            }
+            throw error
+          }
+        }
+        cleanup = nextCleanup
+        currentRef = nextRef
+        currentHandle = nextHandle
+        currentDependencies = nextDependencies
+        finalized = true
+      },
+      10,
+    ])
+  }
+  const removeUpdater = subscribe(scope, reads, update)
+  owner[1].add(() => {
+    removeUpdater()
+    cleanup()
+  })
+}
+
+function queueOwnerCommit(owner: Owner, commit: () => void): void {
   let commits = pendingOwnerCommits.get(owner)
   if (commits === undefined) {
     commits = new Set()
     pendingOwnerCommits.set(owner, commits)
   }
-  commits.add(() => owner[1].add(attachRef(ref, create())))
+  commits.add(commit)
+}
+
+function readImperativeRef<T>(ref: RefValue<T>): RefValue<T> {
+  if (!isRefValue(ref)) {
+    throw new TypeError(
+      DEV ? 'imperative ref must be null, a callback, or an object with current' : 'V006',
+    )
+  }
+  return ref
+}
+
+function equalDependencies(
+  next: readonly unknown[] | undefined,
+  previous: readonly unknown[] | undefined,
+): boolean {
+  if (next === undefined || previous === undefined || next.length !== previous.length) return false
+  return next.every((value, index) => Object.is(value, previous[index]))
 }
 
 export function mountCompiledRef(element: Element, value: CompiledBinding<unknown>): void {
@@ -764,6 +898,7 @@ export function mountCompiledRef(element: Element, value: CompiledBinding<unknow
     throw new TypeError(DEV ? 'ref must be null, a callback, or an object with current' : 'V006')
   }
   let current: RefValue = initial
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- This placeholder is replaced when the ref attaches.
   let cleanup = (): void => {}
   const pending: PendingRef = [activeOwner, current, (attached) => (cleanup = attached)]
   pendingRefs.set(element, pending)
@@ -1298,10 +1433,7 @@ function visitNodes(root: Node, visit: (node: Node) => void): void {
   for (const child of root.childNodes) visitNodes(child, visit)
 }
 
-function attachRef<T>(
-  value: ((value: T | null) => void | (() => void)) | { current: unknown } | null | undefined,
-  target: T,
-): () => void {
+function attachRef<T>(value: RefValue<T>, target: T): () => void {
   if (value === null || value === undefined) return () => {}
   if (typeof value === 'function') {
     const cleanup = value(target)

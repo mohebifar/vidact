@@ -15,6 +15,7 @@ export {
   binding,
   choose,
   compiledEvent,
+  compiledImperativeHandle,
   compiledRoot,
   createCompiledProp,
   createCompiledReducer,

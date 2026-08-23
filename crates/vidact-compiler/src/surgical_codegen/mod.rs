@@ -9,8 +9,8 @@ use oxc_ast_visit::{
     Visit, VisitMut,
     walk::walk_call_expression,
     walk_mut::{
-        walk_expression as walk_expression_mut, walk_jsx_attribute, walk_jsx_element,
-        walk_jsx_spread_attribute,
+        walk_call_expression as walk_call_expression_mut, walk_expression as walk_expression_mut,
+        walk_jsx_attribute, walk_jsx_element, walk_jsx_spread_attribute,
     },
 };
 use oxc_codegen::{Codegen, CodegenOptions};
@@ -45,6 +45,7 @@ const SCOPE: &str = "__vidactScope";
 const BINDING: &str = "__vidactBinding";
 const COMBINE_SOURCES: &str = "__vidactCombineSources";
 const COMPILED_EVENT: &str = "__vidactEvent";
+const COMPILED_IMPERATIVE_HANDLE: &str = "__vidactImperativeHandle";
 const COMPILED_ROOT: &str = "__vidactCompiledRoot";
 const CHOOSE: &str = "__vidactChoose";
 const CREATE_PROP: &str = "__vidactCreateProp";
@@ -160,6 +161,7 @@ fn transform_program<'a>(
         BINDING,
         COMBINE_SOURCES,
         COMPILED_EVENT,
+        COMPILED_IMPERATIVE_HANDLE,
         COMPILED_ROOT,
         CHOOSE,
         CREATE_PROP,
@@ -551,6 +553,7 @@ fn transform_component<'a>(
         source_symbols: &source_symbols,
         item_source_symbols: &item_source_symbols,
         options,
+        react: &react,
         diagnostic: None,
     };
     jsx_transformer.visit_function_body(body);
@@ -740,10 +743,117 @@ struct JsxBindingTransformer<'a, 'b, 's> {
     source_symbols: &'s BTreeMap<SymbolId, SourceId>,
     item_source_symbols: &'s BTreeMap<SymbolId, SourceId>,
     options: &'s CompilationOptions,
+    react: &'s ReactBindings<'s>,
     diagnostic: Option<Diagnostic>,
 }
 
 impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
+    fn visit_call_expression(&mut self, call: &mut CallExpression<'a>) {
+        if !self.react.is_imperative_handle_call(call) {
+            walk_call_expression_mut(self, call);
+            return;
+        }
+        if !(2..=3).contains(&call.arguments.len())
+            || call.arguments.iter().any(Argument::is_spread)
+        {
+            self.diagnostic = Some(
+                unsupported("useImperativeHandle requires a ref, handle factory, and optional dependency array")
+                    .with_span(SourceSpan::new(call.span.start, call.span.end)),
+            );
+            return;
+        }
+        let ref_expression = call.arguments[0]
+            .as_expression()
+            .expect("spread arguments were rejected");
+        let create_expression = call.arguments[1]
+            .as_expression()
+            .expect("spread arguments were rejected");
+        if let Some(dependencies) = call.arguments.get(2) {
+            let dependencies = dependencies
+                .as_expression()
+                .expect("spread arguments were rejected");
+            let Expression::ArrayExpression(array) = dependencies.without_parentheses() else {
+                self.diagnostic = Some(
+                    unsupported("useImperativeHandle dependencies must be an inline array")
+                        .with_span(SourceSpan::from_oxc(dependencies.span())),
+                );
+                return;
+            };
+            if array.elements.iter().any(|element| {
+                matches!(
+                    element,
+                    ArrayExpressionElement::SpreadElement(_) | ArrayExpressionElement::Elision(_)
+                )
+            }) {
+                self.diagnostic = Some(
+                    unsupported("useImperativeHandle dependencies must have a static length")
+                        .with_span(SourceSpan::from_oxc(dependencies.span())),
+                );
+                return;
+            }
+        }
+        let mut reads = dependencies(
+            ref_expression,
+            self.scoping,
+            self.source_symbols,
+            self.item_source_symbols,
+        );
+        let lifecycle_reads = call.arguments.get(2).map_or_else(
+            || DependencyReads {
+                parent: self.source_symbols.values().copied().collect(),
+                item: BTreeSet::new(),
+            },
+            |dependencies_argument| {
+                dependencies(
+                    dependencies_argument
+                        .as_expression()
+                        .expect("spread arguments were rejected"),
+                    self.scoping,
+                    self.source_symbols,
+                    self.item_source_symbols,
+                )
+            },
+        );
+        reads.parent.extend(lifecycle_reads.parent);
+        reads.item.extend(lifecycle_reads.item);
+        if !reads.item.is_empty() {
+            self.diagnostic = Some(
+                unsupported("useImperativeHandle cannot capture keyed item slots")
+                    .with_span(SourceSpan::new(call.span.start, call.span.end)),
+            );
+            return;
+        }
+
+        walk_call_expression_mut(self, call);
+        let ref_expression = call.arguments[0]
+            .as_expression()
+            .expect("spread arguments were rejected")
+            .clone_in_with_semantic_ids(self.ast.allocator());
+        let create_expression = call.arguments[1]
+            .as_expression()
+            .expect("spread arguments were rejected")
+            .clone_in_with_semantic_ids(self.ast.allocator());
+        let dependencies_expression = call.arguments.get(2).map(|argument| {
+            argument
+                .as_expression()
+                .expect("spread arguments were rejected")
+                .clone_in_with_semantic_ids(self.ast.allocator())
+        });
+        let mut arguments = vec![
+            ident(self.ast, SCOPE),
+            dependency_mask(self.ast, &reads.parent),
+            arrow_expression(self.ast, [], ref_expression),
+            create_expression,
+        ];
+        if let Some(dependencies_expression) = dependencies_expression {
+            arguments.push(arrow_expression(self.ast, [], dependencies_expression));
+        }
+        call.callee = ident(self.ast, COMPILED_IMPERATIVE_HANDLE);
+        call.type_arguments = None;
+        call.arguments =
+            oxc_allocator::Vec::from_iter_in(arguments.into_iter().map(Argument::from), self.ast);
+    }
+
     fn visit_jsx_element(&mut self, element: &mut JSXElement<'a>) {
         if !self.options.feature_enabled(CompilerFeature::UnsafeHtml)
             && let Some(span) = raw_html::attribute_span(element)
@@ -1585,6 +1695,7 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>, program: &Program<'a>) -> Statement<
         ("binding", BINDING),
         ("combineSources", COMBINE_SOURCES),
         ("compiledEvent", COMPILED_EVENT),
+        ("compiledImperativeHandle", COMPILED_IMPERATIVE_HANDLE),
         ("compiledRoot", COMPILED_ROOT),
         ("choose", CHOOSE),
         ("createCompiledProp", CREATE_PROP),

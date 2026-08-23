@@ -216,6 +216,11 @@
       "path": "accepted/use-imperative-handle.tsx",
       "expectation": "accepted",
       "components": ["ImperativeCounter"]
+    },
+    {
+      "path": "accepted/imperative-handle-imports.tsx",
+      "expectation": "accepted",
+      "components": ["AliasedImperativeHandle", "NamespacedImperativeHandle"]
     }
   ]
 }

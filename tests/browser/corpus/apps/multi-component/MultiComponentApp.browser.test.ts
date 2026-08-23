@@ -6,7 +6,12 @@ import {
 } from '@vidact/test-support'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { MultiComponentApp, readCounterHandle, readCounterValueRef } from './MultiComponentApp.tsx'
+import {
+  MultiComponentApp,
+  readCounterHandle,
+  readCounterValueRef,
+  readSecondaryCounterHandle,
+} from './MultiComponentApp.tsx'
 
 let dispose: (() => void) | undefined
 
@@ -31,9 +36,13 @@ describe('compiled same-module components', () => {
     const imperativeIncrement = host.querySelector<HTMLButtonElement>(
       '[data-imperative-increment]',
     )!
+    const switchHandleRef = host.querySelector<HTMLButtonElement>('[data-switch-handle-ref]')!
 
     expect(readCounterValueRef()).toBe(output)
-    expect(readCounterHandle()?.output).toBe(imperativeOutput)
+    const initialHandle = readCounterHandle()
+    expect(initialHandle?.count).toBe(0)
+    expect(initialHandle?.output).toBe(imperativeOutput)
+    expect(initialHandle?.textAtCreation).toBe('0')
 
     const capture = await captureMutations(host, () => increment.click())
 
@@ -53,6 +62,9 @@ describe('compiled same-module components', () => {
 
     expect(host.querySelector('[data-imperative-count]')).toBe(imperativeOutput)
     expect(imperativeOutput.textContent).toBe('1')
+    expect(readCounterHandle()?.count).toBe(1)
+    expect(readCounterHandle()).not.toBe(initialHandle)
+    expect(readCounterHandle()?.textAtCreation).toBe('1')
     expect(() =>
       assertMutationEnvelope(
         imperativeCapture.records,
@@ -61,9 +73,17 @@ describe('compiled same-module components', () => {
       ),
     ).not.toThrow()
 
+    const refCapture = await captureMutations(host, () => switchHandleRef.click())
+
+    expect(refCapture.records).toHaveLength(0)
+    expect(readCounterHandle()).toBeNull()
+    expect(readSecondaryCounterHandle()?.count).toBe(1)
+    expect(readSecondaryCounterHandle()?.output).toBe(imperativeOutput)
+
     dispose()
     dispose = undefined
     expect(readCounterValueRef()).toBeNull()
     expect(readCounterHandle()).toBeNull()
+    expect(readSecondaryCounterHandle()).toBeNull()
   })
 })

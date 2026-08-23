@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use oxc_ast::ast::{
     CallExpression, Expression, ImportDeclarationSpecifier, ModuleExportName, Program, Statement,
@@ -8,8 +8,7 @@ use oxc_syntax::symbol::SymbolId;
 
 pub(crate) struct ReactBindings<'s> {
     scoping: &'s Scoping,
-    use_state: BTreeSet<SymbolId>,
-    use_reducer: BTreeSet<SymbolId>,
+    named: BTreeMap<String, BTreeSet<SymbolId>>,
     namespaces: BTreeSet<SymbolId>,
 }
 
@@ -32,8 +31,7 @@ impl<'s> ReactBindings<'s> {
     pub(crate) fn new(program: &Program<'_>, scoping: &'s Scoping) -> Self {
         let mut bindings = Self {
             scoping,
-            use_state: BTreeSet::new(),
-            use_reducer: BTreeSet::new(),
+            named: BTreeMap::new(),
             namespaces: BTreeSet::new(),
         };
         for statement in &program.body {
@@ -45,24 +43,16 @@ impl<'s> ReactBindings<'s> {
             }
             for specifier in import.specifiers.iter().flatten() {
                 match specifier {
-                    ImportDeclarationSpecifier::ImportSpecifier(specifier)
-                        if matches!(
-                            &specifier.imported,
-                            ModuleExportName::IdentifierName(name) if name.name == "useState"
-                        ) =>
-                    {
+                    ImportDeclarationSpecifier::ImportSpecifier(specifier) => {
+                        let ModuleExportName::IdentifierName(imported) = &specifier.imported else {
+                            continue;
+                        };
                         if let Some(symbol) = specifier.local.symbol_id.get() {
-                            bindings.use_state.insert(symbol);
-                        }
-                    }
-                    ImportDeclarationSpecifier::ImportSpecifier(specifier)
-                        if matches!(
-                            &specifier.imported,
-                            ModuleExportName::IdentifierName(name) if name.name == "useReducer"
-                        ) =>
-                    {
-                        if let Some(symbol) = specifier.local.symbol_id.get() {
-                            bindings.use_reducer.insert(symbol);
+                            bindings
+                                .named
+                                .entry(imported.name.to_string())
+                                .or_default()
+                                .insert(symbol);
                         }
                     }
                     ImportDeclarationSpecifier::ImportNamespaceSpecifier(specifier) => {
@@ -78,35 +68,34 @@ impl<'s> ReactBindings<'s> {
     }
 
     pub(crate) fn state_hook_call(&self, call: &CallExpression<'_>) -> Option<StateHook> {
+        if self.is_named_call(call, "useState") {
+            Some(StateHook::State)
+        } else if self.is_named_call(call, "useReducer") {
+            Some(StateHook::Reducer)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn is_imperative_handle_call(&self, call: &CallExpression<'_>) -> bool {
+        self.is_named_call(call, "useImperativeHandle")
+    }
+
+    fn is_named_call(&self, call: &CallExpression<'_>, name: &str) -> bool {
         match call.callee.without_parentheses() {
-            Expression::Identifier(identifier) => {
-                let symbol = reference_symbol(identifier, self.scoping)?;
-                if self.use_state.contains(&symbol) {
-                    Some(StateHook::State)
-                } else if self.use_reducer.contains(&symbol) {
-                    Some(StateHook::Reducer)
-                } else {
-                    None
-                }
-            }
-            Expression::StaticMemberExpression(member)
-                if matches!(member.property.name.as_str(), "useState" | "useReducer") =>
-            {
-                let symbol = member
-                    .object
-                    .without_parentheses()
-                    .get_identifier_reference()
-                    .and_then(|identifier| reference_symbol(identifier, self.scoping))?;
-                if !self.namespaces.contains(&symbol) {
-                    return None;
-                }
-                Some(if member.property.name == "useState" {
-                    StateHook::State
-                } else {
-                    StateHook::Reducer
-                })
-            }
-            _ => None,
+            Expression::Identifier(identifier) => reference_symbol(identifier, self.scoping)
+                .is_some_and(|symbol| {
+                    self.named
+                        .get(name)
+                        .is_some_and(|set| set.contains(&symbol))
+                }),
+            Expression::StaticMemberExpression(member) if member.property.name == name => member
+                .object
+                .without_parentheses()
+                .get_identifier_reference()
+                .and_then(|identifier| reference_symbol(identifier, self.scoping))
+                .is_some_and(|symbol| self.namespaces.contains(&symbol)),
+            _ => false,
         }
     }
 }
