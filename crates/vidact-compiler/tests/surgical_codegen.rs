@@ -954,6 +954,58 @@ fn compiles_external_store_snapshots_into_owned_slots() {
 }
 
 #[test]
+fn compiles_effect_events_as_stable_live_callbacks() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "EffectEvent.tsx",
+        source: r#"
+            import { useEffect, useEffectEvent, useState } from 'react';
+            const subscribe = (listener) => () => listener;
+            export function EffectEvent(): Node {
+                const [count, setCount] = useState(0);
+                const onTick = useEffectEvent((label) => console.log(label, count));
+                useEffect(() => subscribe(onTick), []);
+                return <button onClick={() => setCount(count + 1)}>{count}</button>;
+            }
+        "#,
+    })
+    .expect("effect events should lower to stable callbacks with live slot reads");
+
+    assert!(
+        output.contains("createCompiledEffectEvent as __vidactCreateEffectEvent"),
+        "{output}"
+    );
+    assert!(
+        output.contains("console.log(label, count.get())"),
+        "{output}"
+    );
+    assert!(output.contains("subscribe(onTick)"), "{output}");
+    assert!(!output.contains("useEffectEvent("), "{output}");
+}
+
+#[test]
+fn rejects_effect_event_references_outside_effect_callbacks() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "InvalidEffectEvent.tsx",
+        source: r#"
+            import { useEffectEvent } from 'react';
+            export function InvalidEffectEvent(): Node {
+                const onClick = useEffectEvent(() => undefined);
+                return <button onClick={onClick}>invalid</button>;
+            }
+        "#,
+    })
+    .expect_err("effect events cannot escape into render event props");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic
+                .message
+                .contains("only be referenced inside an effect")
+            && diagnostic.span.is_some()
+    }));
+}
+
+#[test]
 fn compiles_aliased_props_into_local_updater_slots() {
     let output = compile_surgical_module(ModuleInput {
         filename: "AliasedProp.tsx",

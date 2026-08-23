@@ -134,6 +134,11 @@
       "components": ["ExternalStore"]
     },
     {
+      "path": "accepted/effect-event.tsx",
+      "expectation": "accepted",
+      "components": ["EffectEvent"]
+    },
+    {
       "path": "rejected/foreign-array-call.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",

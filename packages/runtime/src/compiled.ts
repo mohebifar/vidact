@@ -382,6 +382,20 @@ export function createCompiledExternalStore<T>(
   return slot
 }
 
+export function createCompiledEffectEvent<Arguments extends unknown[], Result>(
+  scope: CompiledScope,
+  callback: (...arguments_: Arguments) => Result,
+): (...arguments_: Arguments) => Result {
+  const owner = scopeOwners.get(scope)
+  if (owner === undefined) {
+    throw new Error(DEV ? 'createCompiledEffectEvent received an unknown scope' : 'V003')
+  }
+  return (...arguments_) => {
+    if (owner[0]) throw new Error(DEV ? 'cannot call an effect event after disposal' : 'V022')
+    return callback(...arguments_)
+  }
+}
+
 export function useContext<T>(context: CompiledContext<T>): T {
   if (activeConstructionOwner === null) {
     throw new Error(DEV ? 'useContext must run during compiled component construction' : 'V019')
@@ -400,6 +414,12 @@ export function useSyncExternalStore<T>(
   _getServerSnapshot?: () => T,
 ): T {
   throw new Error(DEV ? 'useSyncExternalStore requires compiler lowering' : 'V021')
+}
+
+export function useEffectEvent<Arguments extends unknown[], Result>(
+  callback: (...arguments_: Arguments) => Result,
+): (...arguments_: Arguments) => Result {
+  return callback
 }
 
 export function useMemo<T>(factory: () => T, _dependencies: readonly unknown[]): T {

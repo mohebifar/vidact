@@ -22,6 +22,13 @@ requires an inline fixed-length dependency array when one is supplied, and
 emits a static source mask. An omitted array subscribes to every component
 source; an empty array subscribes to none.
 
+`useEffectEvent` lowers to one owner-bound stable function. Its callback is not
+snapshotted: compiler-rewritten prop, state, context, and external-source reads
+remain live slot reads whenever an external system invokes it. The compiler
+allows the function to be referenced only inside an inline effect callback,
+which supports passing it to subscriptions without exposing it as a render or
+DOM event handler. Calling a retained effect event after owner disposal fails.
+
 Each effect callback is rebuilt for a run with compiler-generated snapshots of
 the reactive values it captures. Cleanup closures therefore retain the values
 from the run that created them even though the component itself is never
@@ -47,6 +54,8 @@ disposal; passive cleanup is deferred to the passive phase.
   removes the updater, cancels stale scheduled runs, and calls cleanup once.
 - A callback may return `undefined` or one cleanup function. Other values fail
   with the stable lifecycle error family.
+- `createCompiledEffectEvent(scope, callback)` returns one stable owner-bound
+  function whose callback reads current slots rather than effect-run snapshots.
 
 Effect errors still propagate through the current synchronous or microtask
 boundary. Routing them to function error boundaries and root error callbacks is
@@ -61,6 +70,8 @@ them.
 - Cleanup observes the reactive snapshot from its own effect run.
 - Dependency-equal updates do not clean up or rerun the effect.
 - Removing a branch, keyed row, or root cleans each mounted effect exactly once.
+- Effect-event identity remains stable while its callback observes current
+  reactive values, and retained calls fail after disposal.
 - Applications without effects retain no effect scheduling code in measured
   production chunks.
 
@@ -81,8 +92,8 @@ them.
 Common subscription, measurement, and imperative-library effects now compose
 with Vidact ownership without component reruns. The runtime pays scheduling
 bytes only in chunks that import an effect capability. Custom hooks,
-`useEffectEvent`, insertion effects, error routing, and a public `act` drain API
-remain follow-up work on this phase model.
+insertion effects, error routing, and a public `act` drain API remain follow-up
+work on this phase model.
 
 ## Verification
 
@@ -90,9 +101,13 @@ remain follow-up work on this phase model.
   source-mask, dependency-reader, and snapshot-factory lowering.
 - `crates/vidact-compiler/tests/fixtures/compatibility/accepted/effects.tsx`
   records effects in the accepted syntax contract.
+- `crates/vidact-compiler/tests/fixtures/compatibility/accepted/effect-event.tsx`
+  records live, stable effect events and compiler-enforced reference placement.
 - `tests/browser/corpus/apps/multi-component/MultiComponentApp.browser.test.ts`
   proves ref/DOM timing, dependency reruns, snapshot cleanup, and layout/passive
   disposal order.
+- `tests/browser/corpus/apps/effect-event/EffectEventApp.browser.test.ts` proves
+  stable subscription identity, live state reads, and post-disposal failure.
 - `cargo test -p vidact-compiler`
 - `pnpm --filter @vidact/browser-corpus test`
 - `pnpm size`

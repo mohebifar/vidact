@@ -54,6 +54,7 @@ const COMPILED_ROOT: &str = "__vidactCompiledRoot";
 const CHOOSE: &str = "__vidactChoose";
 const CREATE_CONTEXT: &str = "__vidactCreateContext";
 const CREATE_EXTERNAL_STORE: &str = "__vidactCreateExternalStore";
+const CREATE_EFFECT_EVENT: &str = "__vidactCreateEffectEvent";
 const CREATE_PROP: &str = "__vidactCreateProp";
 const CREATE_REST_PROP: &str = "__vidactCreateRestProp";
 const CREATE_REDUCER: &str = "__vidactCreateReducer";
@@ -182,6 +183,7 @@ fn transform_program<'a>(
         CHOOSE,
         CREATE_CONTEXT,
         CREATE_EXTERNAL_STORE,
+        CREATE_EFFECT_EVENT,
         CREATE_PROP,
         CREATE_REST_PROP,
         CREATE_REDUCER,
@@ -333,6 +335,11 @@ impl<'a> Visit<'a> for PostTransformReactUsage<'_, '_> {
                 .get_or_insert(("useSyncExternalStore", call.span));
             return;
         }
+        if self.react.is_effect_event_call(call) {
+            self.remaining_compiled_hook_call
+                .get_or_insert(("useEffectEvent", call.span));
+            return;
+        }
         walk_call_expression(self, call);
     }
 
@@ -400,6 +407,8 @@ fn transform_component<'a>(
     let mut state_symbols = BTreeMap::<SymbolId, StateReference<'a>>::new();
     let mut context_sources = BTreeSet::<SourceId>::new();
     let mut external_sources = BTreeSet::<SourceId>::new();
+    let mut effect_event_sources = BTreeSet::<SourceId>::new();
+    let mut effect_event_symbols = BTreeSet::<SymbolId>::new();
     let mut memo_sources = BTreeSet::<SourceId>::new();
     let iterative_plans = iterative::collect(&ast, body, scoping)?;
     let (mut item_source_symbols, mut item_state_symbols) = item_parameters(body, &ast);
@@ -484,6 +493,13 @@ fn transform_component<'a>(
                         path: Vec::new(),
                     },
                 );
+            } else if let Some((symbol, source)) =
+                effect_event_binding_symbol(declarator, &source_ids, &react)?
+            {
+                effect_event_symbols.insert(symbol);
+                if let Some(source) = source {
+                    effect_event_sources.insert(source);
+                }
             } else if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
                 && let Some(source) = source_ids.get(identifier.name.as_str())
                 && let Some(symbol) = identifier.symbol_id.get()
@@ -492,6 +508,8 @@ fn transform_component<'a>(
             }
         }
     }
+
+    validate_effect_event_uses(body, &react, scoping, &effect_event_symbols)?;
 
     reject_untracked_derived_bindings(body, scoping, &source_symbols, &item_source_symbols)?;
     let mut render_expression = render::lower_component_render(
@@ -546,6 +564,7 @@ fn transform_component<'a>(
                 &source_symbols,
                 &item_source_symbols,
             )?;
+            transform_effect_event_declarator(&ast, declarator, &react)?;
             if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
                 && ir.sources.iter().any(|source| {
                     source.kind == SourceKind::Derived
@@ -553,6 +572,7 @@ fn transform_component<'a>(
                         && !memo_sources.contains(&source.id)
                         && !context_sources.contains(&source.id)
                         && !external_sources.contains(&source.id)
+                        && !effect_event_sources.contains(&source.id)
                 })
             {
                 declarator.kind = VariableDeclarationKind::Let;
@@ -683,6 +703,7 @@ fn transform_component<'a>(
         if memo_sources.contains(write)
             || context_sources.contains(write)
             || external_sources.contains(write)
+            || effect_event_sources.contains(write)
         {
             continue;
         }
@@ -994,6 +1015,32 @@ fn external_store_binding_symbol<'a>(
     }))
 }
 
+fn effect_event_binding_symbol(
+    declarator: &VariableDeclarator<'_>,
+    sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
+) -> Result<Option<(SymbolId, Option<SourceId>)>, Diagnostic> {
+    let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+        return Ok(None);
+    };
+    let Some(Expression::CallExpression(call)) = &declarator.init else {
+        return Ok(None);
+    };
+    if !react.is_effect_event_call(call) {
+        return Ok(None);
+    }
+    let symbol = identifier.symbol_id.get().ok_or_else(|| {
+        analysis_error(format!(
+            "effect event {} has no semantic symbol",
+            identifier.name
+        ))
+    })?;
+    Ok(Some((
+        symbol,
+        sources.get(identifier.name.as_str()).copied(),
+    )))
+}
+
 fn transform_state_declarator<'a>(
     ast: &AstBuilder<'a>,
     declarator: &mut VariableDeclarator<'a>,
@@ -1207,6 +1254,107 @@ fn transform_external_store_declarator<'a>(
     }));
     declarator.init = Some(call_name(ast, CREATE_EXTERNAL_STORE, arguments));
     Ok(())
+}
+
+fn transform_effect_event_declarator<'a>(
+    ast: &AstBuilder<'a>,
+    declarator: &mut VariableDeclarator<'a>,
+    react: &ReactBindings<'_>,
+) -> Result<(), Diagnostic> {
+    let Some(Expression::CallExpression(hook_call)) = &declarator.init else {
+        return Ok(());
+    };
+    if !react.is_effect_event_call(hook_call) {
+        return Ok(());
+    }
+    if hook_call.arguments.len() != 1 || hook_call.arguments[0].is_spread() {
+        return Err(unsupported("useEffectEvent requires exactly one callback")
+            .with_span(SourceSpan::new(hook_call.span.start, hook_call.span.end)));
+    }
+    let callback = hook_call.arguments[0]
+        .as_expression()
+        .expect("spread arguments were rejected")
+        .clone_in_with_semantic_ids(ast.allocator());
+    declarator.init = Some(call_name(
+        ast,
+        CREATE_EFFECT_EVENT,
+        [ident(ast, SCOPE), callback],
+    ));
+    Ok(())
+}
+
+fn validate_effect_event_uses(
+    body: &FunctionBody<'_>,
+    react: &ReactBindings<'_>,
+    scoping: &Scoping,
+    symbols: &BTreeSet<SymbolId>,
+) -> Result<(), Diagnostic> {
+    if symbols.is_empty() {
+        return Ok(());
+    }
+    let mut callbacks = EffectCallbackSpanCollector {
+        react,
+        spans: Vec::new(),
+    };
+    callbacks.visit_function_body(body);
+    let mut validator = EffectEventReferenceValidator {
+        scoping,
+        symbols,
+        callback_spans: &callbacks.spans,
+        invalid: None,
+    };
+    validator.visit_function_body(body);
+    validator.invalid.map_or(Ok(()), |span| {
+        Err(
+            unsupported("effect events may only be referenced inside an effect callback")
+                .with_span(SourceSpan::new(span.start, span.end)),
+        )
+    })
+}
+
+struct EffectCallbackSpanCollector<'r, 's> {
+    react: &'r ReactBindings<'s>,
+    spans: Vec<Span>,
+}
+
+impl<'a> Visit<'a> for EffectCallbackSpanCollector<'_, '_> {
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if self.react.effect_hook_call(call).is_some()
+            && let Some(callback) = call.arguments.first().and_then(Argument::as_expression)
+        {
+            self.spans.push(callback.span());
+        }
+        walk_call_expression(self, call);
+    }
+}
+
+struct EffectEventReferenceValidator<'s> {
+    scoping: &'s Scoping,
+    symbols: &'s BTreeSet<SymbolId>,
+    callback_spans: &'s [Span],
+    invalid: Option<Span>,
+}
+
+impl<'a> Visit<'a> for EffectEventReferenceValidator<'_> {
+    fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
+        if self.invalid.is_some() {
+            return;
+        }
+        let Some(symbol) = crate::react_bindings::reference_symbol(identifier, self.scoping) else {
+            return;
+        };
+        if !self.symbols.contains(&symbol) {
+            return;
+        }
+        let span = identifier.span;
+        if !self
+            .callback_spans
+            .iter()
+            .any(|callback| callback.start <= span.start && span.end <= callback.end)
+        {
+            self.invalid = Some(span);
+        }
+    }
 }
 
 fn derived_expressions<'a>(
@@ -2823,6 +2971,7 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>, program: &Program<'a>) -> Statement<
         ("choose", CHOOSE),
         ("createCompiledContext", CREATE_CONTEXT),
         ("createCompiledExternalStore", CREATE_EXTERNAL_STORE),
+        ("createCompiledEffectEvent", CREATE_EFFECT_EVENT),
         ("createCompiledMemo", CREATE_MEMO),
         ("createCompiledProp", CREATE_PROP),
         ("createCompiledRestProp", CREATE_REST_PROP),

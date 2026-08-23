@@ -151,6 +151,10 @@ impl<'s> ReactBindings<'s> {
         self.is_named_call(call, "useSyncExternalStore")
     }
 
+    pub(crate) fn is_effect_event_call(&self, call: &CallExpression<'_>) -> bool {
+        self.is_named_call(call, "useEffectEvent")
+    }
+
     fn is_named_call(&self, call: &CallExpression<'_>, name: &str) -> bool {
         match call.callee.without_parentheses() {
             Expression::Identifier(identifier) => reference_symbol(identifier, self.scoping)
