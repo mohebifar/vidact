@@ -200,15 +200,7 @@ fn lower_snapshot(
         component_name,
         component_span,
         &control_flow,
-    )
-    .map_err(|message| {
-        let code = if message.contains("not a supported named function declaration") {
-            DiagnosticCode::UnsupportedComponentForm
-        } else {
-            DiagnosticCode::AnalysisFailed
-        };
-        Diagnostic::new(code, message).with_span(component_span)
-    })?;
+    )?;
     let def_use = CompilerDefUse::new(analysis);
     validate_destructive_render_writes(&control_flow, &syntax, component_name, component_span)?;
     let phi_declarations = control_flow
@@ -366,9 +358,9 @@ fn lower_snapshot(
                     updaters.len() + collected.len(),
                 )?;
                 collected.extend(next);
-                Ok::<_, String>(collected)
+                Ok::<_, Diagnostic>(collected)
             })
-            .map_err(|message| analysis_error(message).with_span(component_span))?,
+            .map_err(|diagnostic| diagnostic.with_fallback_span(Some(component_span)))?,
     );
 
     Ok(ComponentFacts::new(component_name, source_facts, updaters)

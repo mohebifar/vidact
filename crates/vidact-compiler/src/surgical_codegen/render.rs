@@ -8,7 +8,7 @@ use oxc_span::{ContentEq, GetSpan, SPAN};
 use oxc_syntax::{operator::BinaryOperator, symbol::SymbolId};
 
 use crate::{
-    Diagnostic,
+    Diagnostic, SourceSpan,
     analysis::{SourceId, SourceKind},
     ir::ComponentIr,
     render_flow::{RenderDecisionKind, RenderFlowNodeId, RenderFlowNodeKind},
@@ -119,9 +119,11 @@ impl<'a> RenderLowerer<'a, '_> {
                             | Expression::BooleanLiteral(_)
                             | Expression::NullLiteral(_)
                     ) {
+                        let span = test.span();
                         return Err(super::unsupported(
                             "terminal render switch cases currently require literal tests",
-                        ));
+                        )
+                        .with_span(SourceSpan::from_oxc(span)));
                     }
                     let equality = Expression::new_binary_expression(
                         SPAN,
@@ -162,7 +164,8 @@ impl<'a> RenderLowerer<'a, '_> {
         if !reads.item.is_empty() {
             return Err(super::unsupported(
                 "render decisions inside keyed item regions are not implemented",
-            ));
+            )
+            .with_span(SourceSpan::from_oxc(test.span())));
         }
         let mode = match kind {
             RenderDecisionKind::NullishCoalescing => "not-nullish",
@@ -304,10 +307,12 @@ impl<'a> RenderLowerer<'a, '_> {
             )),
             SourceKind::Prop | SourceKind::State => Err(super::unsupported(
                 "state- or prop-valued component types require callable slot lowering",
-            )),
+            )
+            .with_span(SourceSpan::from_oxc(identifier.span))),
             SourceKind::Context | SourceKind::External => Err(super::unsupported(
                 "context- or external-valued component types require an explicit reactive source",
-            )),
+            )
+            .with_span(SourceSpan::from_oxc(identifier.span))),
         }
     }
 
@@ -369,17 +374,22 @@ impl<'a> RenderLowerer<'a, '_> {
             if name == "key" {
                 continue;
             }
-            if name == "ref" {
-                return Err(super::unsupported(
-                    "branch-varying ref identity is unsupported",
-                ));
-            }
             let left = consequent_indexes
                 .get(&name)
                 .map(|index| &consequent.attributes[*index]);
             let right = alternate_indexes
                 .get(&name)
                 .map(|index| &alternate.attributes[*index]);
+            if name == "ref" {
+                let span = left
+                    .or(right)
+                    .expect("ref came from one alternative")
+                    .span();
+                return Err(
+                    super::unsupported("branch-varying ref identity is unsupported")
+                        .with_span(SourceSpan::from_oxc(span)),
+                );
+            }
             let left_value = self.attribute_expression(left)?;
             let right_value = self.attribute_expression(right)?;
             if left_value.content_eq(&right_value) {
@@ -441,6 +451,7 @@ impl<'a> RenderLowerer<'a, '_> {
                 .map(|expression| expression.clone_in_with_semantic_ids(self.ast.allocator()))
                 .ok_or_else(|| {
                     super::unsupported("empty JSX attribute expressions are unsupported")
+                        .with_span(SourceSpan::from_oxc(container.span))
                 }),
             Some(JSXAttributeValue::Element(element)) => Ok(Expression::JSXElement(
                 element.clone_in_with_semantic_ids(self.ast.allocator()),
@@ -471,7 +482,8 @@ impl<'a> RenderLowerer<'a, '_> {
                 if consequent.children.len() != alternate.children.len() {
                     return Err(super::unsupported(
                         "aligned JSX children currently require equal child positions",
-                    ));
+                    )
+                    .with_span(SourceSpan::from_oxc(consequent.span)));
                 }
                 for (consequent, alternate) in
                     consequent.children.iter_mut().zip(&alternate.children)
@@ -522,10 +534,14 @@ impl<'a> RenderLowerer<'a, '_> {
                 .expression
                 .as_expression()
                 .map(|expression| expression.clone_in_with_semantic_ids(self.ast.allocator()))
-                .ok_or_else(|| super::unsupported("empty JSX child expressions are unsupported")),
-            JSXChild::Spread(_) => Err(super::unsupported(
+                .ok_or_else(|| {
+                    super::unsupported("empty JSX child expressions are unsupported")
+                        .with_span(SourceSpan::from_oxc(container.span))
+                }),
+            JSXChild::Spread(spread) => Err(super::unsupported(
                 "spread JSX children are unsupported in aligned render alternatives",
-            )),
+            )
+            .with_span(SourceSpan::from_oxc(spread.span))),
         }
     }
 }
@@ -538,12 +554,14 @@ fn simple_attribute_indexes(
         let JSXAttributeItem::Attribute(attribute) = item else {
             return Err(super::unsupported(
                 "JSX spreads cannot be aligned across render alternatives",
-            ));
+            )
+            .with_span(SourceSpan::from_oxc(item.span())));
         };
         let JSXAttributeName::Identifier(name) = &attribute.name else {
-            return Err(super::unsupported(
-                "namespaced JSX attributes cannot be aligned",
-            ));
+            return Err(
+                super::unsupported("namespaced JSX attributes cannot be aligned")
+                    .with_span(SourceSpan::from_oxc(attribute.span)),
+            );
         };
         indexes.insert(name.name.to_string(), index);
     }

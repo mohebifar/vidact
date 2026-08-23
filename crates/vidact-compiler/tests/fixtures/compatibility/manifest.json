@@ -57,7 +57,49 @@
       "path": "rejected/reactive-spread.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",
-      "spanContains": "function ReactiveSpread"
+      "spanContains": "{...attributes}"
+    },
+    {
+      "path": "rejected/aliased-prop.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "title: label"
+    },
+    {
+      "path": "rejected/rest-props.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "...rest"
+    },
+    {
+      "path": "rejected/foreign-array-call.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "createTuple()"
+    },
+    {
+      "path": "rejected/invalid-list-key.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "items.map"
+    },
+    {
+      "path": "rejected/branch-varying-ref.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "ref={first}"
+    },
+    {
+      "path": "rejected/intrinsic-component-child.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "<div />"
+    },
+    {
+      "path": "rejected/slot-component-type.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "Type"
     },
     {
       "path": "rejected/raw-html-children.tsx",

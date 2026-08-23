@@ -254,7 +254,8 @@ fn rejects_foreign_namespace_hooks() {
         })
         .expect_err("a foreign namespace must never become Vidact state");
 
-    assert_eq!(diagnostics[0].code, DiagnosticCode::AnalysisFailed);
+    assert_eq!(diagnostics[0].code, DiagnosticCode::UnsupportedSyntax);
+    assert!(diagnostics[0].span.is_some());
     assert!(
         diagnostics[0]
             .message
@@ -314,7 +315,8 @@ fn rejects_keyed_maps_outside_the_normalized_key_subset() {
             })
             .expect_err("unsupported key expressions must not fall through as text updaters");
 
-        assert_eq!(diagnostics[0].code, DiagnosticCode::AnalysisFailed);
+        assert_eq!(diagnostics[0].code, DiagnosticCode::UnsupportedSyntax);
+        assert!(diagnostics[0].span.is_some());
         assert!(diagnostics[0].message.contains("keyed maps require"));
     }
 }
@@ -334,7 +336,8 @@ fn rejects_foreign_hooks_instead_of_classifying_by_name() {
         })
         .expect_err("a foreign function named useState must never become Vidact state");
 
-    assert_eq!(diagnostics[0].code, DiagnosticCode::AnalysisFailed);
+    assert_eq!(diagnostics[0].code, DiagnosticCode::UnsupportedSyntax);
+    assert!(diagnostics[0].span.is_some());
     assert!(
         diagnostics[0]
             .message

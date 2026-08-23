@@ -16,7 +16,7 @@ use oxc_ast_visit::{
 use oxc_codegen::{Codegen, CodegenOptions};
 use oxc_parser::Parser;
 use oxc_semantic::{Scoping, SemanticBuilder};
-use oxc_span::{SPAN, SourceType, Span};
+use oxc_span::{GetSpan, SPAN, SourceType, Span};
 use oxc_syntax::{operator::LogicalOperator, scope::ScopeFlags, symbol::SymbolId};
 
 use crate::{
@@ -312,7 +312,7 @@ fn transform_component<'a>(
         .body
         .as_deref_mut()
         .ok_or_else(|| unsupported("compiled component has no body"))?;
-    let mut render_start = render_suffix_start(body, ir)?;
+    let mut render_start = render_suffix_start(body)?;
     let mut source_symbols = BTreeMap::<SymbolId, SourceId>::new();
     let mut state_symbols = BTreeMap::<SymbolId, StateReference<'a>>::new();
     let iterative_plans = iterative::collect(&ast, body, scoping)?;
@@ -600,12 +600,13 @@ fn state_binding_symbols<'a>(
         Some(BindingPattern::BindingIdentifier(setter)),
     ] = pattern.elements.as_slice()
     else {
-        return Err(unsupported("useState must bind [value, setter]"));
+        return Err(unsupported("useState must bind [value, setter]")
+            .with_span(SourceSpan::new(pattern.span.start, pattern.span.end)));
     };
-    let source = sources
-        .get(value.name.as_str())
-        .copied()
-        .ok_or_else(|| unsupported(format!("state {} is absent from analysis", value.name)))?;
+    let source = sources.get(value.name.as_str()).copied().ok_or_else(|| {
+        unsupported(format!("state {} is absent from analysis", value.name))
+            .with_span(SourceSpan::new(value.span.start, value.span.end))
+    })?;
     let value_symbol = value
         .symbol_id
         .get()
@@ -643,11 +644,16 @@ fn transform_state_declarator<'a>(
         unreachable!();
     };
     let [initial] = call.arguments.as_slice() else {
-        return Err(unsupported("useState requires exactly one initializer"));
+        return Err(unsupported("useState requires exactly one initializer")
+            .with_span(SourceSpan::new(call.span.start, call.span.end)));
     };
     let initial = initial
         .as_expression()
-        .ok_or_else(|| unsupported("spread state initializers are unsupported"))?
+        .ok_or_else(|| {
+            let span = initial.span();
+            unsupported("spread state initializers are unsupported")
+                .with_span(SourceSpan::new(span.start, span.end))
+        })?
         .clone_in_with_semantic_ids(ast.allocator());
     declarator.id = BindingPattern::new_binding_identifier(SPAN, value_name, ast);
     declarator.init = Some(call_name(
@@ -794,9 +800,12 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             self.item_source_symbols,
         );
         if !reads.is_empty() {
-            self.diagnostic = Some(unsupported(
-                "reactive JSX spreads are unsupported until spread deletion semantics are implemented",
-            ));
+            self.diagnostic = Some(
+                unsupported(
+                    "reactive JSX spreads are unsupported until spread deletion semantics are implemented",
+                )
+                .with_span(SourceSpan::new(attribute.span.start, attribute.span.end)),
+            );
             return;
         }
         walk_jsx_spread_attribute(self, attribute);
@@ -899,9 +908,13 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
                 self.item_source_symbols,
             );
             if !reads.item.is_empty() {
-                self.diagnostic = Some(unsupported(
-                    "nested keyed collections that depend on an outer item are unsupported",
-                ));
+                let span = expression.span();
+                self.diagnostic = Some(
+                    unsupported(
+                        "nested keyed collections that depend on an outer item are unsupported",
+                    )
+                    .with_span(SourceSpan::new(span.start, span.end)),
+                );
                 return;
             }
             self.visit_expression(&mut render);
@@ -933,9 +946,11 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             return;
         }
         if contains_reactive_jsx {
-            self.diagnostic = Some(unsupported(
-                "reactive JSX blocks must use a keyed map or an && conditional",
-            ));
+            let span = expression.span();
+            self.diagnostic = Some(
+                unsupported("reactive JSX blocks must use a keyed map or an && conditional")
+                    .with_span(SourceSpan::new(span.start, span.end)),
+            );
             return;
         }
         let evaluate = expression.clone_in_with_semantic_ids(self.ast.allocator());
@@ -984,17 +999,20 @@ fn prop_binding_symbols<'a>(
         let BindingPattern::ObjectPattern(pattern) = &parameter.pattern else {
             continue;
         };
-        if pattern.rest.is_some() {
+        if let Some(rest) = &pattern.rest {
             return Err(unsupported(
                 "rest props are unsupported until the compiled prop store models deletion",
-            ));
+            )
+            .with_span(SourceSpan::new(rest.span.start, rest.span.end)));
         }
         for property in &pattern.properties {
             if property.computed {
-                return Err(unsupported("computed prop destructuring is unsupported"));
+                return Err(unsupported("computed prop destructuring is unsupported")
+                    .with_span(SourceSpan::new(property.span.start, property.span.end)));
             }
             let Some(prop_name) = property.key.static_name() else {
-                return Err(unsupported("dynamic prop destructuring is unsupported"));
+                return Err(unsupported("dynamic prop destructuring is unsupported")
+                    .with_span(SourceSpan::new(property.span.start, property.span.end)));
             };
             if !prop_sources.contains(prop_name.as_ref()) {
                 continue;
@@ -1003,17 +1021,24 @@ fn prop_binding_symbols<'a>(
                 BindingPattern::BindingIdentifier(identifier) => (identifier.as_ref(), None),
                 BindingPattern::AssignmentPattern(assignment) => {
                     let BindingPattern::BindingIdentifier(identifier) = &assignment.left else {
-                        return Err(unsupported("nested prop defaults are unsupported"));
+                        let span = assignment.left.span();
+                        return Err(unsupported("nested prop defaults are unsupported")
+                            .with_span(SourceSpan::new(span.start, span.end)));
                     };
                     (
                         identifier.as_ref(),
                         Some(assignment.right.clone_in_with_semantic_ids(allocator)),
                     )
                 }
-                _ => return Err(unsupported("nested prop destructuring is unsupported")),
+                _ => {
+                    let span = property.value.span();
+                    return Err(unsupported("nested prop destructuring is unsupported")
+                        .with_span(SourceSpan::new(span.start, span.end)));
+                }
             };
             if identifier.name.as_str() != prop_name.as_ref() {
-                return Err(unsupported("aliased prop destructuring is unsupported"));
+                return Err(unsupported("aliased prop destructuring is unsupported")
+                    .with_span(SourceSpan::new(property.span.start, property.span.end)));
             }
             let Some(source) = sources.get(prop_name.as_ref()).copied() else {
                 return Err(analysis_error(format!(
@@ -1039,11 +1064,11 @@ fn prop_binding_symbols<'a>(
     Ok(bindings)
 }
 
-fn render_suffix_start(body: &FunctionBody<'_>, ir: &ComponentIr) -> Result<usize, Diagnostic> {
+fn render_suffix_start(body: &FunctionBody<'_>) -> Result<usize, Diagnostic> {
     let Some(start) = body.statements.iter().position(contains_component_return) else {
         return Err(unsupported("compiled component has no return statement"));
     };
-    if body.statements[start..].iter().any(|statement| {
+    let unsupported_statement = body.statements[start..].iter().find(|statement| {
         !matches!(
             statement,
             Statement::ReturnStatement(_)
@@ -1051,27 +1076,14 @@ fn render_suffix_start(body: &FunctionBody<'_>, ir: &ComponentIr) -> Result<usiz
                 | Statement::SwitchStatement(_)
                 | Statement::EmptyStatement(_)
         )
-    }) {
-        let span = ir
-            .control_flow
-            .blocks
-            .iter()
-            .filter_map(|block| {
-                matches!(
-                    block.terminal.kind,
-                    crate::analysis::ControlFlowTerminalKind::Return(
-                        crate::analysis::ControlFlowReturnVariant::Explicit
-                    )
-                )
-                .then_some(block.terminal.span)
-                .flatten()
-            })
-            .min_by_key(|span| span.start);
+    });
+    if let Some(statement) = unsupported_statement {
+        let span = statement.span();
         return Err(Diagnostic::new(
             DiagnosticCode::UnsupportedControlFlow,
             "statements between render-selecting branches are deferred to synchronous-region lowering",
         )
-        .with_fallback_span(span));
+        .with_span(SourceSpan::new(span.start, span.end)));
     }
     Ok(start)
 }
@@ -1111,10 +1123,12 @@ fn reject_untracked_derived_bindings(
             let reads =
                 immediate_dependencies(initializer, scoping, source_symbols, item_source_symbols);
             if !reads.is_empty() {
+                let span = initializer.span();
                 return Err(unsupported(format!(
                     "reactive local {} is absent from compiler data-flow analysis",
                     identifier.name
-                )));
+                ))
+                .with_span(SourceSpan::new(span.start, span.end)));
             }
         }
     }

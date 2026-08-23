@@ -24,6 +24,11 @@ impl SourceSpan {
     pub const fn new(start: u32, end: u32) -> Self {
         Self { start, end }
     }
+
+    #[must_use]
+    pub(crate) const fn from_oxc(span: oxc_span::Span) -> Self {
+        Self::new(span.start, span.end)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -28,6 +28,13 @@ CLI renders a spanned diagnostic as `filename:line:column`; downstream
 transform errors fall back to the component span until their individual AST
 sites expose narrower spans.
 
+Classifier and code-generation rejections carry `Diagnostic` values across
+their internal boundary rather than collapsing to strings. Known unsupported
+prop patterns, state declarations, JSX spreads and blocks, list keys, namespace
+violations, component slots, and branch-varying refs select their originating
+AST nodes. Component-span fallback is reserved for analysis invariants that do
+not correspond to one source construct.
+
 React Compiler's owned CFG snapshot supplies exact return-terminal spans.
 Vidact uses those facts to reject multiple render returns with
 `UnsupportedControlFlow` at the first return site. Nested callback returns and
@@ -72,6 +79,8 @@ app compiled through the Vite plugin.
 - Facts, sources, and updaters from two components never mix.
 - A rejected manifest fixture always has the expected code and a valid original
   source span.
+- A known unsupported syntax family never substitutes the enclosing component
+  span for its feature-site span.
 - No `.tsx` compatibility fixture exists outside the manifest.
 - Browser evidence checks MutationObserver records and node identity separately.
 
@@ -94,10 +103,10 @@ Ordinary parent/child modules can now compile without splitting components into
 files, and diagnostics can point back to original TSX. The Oxc patch now
 includes an owned control-flow snapshot as well as the function span.
 Arrow/default component lowering, DOM-range lowering for multi-return control
-flow, and precise spans for features other than returns remain follow-up work.
-Original-TSX source maps were completed by the versioned compiler protocol.
-Adding a compatibility fixture requires an explicit contract classification,
-which is intentional maintenance overhead.
+flow, and precise spans for internal analysis failures without a single source
+construct remain follow-up work. Original-TSX source maps were completed by the
+versioned compiler protocol. Adding a compatibility fixture requires an
+explicit contract classification, which is intentional maintenance overhead.
 
 ## Verification
 

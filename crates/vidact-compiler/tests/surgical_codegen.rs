@@ -534,7 +534,8 @@ fn rejects_keyed_maps_the_analysis_ir_cannot_represent() {
         })
         .expect_err("surgical codegen must be gated by the normalized key subset");
 
-        assert_eq!(diagnostics[0].code, DiagnosticCode::AnalysisFailed);
+        assert_eq!(diagnostics[0].code, DiagnosticCode::UnsupportedSyntax);
+        assert!(diagnostics[0].span.is_some());
         assert!(diagnostics[0].message.contains("keyed maps require"));
     }
 }

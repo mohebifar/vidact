@@ -2,7 +2,7 @@ use oxc_ast::{ast::*, builder::AstBuilder};
 use oxc_ast_visit::{VisitMut, walk_mut::walk_jsx_element};
 use oxc_span::SPAN;
 
-use crate::Diagnostic;
+use crate::{Diagnostic, SourceSpan};
 
 const NAMESPACE_PROP: &str = "__vidactNamespace";
 
@@ -40,12 +40,18 @@ impl<'a> VisitMut<'a> for NamespaceTransformer<'a, '_> {
         if self.diagnostic.is_some() {
             return;
         }
-        if element.opening_element.attributes.iter().any(|item| {
-            matches!(item, JSXAttributeItem::Attribute(attribute) if attribute.is_identifier(NAMESPACE_PROP))
+        if let Some(attribute) = element.opening_element.attributes.iter().find_map(|item| {
+            let JSXAttributeItem::Attribute(attribute) = item else {
+                return None;
+            };
+            attribute.is_identifier(NAMESPACE_PROP).then_some(attribute)
         }) {
-            self.diagnostic = Some(super::unsupported(format!(
-                "{NAMESPACE_PROP} is reserved for namespace-aware JSX lowering"
-            )));
+            self.diagnostic = Some(
+                super::unsupported(format!(
+                    "{NAMESPACE_PROP} is reserved for namespace-aware JSX lowering"
+                ))
+                .with_span(SourceSpan::new(attribute.span.start, attribute.span.end)),
+            );
             return;
         }
 
@@ -53,9 +59,12 @@ impl<'a> VisitMut<'a> for NamespaceTransformer<'a, '_> {
             .filter(|name| name.chars().next().is_some_and(char::is_lowercase));
         let is_component = tag.is_none();
         if self.inside_component_children && tag.is_some() {
-            self.diagnostic = Some(super::unsupported(
-                "JSX intrinsic children passed to a component require deferred namespace-aware construction",
-            ));
+            self.diagnostic = Some(
+                super::unsupported(
+                    "JSX intrinsic children passed to a component require deferred namespace-aware construction",
+                )
+                .with_span(SourceSpan::new(element.span.start, element.span.end)),
+            );
             return;
         }
         let element_context = element_context(self.context, tag);

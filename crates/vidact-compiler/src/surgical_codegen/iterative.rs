@@ -4,9 +4,10 @@ use oxc_allocator::{CloneIn, GetAllocator};
 use oxc_ast::{ast::*, builder::AstBuilder};
 use oxc_ast_visit::{VisitMut, walk_mut::walk_expression};
 use oxc_semantic::Scoping;
+use oxc_span::GetSpan;
 use oxc_syntax::symbol::SymbolId;
 
-use crate::{Diagnostic, analysis::SourceId};
+use crate::{Diagnostic, SourceSpan, analysis::SourceId};
 
 use super::{
     INDEXED, ITEM_INDEX, ITEM_SCOPE, KEYED, SCOPE, StateReference, append_arrow_parameter,
@@ -215,14 +216,16 @@ fn list_key<'a>(
         return Ok(None);
     };
     let Some(JSXAttributeValue::ExpressionContainer(container)) = &key.value else {
-        return Err(unsupported(
-            "iterative JSX keys require key={item} or key={item.property}",
-        ));
+        return Err(
+            unsupported("iterative JSX keys require key={item} or key={item.property}")
+                .with_span(SourceSpan::new(key.span.start, key.span.end)),
+        );
     };
     let Some(expression) = container.expression.as_expression() else {
-        return Err(unsupported(
-            "iterative JSX keys require key={item} or key={item.property}",
-        ));
+        return Err(
+            unsupported("iterative JSX keys require key={item} or key={item.property}")
+                .with_span(SourceSpan::new(key.span.start, key.span.end)),
+        );
     };
     let valid = match expression.without_parentheses() {
         Expression::Identifier(identifier) => reference_symbol(identifier, scoping) == Some(item),
@@ -237,7 +240,11 @@ fn list_key<'a>(
     };
     valid
         .then(|| expression.clone_in(ast.allocator()))
-        .ok_or_else(|| unsupported("iterative JSX keys require key={item} or key={item.property}"))
+        .ok_or_else(|| {
+            let span = expression.span();
+            unsupported("iterative JSX keys require key={item} or key={item.property}")
+                .with_span(SourceSpan::new(span.start, span.end))
+        })
         .map(Some)
 }
 
@@ -276,9 +283,11 @@ impl<'a> VisitMut<'a> for IterativeJsxTransformer<'a, '_, '_> {
             self.item_source_symbols,
         );
         if !reads.item.is_empty() {
-            self.diagnostic = Some(unsupported(
-                "iterative JSX collections cannot depend on an outer row",
-            ));
+            let span = plan.collection.span();
+            self.diagnostic = Some(
+                unsupported("iterative JSX collections cannot depend on an outer row")
+                    .with_span(SourceSpan::new(span.start, span.end)),
+            );
             return;
         }
         let mut arguments = vec![

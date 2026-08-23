@@ -30,7 +30,10 @@ pub(crate) fn lower_render_flow(
         })
         .collect::<Vec<_>>();
     cfg_returns.sort_by_key(|span| (span.start, span.end));
-    let mut ast_returns = ast_returns.into_iter().map(source_span).collect::<Vec<_>>();
+    let mut ast_returns = ast_returns
+        .into_iter()
+        .map(SourceSpan::from_oxc)
+        .collect::<Vec<_>>();
     ast_returns.sort_by_key(|span| (span.start, span.end));
     if ast_returns != cfg_returns {
         return Err(
@@ -97,7 +100,7 @@ impl Builder {
                 })?;
                 Ok(self.push(RenderFlowNodeKind::Decision {
                     kind: RenderDecisionKind::If,
-                    test: source_span(statement.test.span()),
+                    test: SourceSpan::from_oxc(statement.test.span()),
                     consequent,
                     alternate,
                 }))
@@ -135,14 +138,17 @@ impl Builder {
                 );
             }
             let target = self.lower_statements(&case.consequent, continuation)?;
-            let test = case.test.as_ref().map(|test| source_span(test.span()));
+            let test = case
+                .test
+                .as_ref()
+                .map(|test| SourceSpan::from_oxc(test.span()));
             if test.is_none() {
                 fallback = target;
             }
             cases.push(RenderSwitchCase { test, target });
         }
         Ok(self.push(RenderFlowNodeKind::Switch {
-            discriminant: source_span(statement.discriminant.span()),
+            discriminant: SourceSpan::from_oxc(statement.discriminant.span()),
             cases,
             fallback,
         }))
@@ -158,7 +164,7 @@ impl Builder {
                 let alternate = self.lower_expression(&expression.alternate)?;
                 Ok(self.push(RenderFlowNodeKind::Decision {
                     kind: RenderDecisionKind::Ternary,
-                    test: source_span(expression.test.span()),
+                    test: SourceSpan::from_oxc(expression.test.span()),
                     consequent,
                     alternate,
                 }))
@@ -175,7 +181,7 @@ impl Builder {
                 };
                 Ok(self.push(RenderFlowNodeKind::Decision {
                     kind,
-                    test: source_span(expression.left.span()),
+                    test: SourceSpan::from_oxc(expression.left.span()),
                     consequent,
                     alternate,
                 }))
@@ -186,7 +192,7 @@ impl Builder {
 
     fn value(&mut self, expression: &Expression<'_>) -> RenderFlowNodeId {
         self.push(RenderFlowNodeKind::Value {
-            expression: Some(source_span(expression.span())),
+            expression: Some(SourceSpan::from_oxc(expression.span())),
             identity: render_identity(expression),
         })
     }
@@ -325,10 +331,10 @@ fn jsx_key(element: &JSXOpeningElement<'_>) -> RenderIdentityKey {
                 Expression::BigIntLiteral(value) => {
                     RenderIdentityKey::Static(value.value.to_string())
                 }
-                _ => RenderIdentityKey::Dynamic(source_span(expression.span())),
+                _ => RenderIdentityKey::Dynamic(SourceSpan::from_oxc(expression.span())),
             }
         }
-        Some(value) => RenderIdentityKey::Dynamic(source_span(value.span())),
+        Some(value) => RenderIdentityKey::Dynamic(SourceSpan::from_oxc(value.span())),
         None => RenderIdentityKey::Absent,
     }
 }
@@ -395,10 +401,6 @@ fn contains_component_return(statement: &Statement<'_>) -> bool {
     let mut returns = vec![];
     collect_statement_returns(statement, &mut returns);
     !returns.is_empty()
-}
-
-const fn source_span(span: Span) -> SourceSpan {
-    SourceSpan::new(span.start, span.end)
 }
 
 fn prune_unreachable(graph: RenderFlowGraph) -> RenderFlowGraph {

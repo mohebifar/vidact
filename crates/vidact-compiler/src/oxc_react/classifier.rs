@@ -3,10 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
 use oxc_semantic::Scoping;
+use oxc_span::GetSpan;
 use oxc_syntax::symbol::SymbolId;
 
 use crate::{
-    SourceSpan,
+    Diagnostic, DiagnosticCode, SourceSpan,
     analysis::{
         ControlFlowFacts, KeyPath, SourceId, SourceKind, UpdaterFact, UpdaterId, UpdaterKind,
     },
@@ -37,52 +38,81 @@ pub(super) fn classify_component<'a>(
     component_name: &str,
     component_span: SourceSpan,
     control_flow: &ControlFlowFacts,
-) -> Result<ComponentSyntax<'a>, String> {
+) -> Result<ComponentSyntax<'a>, Diagnostic> {
     let function =
         component_function(program, component_name, Some(component_span)).ok_or_else(|| {
-            format!("component {component_name} is not a supported named function declaration")
+            Diagnostic::new(
+                DiagnosticCode::UnsupportedComponentForm,
+                format!("component {component_name} is not a supported named function declaration"),
+            )
+            .with_span(component_span)
         })?;
-    let body = function
-        .body
-        .as_deref()
-        .ok_or_else(|| format!("component {component_name} has no body"))?;
+    let body = function.body.as_deref().ok_or_else(|| {
+        unsupported_at(
+            format!("component {component_name} has no body"),
+            function.span,
+        )
+    })?;
     let react = ReactBindings::new(program, scoping);
     let mut sources = BTreeMap::new();
 
     for parameter in &function.params.items {
         let BindingPattern::ObjectPattern(pattern) = &parameter.pattern else {
-            return Err(
-                "compiled props require direct object destructuring in the component parameter"
-                    .to_string(),
-            );
+            return Err(unsupported_at(
+                "compiled props require direct object destructuring in the component parameter",
+                parameter.pattern.span(),
+            ));
         };
-        if pattern.rest.is_some() {
-            return Err("rest props are unsupported until prop deletion is modeled".to_string());
+        if let Some(rest) = &pattern.rest {
+            return Err(unsupported_at(
+                "rest props are unsupported until prop deletion is modeled",
+                rest.span,
+            ));
         }
         for property in &pattern.properties {
             if property.computed {
-                return Err("computed prop destructuring is unsupported".to_string());
+                return Err(unsupported_at(
+                    "computed prop destructuring is unsupported",
+                    property.span,
+                ));
             }
             let Some(prop_name) = property.key.static_name() else {
-                return Err("dynamic prop destructuring is unsupported".to_string());
+                return Err(unsupported_at(
+                    "dynamic prop destructuring is unsupported",
+                    property.span,
+                ));
             };
             let identifier = match &property.value {
                 BindingPattern::BindingIdentifier(identifier) => identifier.as_ref(),
                 BindingPattern::AssignmentPattern(assignment) => {
                     let BindingPattern::BindingIdentifier(identifier) = &assignment.left else {
-                        return Err("nested prop defaults are unsupported".to_string());
+                        return Err(unsupported_at(
+                            "nested prop defaults are unsupported",
+                            assignment.left.span(),
+                        ));
                     };
                     identifier.as_ref()
                 }
-                _ => return Err("nested prop destructuring is unsupported".to_string()),
+                _ => {
+                    return Err(unsupported_at(
+                        "nested prop destructuring is unsupported",
+                        property.value.span(),
+                    ));
+                }
             };
             if identifier.name.as_str() != prop_name.as_ref() {
-                return Err("aliased prop destructuring is unsupported".to_string());
+                return Err(unsupported_at(
+                    "aliased prop destructuring is unsupported",
+                    property.span,
+                ));
             }
-            let symbol = identifier
-                .symbol_id
-                .get()
-                .ok_or_else(|| format!("semantic analysis did not resolve prop {prop_name}"))?;
+            let symbol = identifier.symbol_id.get().ok_or_else(|| {
+                Diagnostic::new(
+                    DiagnosticCode::AnalysisFailed,
+                    format!("semantic analysis did not resolve prop {prop_name}"),
+                )
+                .with_span(SourceSpan::from_oxc(identifier.span))
+            })?;
             let name = identifier.name.to_string();
             sources.insert(
                 name,
@@ -128,9 +158,15 @@ pub(super) fn classify_component<'a>(
     let mut return_expressions = vec![];
     collect_component_return_expressions(&body.statements, &mut return_expressions);
     if return_expressions.is_empty() {
-        return Err(format!("component {component_name} has no render return"));
+        return Err(unsupported_at(
+            format!("component {component_name} has no render return"),
+            body.span,
+        ));
     }
-    let render_flow = lower_render_flow(body, control_flow)?;
+    let render_flow = lower_render_flow(body, control_flow).map_err(|message| {
+        Diagnostic::new(DiagnosticCode::UnsupportedControlFlow, message)
+            .with_span(SourceSpan::from_oxc(body.span))
+    })?;
 
     Ok(ComponentSyntax {
         sources,
@@ -211,7 +247,7 @@ pub(super) fn render_updaters(
     scoping: &Scoping,
     source_symbols: &BTreeMap<SymbolId, SourceId>,
     first_updater_id: usize,
-) -> Result<Vec<UpdaterFact>, String> {
+) -> Result<Vec<UpdaterFact>, Diagnostic> {
     let mut collector = RenderUpdaterCollector {
         scoping,
         source_symbols,
@@ -230,7 +266,7 @@ pub(super) fn render_updaters(
 fn state_source(
     declarator: &VariableDeclarator<'_>,
     react: &ReactBindings<'_>,
-) -> Result<Option<(String, SourceSyntax)>, String> {
+) -> Result<Option<(String, SourceSyntax)>, Diagnostic> {
     let BindingPattern::ArrayPattern(pattern) = &declarator.id else {
         return Ok(None);
     };
@@ -238,19 +274,26 @@ fn state_source(
         return Ok(None);
     };
     if !react.is_use_state_call(call) {
-        return Err(
-            "array-destructured calls are unsupported unless the callee resolves to React useState"
-                .to_string(),
-        );
+        return Err(unsupported_at(
+            "array-destructured calls are unsupported unless the callee resolves to React useState",
+            call.span,
+        ));
     }
     let Some(Some(BindingPattern::BindingIdentifier(identifier))) = pattern.elements.first() else {
-        return Err("useState must bind a value identifier".to_string());
+        return Err(unsupported_at(
+            "useState must bind a value identifier",
+            pattern.span,
+        ));
     };
     let Some(symbol) = identifier.symbol_id.get() else {
-        return Err(format!(
-            "semantic analysis did not resolve state binding {}",
-            identifier.name
-        ));
+        return Err(Diagnostic::new(
+            DiagnosticCode::AnalysisFailed,
+            format!(
+                "semantic analysis did not resolve state binding {}",
+                identifier.name
+            ),
+        )
+        .with_span(SourceSpan::from_oxc(identifier.span)));
     };
     Ok(Some((
         identifier.name.to_string(),
@@ -267,7 +310,7 @@ struct RenderUpdaterCollector<'s> {
     source_symbols: &'s BTreeMap<SymbolId, SourceId>,
     updaters: Vec<UpdaterFact>,
     next_id: usize,
-    diagnostic: Option<String>,
+    diagnostic: Option<Diagnostic>,
 }
 
 impl RenderUpdaterCollector<'_> {
@@ -322,19 +365,21 @@ impl<'a> Visit<'a> for RenderUpdaterCollector<'_> {
                     semantic_reads(collection, self.scoping, self.source_symbols),
                 ),
                 ListIdentity::InvalidKey => {
-                    self.diagnostic = Some(
+                    self.diagnostic = Some(unsupported_at(
                         "keyed maps require key={item} or key={item.property}; other key expressions are unsupported"
                             .to_string(),
-                    );
+                        expression.span(),
+                    ));
                 }
             }
             return;
         }
         if is_jsx_rendering_map(expression) {
-            self.diagnostic = Some(
+            self.diagnostic = Some(unsupported_at(
                 "keyed maps require key={item} or key={item.property}; other key expressions are unsupported"
                     .to_string(),
-            );
+                expression.span(),
+            ));
             return;
         }
         self.push(
@@ -342,6 +387,11 @@ impl<'a> Visit<'a> for RenderUpdaterCollector<'_> {
             semantic_reads(expression, self.scoping, self.source_symbols),
         );
     }
+}
+
+fn unsupported_at(message: impl Into<String>, span: oxc_span::Span) -> Diagnostic {
+    Diagnostic::new(DiagnosticCode::UnsupportedSyntax, message)
+        .with_span(SourceSpan::from_oxc(span))
 }
 
 fn is_jsx_rendering_map(expression: &Expression<'_>) -> bool {
