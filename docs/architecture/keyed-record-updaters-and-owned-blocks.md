@@ -21,7 +21,19 @@ A keyed or conditional structural result is an owned block. The block may pass t
 
 The generated keyed callback receives `(itemSlot, indexSlot, itemScope)`. References to the source callback's item and index parameters become `.get()` calls. The key selector remains a raw-value callback so key calculation does not allocate slots before reconciliation.
 
-`binding` and `when` accept their component scope/mask plus an optional item scope/mask. Mounting registers the same update closure in every non-empty static domain. Owner disposal removes cross-scope registrations. `keyed` validates all next keys before updating records, moves retained node sequences into the new order, and disposes missing records.
+`binding`, `when`, `keyed`, and `indexed` accept their component scope/mask
+plus an optional item scope/mask. A nested list whose collection reads its outer
+row therefore reconciles when that retained outer item slot changes. Mounting
+registers the same update closure in every non-empty static domain. Owner
+disposal removes cross-scope registrations. `keyed` validates all next keys
+before updating records, moves retained node sequences into the new order, and
+disposes missing records.
+
+The generated item-scope identifier is not depth-indexed yet. A nested list may
+derive its collection from the outer row, but its render body cannot directly
+capture that outer row because the inner callback owns the nearest generated
+item scope. The compiler diagnoses such a reference at its identifier span
+instead of silently subscribing it to the wrong row.
 
 Owned blocks carry their update ownership from their producer. Passing one into a child component transfers a mountable value, not a React element tree and not a second owner. A second mount throws `compiled block is already mounted`.
 
@@ -29,6 +41,8 @@ Owned blocks carry their update ownership from their producer. Passing one into 
 
 - A retained key preserves its record owner and exact DOM nodes across object replacement and reorder.
 - Item-, index-, component-, and mixed-dependency bindings observe their current values.
+- A nested list collection observes replacement of its retained outer item and
+  reconciles its own records without replacing the outer record.
 - Key extraction receives raw collection values; row rendering receives slots.
 - Duplicate keys fail before the current DOM is changed.
 - Removing or changing a key disposes the old record exactly once.
@@ -44,12 +58,23 @@ Owned blocks carry their update ownership from their producer. Passing one into 
 
 ## Consequences
 
-Immutable updates to list records are surgical for supported keyed callbacks, and compiled arrays can be composed through prop boundaries. Explicit unkeyed maps and direct `for...of` accumulators now use the same record engine with position keys; see [Compiler-owned iterative JSX](compiler-owned-iterative-jsx.md). Each mounted record pays for a small scope and two state slots, and mixed bindings register in two scopes. Destructured callback parameters, nested collections derived from an outer item, broader imperative accumulator grammars, and arbitrary external JSX arrays remain unsupported and should fail or remain outside the public contract until separately designed.
+Immutable updates to list records are surgical for supported keyed callbacks,
+and compiled arrays can be composed through prop boundaries. Explicit unkeyed
+maps and direct `for...of` accumulators use the same record engine with position
+keys; see [Compiler-owned iterative JSX](compiler-owned-iterative-jsx.md). Each
+mounted record pays for a small scope and two state slots, and mixed bindings
+register in two scopes. Nested collections derived from an outer item are
+supported while direct outer-row captures remain diagnosed. Destructured
+callback parameters, broader imperative accumulator grammars, and arbitrary
+external JSX arrays remain outside the accepted contract.
 
 ## Verification
 
 - `packages/runtime/test/reactivity/compiled-dom.browser.test.ts` covers same-key object replacement, reorder, index updates, mixed component/item bindings, prop transport, and the single-mount rule.
 - `tests/browser/corpus/apps/roster/RosterApp.browser.test.ts` proves same-key updates, reorder, append, and JSX-array prop transport through compiled TSX.
+- `tests/browser/corpus/apps/control-flow/ControlFlowApp.browser.test.ts` proves
+  a nested keyed list reconciles from a retained outer item while preserving
+  both levels of DOM identity.
 - `crates/vidact-compiler/tests/surgical_codegen.rs` checks separate item/component domains, slot reads, raw key selectors, and generated callback shape.
 - `examples/todomvc/src/TodoApp.browser.test.ts` verifies a changed todo retains its exact `li` while rows are passed through `TodoList` as a prop.
 - Run `cargo test --workspace`, `pnpm test:runtime`, `pnpm test:browser`, `pnpm test:examples`, and `pnpm typecheck`.

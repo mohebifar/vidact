@@ -447,6 +447,65 @@ fn compiles_unkeyed_jsx_maps_into_explicit_indexed_owners() {
 }
 
 #[test]
+fn compiles_nested_keyed_maps_that_read_an_outer_item_collection() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "NestedItems.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function NestedItems(): Node {
+                const [groups, setGroups] = useState([
+                    { id: 'a', items: [{ id: 1, label: 'one' }] }
+                ]);
+                return <main>{groups.map((group) => (
+                    <section key={group.id}>
+                        {group.items.map((item) => (
+                            <span key={item.id}>{item.label}</span>
+                        ))}
+                    </section>
+                ))}</main>;
+            }
+        "#,
+    })
+    .expect("nested list collections should subscribe to their outer item slot");
+
+    assert_eq!(output.matches("__vidactKeyed(").count(), 2, "{output}");
+    assert!(output.contains("() => group.get().items"), "{output}");
+    assert!(output.contains("__vidactItemScope, 1"), "{output}");
+}
+
+#[test]
+fn rejects_nested_list_render_captures_until_item_scopes_are_depth_aware() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "NestedCapture.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function NestedCapture(): Node {
+                const [groups, setGroups] = useState([
+                    { id: 'a', label: 'A', items: [{ id: 1 }] }
+                ]);
+                return <main>{groups.map((group) => (
+                    <section key={group.id}>
+                        {group.items.map((item) => (
+                            <span key={item.id}>{group.label}</span>
+                        ))}
+                    </section>
+                ))}</main>;
+            }
+        "#,
+    })
+    .expect_err("outer row captures need a distinct generated item-scope identity");
+
+    assert_eq!(diagnostics[0].code, DiagnosticCode::UnsupportedSyntax);
+    assert!(
+        diagnostics[0]
+            .message
+            .contains("cannot capture an outer row"),
+        "{diagnostics:#?}"
+    );
+    assert!(diagnostics[0].span.is_some());
+}
+
+#[test]
 fn compiles_for_of_jsx_accumulators_into_record_owners() {
     let keyed = compile_surgical_module(ModuleInput {
         filename: "KeyedLoop.tsx",

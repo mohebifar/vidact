@@ -98,6 +98,39 @@ export function KeyedControlFlowApp(): JSX.Element {
   return <KeyedCounter key={key} swap={() => setKey((current) => (current === 'a' ? 'b' : 'a'))} />
 }
 
+export function NestedListsApp(): JSX.Element {
+  const [groups, setGroups] = useState([{ id: 'group', items: [{ id: 1, label: 'one' }] }])
+  return (
+    <section data-nested-lists>
+      {groups.map((group) => (
+        <article key={group.id} data-group={group.id}>
+          {group.items.map((item) => (
+            <output key={item.id} data-nested-row={item.id}>
+              {item.label}
+            </output>
+          ))}
+        </article>
+      ))}
+      <button
+        data-update-nested
+        onClick={() =>
+          setGroups([
+            {
+              id: 'group',
+              items: [
+                { id: 1, label: 'ONE' },
+                { id: 2, label: 'two' },
+              ],
+            },
+          ])
+        }
+      >
+        update nested
+      </button>
+    </section>
+  )
+}
+
 export function SwitchFlowApp(): JSX.Element {
   const [mode, setMode] = useState<'a' | 'b'>('a')
   switch (mode) {

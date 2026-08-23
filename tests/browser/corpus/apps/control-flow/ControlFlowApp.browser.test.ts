@@ -6,6 +6,7 @@ import {
   ControlFlowApp,
   KeyedControlFlowApp,
   LogicalFlowApp,
+  NestedListsApp,
   ReactiveRefApp,
   SlotTypeApp,
   SwitchFlowApp,
@@ -21,6 +22,25 @@ afterEach(() => {
 })
 
 describe('compiled render control flow', () => {
+  it('updates a nested keyed list from its retained outer item slot', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    dispose = mountCompiled(NestedListsApp, host).dispose
+
+    const group = host.querySelector<HTMLElement>('[data-group="group"]')!
+    const first = host.querySelector<HTMLOutputElement>('[data-nested-row="1"]')!
+    expect(first.textContent).toBe('one')
+
+    await captureMutations(host, () =>
+      host.querySelector<HTMLButtonElement>('[data-update-nested]')!.click(),
+    )
+
+    expect(host.querySelector('[data-group="group"]')).toBe(group)
+    expect(host.querySelector('[data-nested-row="1"]')).toBe(first)
+    expect(first.textContent).toBe('ONE')
+    expect(host.querySelector('[data-nested-row="2"]')?.textContent).toBe('two')
+  })
+
   it('preserves aligned identity and replaces only a divergent owned range', async () => {
     const host = document.createElement('div')
     document.body.append(host)

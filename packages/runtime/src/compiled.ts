@@ -559,6 +559,8 @@ export function keyed<T, K>(
   values: () => readonly T[],
   key: (value: T, index: number) => K,
   render: (value: StateSlot<T>, index: StateSlot<number>, itemScope: CompiledScope) => RenderValue,
+  additionalScope?: CompiledScope,
+  additionalReads?: SourceMask,
 ): StructuralBinding {
   return structural(scope, (parent, before) => {
     const itemSource = 1
@@ -605,7 +607,7 @@ export function keyed<T, K>(
       }
     }
     update()
-    const removeUpdater = scope[0](reads, update)
+    const removeUpdater = subscribe(scope, reads, update, additionalScope, additionalReads)
     onCleanup(() => {
       removeUpdater()
       list.dispose()
@@ -618,6 +620,8 @@ export function indexed<T>(
   reads: SourceMask,
   values: () => readonly T[],
   render: (value: StateSlot<T>, index: StateSlot<number>, itemScope: CompiledScope) => RenderValue,
+  additionalScope?: CompiledScope,
+  additionalReads?: SourceMask,
 ): StructuralBinding {
   return structural(scope, (parent, before) => {
     const itemSource = 1
@@ -663,7 +667,7 @@ export function indexed<T>(
       }
     }
     update()
-    const removeUpdater = scope[0](reads, update)
+    const removeUpdater = subscribe(scope, reads, update, additionalScope, additionalReads)
     onCleanup(() => {
       removeUpdater()
       list.dispose()

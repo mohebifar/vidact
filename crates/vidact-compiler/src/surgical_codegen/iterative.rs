@@ -282,14 +282,6 @@ impl<'a> VisitMut<'a> for IterativeJsxTransformer<'a, '_, '_> {
             self.source_symbols,
             self.item_source_symbols,
         );
-        if !reads.item.is_empty() {
-            let span = plan.collection.span();
-            self.diagnostic = Some(
-                unsupported("iterative JSX collections cannot depend on an outer row")
-                    .with_span(SourceSpan::new(span.start, span.end)),
-            );
-            return;
-        }
         let mut arguments = vec![
             ident(self.ast, SCOPE),
             dependency_mask(self.ast, &reads.parent),
@@ -307,9 +299,11 @@ impl<'a> VisitMut<'a> for IterativeJsxTransformer<'a, '_, '_> {
                 key.clone_in(self.ast.allocator()),
             ));
             arguments.push(plan.render.clone_in_with_semantic_ids(self.ast.allocator()));
+            super::append_item_dependency(self.ast, &mut arguments, &reads);
             *expression = call_name(self.ast, KEYED, arguments);
         } else {
             arguments.push(plan.render.clone_in_with_semantic_ids(self.ast.allocator()));
+            super::append_item_dependency(self.ast, &mut arguments, &reads);
             *expression = call_name(self.ast, INDEXED, arguments);
         }
     }

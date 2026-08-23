@@ -1263,13 +1263,14 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
                 self.source_symbols,
                 self.item_source_symbols,
             );
-            if !reads.item.is_empty() {
-                let span = expression.span();
+            if let Some(span) =
+                outer_item_reference(&render, self.scoping, self.item_source_symbols)
+            {
                 self.diagnostic = Some(
                     unsupported(
-                        "nested keyed collections that depend on an outer item are unsupported",
+                        "nested list render bodies cannot capture an outer row yet; derive the value in the nested collection",
                     )
-                    .with_span(SourceSpan::new(span.start, span.end)),
+                    .with_span(span),
                 );
                 return;
             }
@@ -1282,9 +1283,11 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             if let Some(key) = key {
                 arguments.push(key);
                 arguments.push(render);
+                append_item_dependency(self.ast, &mut arguments, &reads);
                 *expression = call_name(self.ast, KEYED, arguments);
             } else {
                 arguments.push(render);
+                append_item_dependency(self.ast, &mut arguments, &reads);
                 *expression = call_name(self.ast, INDEXED, arguments);
             }
             return;
@@ -1914,6 +1917,50 @@ fn immediate_dependencies(
     };
     finder.visit_expression(expression);
     finder.reads
+}
+
+fn outer_item_reference(
+    render: &Expression<'_>,
+    scoping: &Scoping,
+    item_source_symbols: &BTreeMap<SymbolId, SourceId>,
+) -> Option<SourceSpan> {
+    let render_span = render.span();
+    let mut finder = OuterItemReferenceFinder {
+        render_span,
+        scoping,
+        item_source_symbols,
+        span: None,
+    };
+    finder.visit_expression(render);
+    finder.span
+}
+
+struct OuterItemReferenceFinder<'s> {
+    render_span: Span,
+    scoping: &'s Scoping,
+    item_source_symbols: &'s BTreeMap<SymbolId, SourceId>,
+    span: Option<SourceSpan>,
+}
+
+impl<'a> Visit<'a> for OuterItemReferenceFinder<'_> {
+    fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
+        if self.span.is_some() {
+            return;
+        }
+        let Some(reference) = identifier.reference_id.get() else {
+            return;
+        };
+        let Some(symbol) = self.scoping.get_reference(reference).symbol_id() else {
+            return;
+        };
+        if !self.item_source_symbols.contains_key(&symbol) {
+            return;
+        }
+        let declaration = self.scoping.symbol_span(symbol);
+        if declaration.start < self.render_span.start || declaration.end > self.render_span.end {
+            self.span = Some(SourceSpan::new(identifier.span.start, identifier.span.end));
+        }
+    }
 }
 
 fn append_item_dependency<'a>(
