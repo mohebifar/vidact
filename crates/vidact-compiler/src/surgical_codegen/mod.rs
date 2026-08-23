@@ -63,6 +63,7 @@ const KEYED: &str = "__vidactKeyed";
 const ITEM_INDEX: &str = "__vidactItemIndex";
 const ITEM_SCOPE: &str = "__vidactItemScope";
 const NARROW_SOURCE_BITS: u32 = 32;
+const NESTED_PROP: &str = "__vidactNestedProp";
 const PROPS: &str = "__vidactProps";
 const SOURCE: &str = "__vidactSource";
 const WHEN: &str = "__vidactWhen";
@@ -183,6 +184,7 @@ fn transform_program<'a>(
         KEYED,
         ITEM_INDEX,
         ITEM_SCOPE,
+        NESTED_PROP,
         PROPS,
         SOURCE,
         WHEN,
@@ -441,7 +443,7 @@ fn transform_component<'a>(
             .all(|source| source.id.get() < NARROW_SOURCE_BITS),
     ));
     inserted.extend(prop_bindings.iter().map(|prop| {
-        let input = if prop.rest {
+        let mut input = if prop.rest {
             ident(&ast, PROPS)
         } else {
             Expression::from(MemberExpression::new_computed_member_expression(
@@ -461,6 +463,41 @@ fn transform_component<'a>(
                 &ast,
             ))
         };
+        if !prop.path.is_empty() {
+            let path = Expression::new_array_expression(
+                SPAN,
+                oxc_allocator::Vec::from_iter_in(
+                    prop.path.iter().map(|name| {
+                        ArrayExpressionElement::from(Expression::new_string_literal(
+                            SPAN,
+                            ast.allocator().alloc_str(name),
+                            None,
+                            &ast,
+                        ))
+                    }),
+                    &ast,
+                ),
+                &ast,
+            );
+            let defaults = Expression::new_array_expression(
+                SPAN,
+                oxc_allocator::Vec::from_iter_in(
+                    prop.container_defaults.iter().map(|fallback| {
+                        ArrayExpressionElement::from(match fallback {
+                            Some(fallback) => arrow_expression(
+                                &ast,
+                                [],
+                                fallback.clone_in_with_semantic_ids(allocator),
+                            ),
+                            None => Expression::new_null_literal(SPAN, &ast),
+                        })
+                    }),
+                    &ast,
+                ),
+                &ast,
+            );
+            input = call_name(&ast, NESTED_PROP, [input, path, defaults]);
+        }
         let mut arguments = vec![ident(&ast, SCOPE), mask(&ast, &[prop.source]), input];
         if prop.rest {
             arguments.push(Expression::new_array_expression(
@@ -644,6 +681,8 @@ struct PropBinding<'a> {
     default: Option<Expression<'a>>,
     rest: bool,
     rest_exclusions: Vec<String>,
+    path: Vec<String>,
+    container_defaults: Vec<Option<Expression<'a>>>,
 }
 
 #[derive(Clone, Copy)]
@@ -1340,6 +1379,8 @@ fn prop_binding_symbols<'a>(
                     default: None,
                     rest: true,
                     rest_exclusions: Vec::new(),
+                    path: Vec::new(),
+                    container_defaults: Vec::new(),
                 });
             }
             continue;
@@ -1355,46 +1396,17 @@ fn prop_binding_symbols<'a>(
                     .with_span(SourceSpan::new(property.span.start, property.span.end)));
             };
             rest_exclusions.push(prop_name.to_string());
-            let (identifier, default) = match &property.value {
-                BindingPattern::BindingIdentifier(identifier) => (identifier.as_ref(), None),
-                BindingPattern::AssignmentPattern(assignment) => {
-                    let BindingPattern::BindingIdentifier(identifier) = &assignment.left else {
-                        let span = assignment.left.span();
-                        return Err(unsupported("nested prop defaults are unsupported")
-                            .with_span(SourceSpan::new(span.start, span.end)));
-                    };
-                    (
-                        identifier.as_ref(),
-                        Some(assignment.right.clone_in_with_semantic_ids(allocator)),
-                    )
-                }
-                _ => {
-                    let span = property.value.span();
-                    return Err(unsupported("nested prop destructuring is unsupported")
-                        .with_span(SourceSpan::new(span.start, span.end)));
-                }
-            };
-            if !prop_sources.contains(identifier.name.as_str()) {
-                continue;
-            }
-            let Some(source) = sources.get(identifier.name.as_str()).copied() else {
-                return Err(analysis_error(format!(
-                    "prop binding {} for {prop_name} is absent from analysis",
-                    identifier.name
-                )));
-            };
-            let symbol = identifier.symbol_id.get().ok_or_else(|| {
-                analysis_error(format!("prop {prop_name} has no semantic symbol"))
-            })?;
-            bindings.push(PropBinding {
-                name: identifier.name.to_string(),
-                public_name: Some(prop_name.to_string()),
-                symbol,
-                source,
-                default,
-                rest: false,
-                rest_exclusions: Vec::new(),
-            });
+            collect_prop_bindings(
+                &property.value,
+                prop_name.as_ref(),
+                Vec::new(),
+                Vec::new(),
+                None,
+                sources,
+                prop_sources,
+                allocator,
+                &mut bindings,
+            )?;
         }
         if let Some(rest) = &pattern.rest {
             let BindingPattern::BindingIdentifier(identifier) = &rest.argument else {
@@ -1425,6 +1437,8 @@ fn prop_binding_symbols<'a>(
                     default: None,
                     rest: true,
                     rest_exclusions,
+                    path: Vec::new(),
+                    container_defaults: Vec::new(),
                 });
             }
         }
@@ -1435,6 +1449,152 @@ fn prop_binding_symbols<'a>(
         ));
     }
     Ok(bindings)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_prop_bindings<'a>(
+    pattern: &BindingPattern<'a>,
+    public_name: &str,
+    path: Vec<String>,
+    container_defaults: Vec<Option<Expression<'a>>>,
+    current_container_default: Option<Expression<'a>>,
+    sources: &BTreeMap<&str, SourceId>,
+    prop_sources: &BTreeSet<&str>,
+    allocator: &'a Allocator,
+    bindings: &mut Vec<PropBinding<'a>>,
+) -> Result<(), Diagnostic> {
+    match pattern {
+        BindingPattern::BindingIdentifier(identifier) => push_prop_binding(
+            identifier,
+            public_name,
+            path,
+            container_defaults,
+            None,
+            sources,
+            prop_sources,
+            bindings,
+        ),
+        BindingPattern::AssignmentPattern(assignment) => {
+            if let BindingPattern::BindingIdentifier(identifier) = &assignment.left {
+                return push_prop_binding(
+                    identifier,
+                    public_name,
+                    path,
+                    container_defaults,
+                    Some(assignment.right.clone_in_with_semantic_ids(allocator)),
+                    sources,
+                    prop_sources,
+                    bindings,
+                );
+            }
+            collect_prop_bindings(
+                &assignment.left,
+                public_name,
+                path,
+                container_defaults,
+                Some(assignment.right.clone_in_with_semantic_ids(allocator)),
+                sources,
+                prop_sources,
+                allocator,
+                bindings,
+            )
+        }
+        BindingPattern::ObjectPattern(object) => {
+            if let Some(rest) = &object.rest {
+                return Err(unsupported("nested rest prop patterns are unsupported")
+                    .with_span(SourceSpan::new(rest.span.start, rest.span.end)));
+            }
+            for property in &object.properties {
+                if property.computed {
+                    return Err(
+                        unsupported("computed nested prop destructuring is unsupported")
+                            .with_span(SourceSpan::new(property.span.start, property.span.end)),
+                    );
+                }
+                let Some(name) = property.key.static_name() else {
+                    return Err(
+                        unsupported("dynamic nested prop destructuring is unsupported")
+                            .with_span(SourceSpan::new(property.span.start, property.span.end)),
+                    );
+                };
+                let mut nested_path = path.clone();
+                nested_path.push(name.to_string());
+                let mut nested_defaults = container_defaults
+                    .iter()
+                    .map(|fallback| {
+                        fallback
+                            .as_ref()
+                            .map(|fallback| fallback.clone_in_with_semantic_ids(allocator))
+                    })
+                    .collect::<Vec<_>>();
+                nested_defaults.push(
+                    current_container_default
+                        .as_ref()
+                        .map(|fallback| fallback.clone_in_with_semantic_ids(allocator)),
+                );
+                collect_prop_bindings(
+                    &property.value,
+                    public_name,
+                    nested_path,
+                    nested_defaults,
+                    None,
+                    sources,
+                    prop_sources,
+                    allocator,
+                    bindings,
+                )?;
+            }
+            Ok(())
+        }
+        _ => {
+            let span = pattern.span();
+            Err(
+                unsupported("array and nested rest prop patterns are unsupported")
+                    .with_span(SourceSpan::new(span.start, span.end)),
+            )
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_prop_binding<'a>(
+    identifier: &BindingIdentifier<'a>,
+    public_name: &str,
+    path: Vec<String>,
+    container_defaults: Vec<Option<Expression<'a>>>,
+    default: Option<Expression<'a>>,
+    sources: &BTreeMap<&str, SourceId>,
+    prop_sources: &BTreeSet<&str>,
+    bindings: &mut Vec<PropBinding<'a>>,
+) -> Result<(), Diagnostic> {
+    if !prop_sources.contains(identifier.name.as_str()) {
+        return Ok(());
+    }
+    let source = sources
+        .get(identifier.name.as_str())
+        .copied()
+        .ok_or_else(|| {
+            analysis_error(format!(
+                "prop binding {} for {public_name} is absent from analysis",
+                identifier.name
+            ))
+        })?;
+    let symbol = identifier
+        .symbol_id
+        .get()
+        .ok_or_else(|| analysis_error(format!("prop {public_name} has no semantic symbol")))?;
+    bindings.push(PropBinding {
+        name: identifier.name.to_string(),
+        public_name: Some(public_name.to_string()),
+        symbol,
+        source,
+        default,
+        rest: false,
+        rest_exclusions: Vec::new(),
+        path,
+        container_defaults,
+    });
+    Ok(())
 }
 
 fn rewrite_component_props_parameter<'a>(
@@ -1961,6 +2121,7 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>, program: &Program<'a>) -> Statement<
         ("dispatch", DISPATCH),
         ("indexed", INDEXED),
         ("keyed", KEYED),
+        ("nestedProp", NESTED_PROP),
         ("source", SOURCE),
         ("when", WHEN),
     ];

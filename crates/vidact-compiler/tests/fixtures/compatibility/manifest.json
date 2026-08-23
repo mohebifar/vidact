@@ -104,6 +104,11 @@
       "components": ["PropsObject"]
     },
     {
+      "path": "accepted/nested-props.tsx",
+      "expectation": "accepted",
+      "components": ["NestedProps"]
+    },
+    {
       "path": "rejected/foreign-array-call.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",

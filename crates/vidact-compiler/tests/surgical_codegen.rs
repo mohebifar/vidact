@@ -1135,6 +1135,33 @@ fn compiles_props_object_reads_and_forwarding_into_a_live_object_slot() {
 }
 
 #[test]
+fn compiles_nested_prop_paths_with_container_and_leaf_defaults() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "NestedProps.tsx",
+        source: r#"
+            export function NestedProps({
+                account: { profile: { name: label = 'anonymous' } = {} } = {}
+            }): Node {
+                return <p>{label}</p>;
+            }
+        "#,
+    })
+    .expect("nested object prop patterns should flatten into reactive leaf slots");
+
+    assert!(
+        output.contains("nestedProp as __vidactNestedProp"),
+        "{output}"
+    );
+    assert!(
+        output.contains("__vidactProps[\"account\"], [\"profile\", \"name\"]"),
+        "{output}"
+    );
+    assert!(output.contains("() => ({})"), "{output}");
+    assert!(output.contains("() => \"anonymous\""), "{output}");
+    assert!(output.contains("() => label.get()"), "{output}");
+}
+
+#[test]
 fn defers_component_children_until_the_child_namespace_is_active() {
     let output = compile_surgical_module(ModuleInput {
         filename: "NamespaceChildren.tsx",

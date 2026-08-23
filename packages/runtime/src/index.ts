@@ -13,6 +13,7 @@ export { useRef, type MutableRef } from './ref.ts'
 export { assertRuntimeProtocol, VIDACT_RUNTIME_PROTOCOL } from './protocol.ts'
 export { compiledSpread } from './spread.ts'
 export { compiledComponentSpread } from './component-spread.ts'
+export { nestedProp } from './nested-prop.ts'
 export {
   binding,
   choose,

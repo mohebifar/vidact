@@ -113,40 +113,7 @@ pub(super) fn classify_component<'a>(
                     property.span,
                 ));
             };
-            let identifier = match &property.value {
-                BindingPattern::BindingIdentifier(identifier) => identifier.as_ref(),
-                BindingPattern::AssignmentPattern(assignment) => {
-                    let BindingPattern::BindingIdentifier(identifier) = &assignment.left else {
-                        return Err(unsupported_at(
-                            "nested prop defaults are unsupported",
-                            assignment.left.span(),
-                        ));
-                    };
-                    identifier.as_ref()
-                }
-                _ => {
-                    return Err(unsupported_at(
-                        "nested prop destructuring is unsupported",
-                        property.value.span(),
-                    ));
-                }
-            };
-            let symbol = identifier.symbol_id.get().ok_or_else(|| {
-                Diagnostic::new(
-                    DiagnosticCode::AnalysisFailed,
-                    format!("semantic analysis did not resolve prop {prop_name}"),
-                )
-                .with_span(SourceSpan::from_oxc(identifier.span))
-            })?;
-            let name = identifier.name.to_string();
-            sources.insert(
-                name,
-                SourceSyntax {
-                    kind: SourceKind::Prop,
-                    symbol,
-                    declaration_start: identifier.span.start,
-                },
-            );
+            collect_prop_pattern_sources(&property.value, prop_name.as_ref(), &mut sources)?;
         }
     }
 
@@ -201,6 +168,65 @@ pub(super) fn classify_component<'a>(
         render_flow,
         body_span: SourceSpan::new(body.span.start, body.span.end),
     })
+}
+
+fn collect_prop_pattern_sources(
+    pattern: &BindingPattern<'_>,
+    public_path: &str,
+    sources: &mut BTreeMap<String, SourceSyntax>,
+) -> Result<(), Diagnostic> {
+    match pattern {
+        BindingPattern::BindingIdentifier(identifier) => {
+            let symbol = identifier.symbol_id.get().ok_or_else(|| {
+                Diagnostic::new(
+                    DiagnosticCode::AnalysisFailed,
+                    format!("semantic analysis did not resolve prop {public_path}"),
+                )
+                .with_span(SourceSpan::from_oxc(identifier.span))
+            })?;
+            sources.insert(
+                identifier.name.to_string(),
+                SourceSyntax {
+                    kind: SourceKind::Prop,
+                    symbol,
+                    declaration_start: identifier.span.start,
+                },
+            );
+            Ok(())
+        }
+        BindingPattern::AssignmentPattern(assignment) => {
+            collect_prop_pattern_sources(&assignment.left, public_path, sources)
+        }
+        BindingPattern::ObjectPattern(object) => {
+            if let Some(rest) = &object.rest {
+                return Err(unsupported_at(
+                    "nested rest prop patterns are unsupported",
+                    rest.span,
+                ));
+            }
+            for property in &object.properties {
+                if property.computed {
+                    return Err(unsupported_at(
+                        "computed nested prop destructuring is unsupported",
+                        property.span,
+                    ));
+                }
+                let Some(name) = property.key.static_name() else {
+                    return Err(unsupported_at(
+                        "dynamic nested prop destructuring is unsupported",
+                        property.span,
+                    ));
+                };
+                let nested_path = format!("{public_path}.{name}");
+                collect_prop_pattern_sources(&property.value, &nested_path, sources)?;
+            }
+            Ok(())
+        }
+        _ => Err(unsupported_at(
+            "array and nested rest prop patterns are unsupported",
+            pattern.span(),
+        )),
+    }
 }
 
 fn collect_component_return_expressions<'a>(

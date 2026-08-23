@@ -87,6 +87,7 @@ describe('compiled DOM semantics app', () => {
     const rest = host.querySelector<HTMLElement>('[data-rest]')!
     const direct = host.querySelector<HTMLOutputElement>('[data-direct-spread]')!
     const propsObject = host.querySelector<HTMLElement>('[data-props-object]')!
+    const nested = host.querySelector<HTMLOutputElement>('[data-nested-spread]')!
     const toggle = host.querySelector<HTMLButtonElement>('[data-toggle-spread]')!
 
     expect(target.title).toBe('first spread')
@@ -104,6 +105,7 @@ describe('compiled DOM semantics app', () => {
     expect(propsObject.title).toBe('first spread')
     expect(propsObject.dataset.spread).toBe('one')
     expect(propsObject.textContent).toBe('first spread:one')
+    expect(nested.textContent).toBe('nested one')
 
     await captureMutations(host, () => toggle.click())
 
@@ -127,6 +129,8 @@ describe('compiled DOM semantics app', () => {
     expect(propsObject.hasAttribute('title')).toBe(false)
     expect(propsObject.dataset.spread).toBe('two')
     expect(propsObject.textContent).toBe('missing:two')
+    expect(host.querySelector('[data-nested-spread]')).toBe(nested)
+    expect(nested.textContent).toBe('anonymous')
     rest.click()
     expect(clicks.textContent).toBe('21')
   })

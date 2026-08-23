@@ -79,6 +79,8 @@ the spread remain ordinary own properties and take precedence.
   its consumer component does not rerun.
 - A component spread can add or delete direct and rest keys without reinvoking
   the child, and deleting a defaulted direct prop reactivates its default.
+- Deleting a top-level object used by nested destructuring re-evaluates its
+  container defaults and nested leaf defaults without remounting the child.
 - Applications that do not compile a reactive spread do not retain the spread
   capability module.
 

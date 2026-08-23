@@ -21,6 +21,7 @@ import {
   h,
   keyed,
   mountCompiled,
+  nestedProp,
   source,
   when,
 } from '../../src/index.ts'
@@ -31,6 +32,13 @@ interface Item {
 }
 
 describe('compiled DOM corpus', () => {
+  it('applies nested container defaults and rejects unguarded nullish destructuring', () => {
+    expect(nestedProp(undefined, ['name'], [() => ({ name: 'fallback' })])).toBe('fallback')
+    expect(() => nestedProp(null, ['name'], [null])).toThrow(
+      'cannot destructure nested prop name from a nullish value',
+    )
+  })
+
   it('rejects reserved values in reactive component spreads before child construction', () => {
     const propsSource = source(0)
     let childRuns = 0

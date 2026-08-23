@@ -127,12 +127,17 @@ Rest props resolve from the full props object through the same object-slot
 primitive with the compiler-recorded destructured public names excluded, and
 can feed the deletion-aware intrinsic spread path
 defined in [Deletion-aware reactive spreads and rest props](deletion-aware-reactive-spreads-and-rest-props.md).
+Nested object patterns flatten into independent leaf slots. The compiler emits a
+capability-imported path selector that resolves a top-level compiled binding,
+applies container defaults at their original destructuring depths, preserves a
+leaf default in `createCompiledProp`, and throws when an unguarded intermediate
+container is nullish.
 One reactive component spread that precedes explicit props can feed a mutable
 component prop view. Direct prop slots receive stable per-key compiled bindings;
-the rest slot observes the spread's live enumerable key set. Computed or nested
-patterns, destructuring a props object later in the body, multiple or interleaved
-reactive component spreads, and reactive local derivations absent from data-flow
-facts remain fail-closed.
+the rest slot observes the spread's live enumerable key set. Computed patterns,
+array/nested-rest patterns, destructuring a props object later in the body,
+multiple or interleaved reactive component spreads, and reactive local
+derivations absent from data-flow facts remain fail-closed.
 
 Each dynamic value range owns the resources created by its current non-scalar
 value. Replacing the value disposes that owner and removes only the nodes between
@@ -162,6 +167,8 @@ back.
   code, and rest exclusion follows public names rather than local symbols.
 - A props-object parameter remains live as one child-local slot; direct,
   computed, and forwarding reads participate in the updater graph.
+- Nested object-pattern leaves update independently, observe container and leaf
+  defaults at the right depth, and reject unguarded nullish intermediates.
 - A reactive component spread can add, replace, or delete a direct or rest prop
   without reinvoking the child; an explicit following prop remains authoritative.
 - A retained state setter fails before evaluating its update after the owning

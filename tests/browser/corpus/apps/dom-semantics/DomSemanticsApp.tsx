@@ -41,6 +41,14 @@ function PropsObject(props: {
   )
 }
 
+function NestedSpread({
+  account: { profile: { name = 'anonymous' } = {} } = {},
+}: {
+  account?: { profile?: { name?: string } }
+}): JSX.Element {
+  return <output data-nested-spread>{name}</output>
+}
+
 function DeferredSvg({ visible }: { visible: boolean }): JSX.Element {
   return <>{visible && <circle data-deferred-svg cx="3" cy="3" r="2" tabIndex={0} />}</>
 }
@@ -83,6 +91,9 @@ export function DomSemanticsApp(): JSX.Element {
     'data-spread': 'one',
     onClick: () => setSpreadClicks((current) => current + 1),
   })
+  const [nestedProps, setNestedProps] = useState<{
+    account?: { profile?: { name?: string } }
+  }>({ account: { profile: { name: 'nested one' } } })
 
   return (
     <main {...forgedNamespace} data-dom-semantics>
@@ -94,14 +105,15 @@ export function DomSemanticsApp(): JSX.Element {
       </button>
       <button
         data-toggle-spread
-        onClick={() =>
+        onClick={() => {
           setSpreadProps({
             hidden: true,
             'data-fixed': 'still dynamic',
             'data-spread': 'two',
             onClick: () => setSpreadClicks((current) => current + 10),
           })
-        }
+          setNestedProps({})
+        }}
       >
         Toggle spread
       </button>
@@ -117,6 +129,7 @@ export function DomSemanticsApp(): JSX.Element {
       />
       <DirectSpread {...spreadProps} />
       <PropsObject {...spreadProps} />
+      <NestedSpread {...nestedProps} />
 
       <section
         data-boolean={active}
