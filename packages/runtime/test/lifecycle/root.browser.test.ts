@@ -10,11 +10,14 @@ import {
   createCompiledId,
   createCompiledState,
   createRoot,
+  deferred,
+  Fragment,
   h,
   keyed,
   source,
 } from '../../src/index.ts'
 import {
+  Fragment as ServerFragment,
   jsx as serverJsx,
   jsxs as serverJsxs,
   renderToString,
@@ -271,5 +274,76 @@ describe('compiled client roots', () => {
     expect(host.querySelector('p')).not.toBe(serverParagraph)
     expect(host.textContent).toBe('no')
     hydration.result.unmount()
+  })
+
+  it('claims wrapper-free fragment roots without moving their nodes', async () => {
+    const host = document.createElement('div')
+    function ServerFragmentRoot(): ServerChild {
+      return serverJsxs(ServerFragment, {
+        children: [serverJsx('span', { children: 'one' }), serverJsx('span', { children: 'two' })],
+      })
+    }
+    host.innerHTML = renderToString(() => serverJsx(ServerFragmentRoot, null))
+    document.body.append(host)
+    const serverSpans = [...host.querySelectorAll('span')]
+    const recoveries: unknown[] = []
+
+    const hydration = await captureMutations(host, () =>
+      hydrateRoot(
+        host,
+        () => {
+          const scope = createCompiledScope()
+          return compiledRoot(scope, () =>
+            h(Fragment, null, h('span', null, 'one'), h('span', null, 'two')),
+          )
+        },
+        { onRecoverableError: (error) => recoveries.push(error) },
+      ),
+    )
+
+    expect(recoveries).toEqual([])
+    expect(hydration.records).toHaveLength(0)
+    expect([...host.querySelectorAll('span')]).toEqual(serverSpans)
+    hydration.result.unmount()
+  })
+
+  it('claims direct array and deferred root values without remounting', async () => {
+    const arrayHost = document.createElement('div')
+    function ServerArrayRoot(): ServerChild {
+      return [serverJsx('i', { children: 'one' }), serverJsx('i', { children: 'two' })]
+    }
+    arrayHost.innerHTML = renderToString(() => serverJsx(ServerArrayRoot, null))
+    document.body.append(arrayHost)
+    const serverItems = [...arrayHost.querySelectorAll('i')]
+
+    const arrayHydration = await captureMutations(arrayHost, () =>
+      hydrateRoot(arrayHost, () => {
+        const scope = createCompiledScope()
+        return compiledRoot(scope, () => [h('i', null, 'one'), h('i', null, 'two')])
+      }),
+    )
+
+    expect(arrayHydration.records).toHaveLength(0)
+    expect([...arrayHost.querySelectorAll('i')]).toEqual(serverItems)
+    arrayHydration.result.unmount()
+
+    const deferredHost = document.createElement('div')
+    function ServerDeferredRoot(): ServerChild {
+      return serverJsx('strong', { children: 'later' })
+    }
+    deferredHost.innerHTML = renderToString(() => serverJsx(ServerDeferredRoot, null))
+    document.body.append(deferredHost)
+    const serverStrong = deferredHost.querySelector('strong')
+
+    const deferredHydration = await captureMutations(deferredHost, () =>
+      hydrateRoot(deferredHost, () => {
+        const scope = createCompiledScope()
+        return compiledRoot(scope, () => deferred(() => h('strong', null, 'later')))
+      }),
+    )
+
+    expect(deferredHydration.records).toHaveLength(0)
+    expect(deferredHost.querySelector('strong')).toBe(serverStrong)
+    deferredHydration.result.unmount()
   })
 })

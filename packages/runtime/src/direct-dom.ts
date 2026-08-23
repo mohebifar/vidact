@@ -30,7 +30,16 @@ import {
   withIntrinsicNamespace,
 } from './dom/namespace.ts'
 import { applyDomProp } from './dom/properties.ts'
-import { claimHydrationElement, claimHydrationNode, claimHydrationText } from './hydration.ts'
+import {
+  claimHydrationElement,
+  claimHydrationArrayRange,
+  claimHydrationNode,
+  claimHydrationText,
+  createHydrationFragment,
+  finishHydrationArrayRange,
+  hydrationFragmentChildren,
+  isHydrating,
+} from './hydration.ts'
 import { mountRawHtmlProp } from './raw-html.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
@@ -83,6 +92,7 @@ export function h(
   ...children: DirectChild[]
 ): DirectChild {
   if (type === Fragment) {
+    if (isHydrating()) return createHydrationFragment(children)
     const fragment = document.createDocumentFragment()
     appendChildren(fragment, children)
     return fragment
@@ -215,10 +225,19 @@ function appendChild(parent: Node, child: DirectChild): void {
     return
   }
   if (Array.isArray(child)) {
+    const hydratedRange = claimHydrationArrayRange(parent)
     for (const item of child) appendChild(parent, item)
+    if (hydratedRange !== undefined) finishHydrationArrayRange(parent, hydratedRange[1])
     return
   }
   if (child instanceof Node) {
+    if (child instanceof DocumentFragment) {
+      const hydrationChildren = hydrationFragmentChildren(child)
+      if (hydrationChildren !== undefined) {
+        for (const item of hydrationChildren) appendChild(parent, item as DirectChild)
+        return
+      }
+    }
     if (!claimHydrationNode(parent, child)) parent.appendChild(child)
     return
   }

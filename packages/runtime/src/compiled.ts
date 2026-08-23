@@ -6,6 +6,7 @@ import {
 import {
   HydrationMismatch,
   beginHydration,
+  claimHydrationArrayRange,
   claimHydrationComponentMount,
   claimHydrationComponentRange,
   claimHydrationNode,
@@ -15,7 +16,9 @@ import {
   hydrationRangeParent,
   hydrationRootMarkers,
   finishHydration,
+  finishHydrationArrayRange,
   hydrationCursor,
+  hydrationFragmentChildren,
   hydrationInsertionPoint,
   isHydrating,
   isHydrationMismatch,
@@ -2210,10 +2213,19 @@ function insertValue(
         DEV ? 'unsupported compiled child value; expected a DOM node or owned block' : 'V009',
       )
     }
+    const hydratedRange = claimHydrationArrayRange(parent)
     for (const item of value) insertValue(parent, item, before, moves)
+    if (hydratedRange !== undefined) finishHydrationArrayRange(parent, hydratedRange[1])
     return
   }
   if (value instanceof DocumentFragment) {
+    const hydrationChildren = hydrationFragmentChildren(value)
+    if (hydrationChildren !== undefined) {
+      for (const child of hydrationChildren) {
+        insertValue(parent, child as RenderValue, before, moves)
+      }
+      return
+    }
     // oxlint-disable-next-line unicorn/no-useless-spread -- Snapshot the live NodeList before moving nodes.
     for (const child of [...value.childNodes]) insertValue(parent, child, before, moves)
     return

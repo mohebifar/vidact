@@ -28,6 +28,7 @@ export class HydrationMismatch extends Error {
 
 let activeHydration: HydrationState | undefined
 let activeInsertionPoint: readonly [parent: Node, before: Node] | undefined
+const hydrationFragments = new WeakMap<DocumentFragment, readonly unknown[]>()
 
 export function beginHydration(host: ParentNode): () => void {
   if (activeHydration !== undefined) {
@@ -81,6 +82,18 @@ export function hydrationRootMarkers(): HydrationRange {
 
 export function isHydrating(): boolean {
   return activeHydration !== undefined
+}
+
+export function createHydrationFragment(children: readonly unknown[]): DocumentFragment {
+  const fragment = document.createDocumentFragment()
+  hydrationFragments.set(fragment, children)
+  return fragment
+}
+
+export function hydrationFragmentChildren(
+  fragment: DocumentFragment,
+): readonly unknown[] | undefined {
+  return hydrationFragments.get(fragment)
 }
 
 export function isHydrationMismatch(error: unknown): error is HydrationMismatch {
@@ -293,13 +306,14 @@ function cursor(state: HydrationState, parent: Node): Node | null {
 }
 
 function enterHydrationSlot(state: HydrationState, parent: Node): void {
-  const start = cursor(state, parent)
-  if (!isMarker(start, `${HYDRATION_PREFIX}:b`)) return
-  const end = findClosingSibling(start, `${HYDRATION_PREFIX}:b`)
   const slots = state.slots.get(parent) ?? []
-  slots.push(end)
-  state.slots.set(parent, slots)
-  state.cursors.set(parent, start.nextSibling)
+  let start = cursor(state, parent)
+  while (isMarker(start, `${HYDRATION_PREFIX}:b`)) {
+    slots.push(findClosingSibling(start, `${HYDRATION_PREFIX}:b`))
+    start = start.nextSibling
+  }
+  if (slots.length !== 0) state.slots.set(parent, slots)
+  state.cursors.set(parent, start)
 }
 
 function setHydrationCursor(state: HydrationState, parent: Node, value: Node | null): void {

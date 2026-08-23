@@ -36,7 +36,9 @@ The hydrate compiler target imports `@vidact/runtime/hydrate`, including its
 own automatic JSX entry points. `hydrateRoot` synchronously validates the root
 protocol, constructs the ordinary compiled scopes once, and claims existing
 elements, component ranges, child slots, scalar text, selected branches, and
-keyed or indexed collection records. Matching content preserves node identity
+keyed or indexed collection records. Transparent fragments, nested child slots,
+deferred values, and direct arrays are claimed without introducing wrapper DOM.
+Matching content preserves node identity
 and performs no initial DOM insert, removal, attribute write, or text
 replacement. After claiming, the same static source-mask updaters used by a
 client-only root own all subsequent updates, keyed movement, and disposal.
@@ -112,8 +114,9 @@ before the claimant is enabled.
   static versus hydratable output, context, state, server snapshots, and IDs
   without browser globals.
 - `packages/runtime/test/lifecycle/root.browser.test.ts` proves matching element,
-  text, branch, and keyed-record identity; zero-mutation hydration envelopes;
-  post-hydration surgical state/list/branch updates; ID parity; mismatch
-  recovery; version skew; and disposal using markup from the server runtime.
+  text, branch, keyed-record, fragment, deferred, and direct-array identity;
+  zero-mutation hydration envelopes; post-hydration surgical state/list/branch
+  updates; ID parity; mismatch recovery; version skew; and disposal using markup
+  from the server runtime.
 - `packages/vite-plugin/test/compiler-client.test.ts` covers isolated server and
   hydrate compiler targets and runtime imports.
