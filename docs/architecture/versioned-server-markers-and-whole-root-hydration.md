@@ -26,18 +26,20 @@ work is removed; initial state, server snapshots, context, and IDs execute in a
 lazy synchronous server-render request.
 
 `renderToString` emits a versioned `vidact:v1` comment protocol. A root range
-contains nested component ranges, and scalar child slots use text ranges. The
-comments are ownership and claiming metadata, not a serialized React element
-tree. `renderToStaticMarkup` deliberately omits them and is therefore not
-hydratable.
+contains nested component ranges. Every child position has an owned slot;
+intrinsic nodes, scalar text, and array collections carry nested typed ranges.
+The comments are ownership and claiming metadata, not a serialized React
+element tree. `renderToStaticMarkup` deliberately omits them and is therefore
+not hydratable.
 
 The hydrate compiler target imports `@vidact/runtime/hydrate`, including its
 own automatic JSX entry points. `hydrateRoot` synchronously validates the root
 protocol, constructs the ordinary compiled scopes once, and claims existing
-elements, component ranges, and scalar text. Matching content preserves node
-identity and performs no initial DOM insert, removal, or text replacement.
-After claiming, the same static source-mask updaters used by a client-only root
-own all subsequent updates and disposal.
+elements, component ranges, child slots, scalar text, selected branches, and
+keyed or indexed collection records. Matching content preserves node identity
+and performs no initial DOM insert, removal, attribute write, or text
+replacement. After claiming, the same static source-mask updaters used by a
+client-only root own all subsequent updates, keyed movement, and disposal.
 
 Root identity uses the same `:${identifierPrefix}r${ordinal}:` allocation on the
 server and hydrate targets. The identifier prefix is part of the render/root
@@ -51,9 +53,9 @@ does not affect neighboring DOM outside it. Application errors continue through
 the ordinary caught/uncaught error channels and are not mislabeled as hydration
 mismatches.
 
-Structural branch and collection markers extend this same protocol. Until a
-structural kind has a symmetric server emitter and hydrate claimant, encountering
-it must recover at the root boundary rather than partially adopting its DOM.
+Every structural kind requires a symmetric server emitter and hydrate claimant.
+Encountering an unrecognized structural kind recovers at the root boundary
+rather than partially adopting its DOM.
 
 ## Invariants
 
@@ -97,10 +99,10 @@ The server serializer evaluates components lazily during the render request.
 That ordering is required for nested context providers and request-local IDs,
 and it avoids global JSX-construction state before `renderToString` begins.
 
-Adding structural hydration is constrained but straightforward: server and
-hydrate implementations must introduce the same versioned range kind, prove
-initial identity reconstruction, and add zero-churn plus mismatch-recovery
-fixtures before the claimant is enabled.
+Adding another structural primitive is constrained: server and hydrate
+implementations must introduce the same versioned range kind, prove initial
+identity reconstruction, and add zero-churn plus mismatch-recovery fixtures
+before the claimant is enabled.
 
 ## Verification
 
@@ -109,8 +111,9 @@ fixtures before the claimant is enabled.
 - `packages/runtime/test/server/server.test.tsx` covers deterministic escaping,
   static versus hydratable output, context, state, server snapshots, and IDs
   without browser globals.
-- `packages/runtime/test/lifecycle/root.browser.test.ts` proves matching element
-  and text identity, a zero-mutation hydration envelope, post-hydration surgical
-  state updates, ID parity, mismatch recovery, version skew, and disposal.
+- `packages/runtime/test/lifecycle/root.browser.test.ts` proves matching element,
+  text, branch, and keyed-record identity; zero-mutation hydration envelopes;
+  post-hydration surgical state/list/branch updates; ID parity; mismatch
+  recovery; version skew; and disposal using markup from the server runtime.
 - `packages/vite-plugin/test/compiler-client.test.ts` covers isolated server and
   hydrate compiler targets and runtime imports.

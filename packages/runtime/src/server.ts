@@ -2,10 +2,12 @@
 /// <reference path="./env.d.ts" />
 
 const SERVER_NODE = Symbol('Vidact.ServerNode')
+const SERVER_NODE_KIND = Symbol('Vidact.ServerNodeKind')
 const SERVER_CONTEXT = Symbol('Vidact.ServerContext')
 
 export interface ServerNode {
   readonly [SERVER_NODE]: (context: RenderContext) => string
+  readonly [SERVER_NODE_KIND]: 'component' | 'intrinsic' | 'transparent'
 }
 
 export type ServerChild =
@@ -134,20 +136,47 @@ const serverBuiltins = new WeakSet<ServerComponent>()
 export const Fragment = Symbol('Vidact.ServerFragment')
 
 export function jsx(type: ServerElementType, props: ServerProps, _key?: unknown): ServerNode {
+  return createServerElement(type, props, false)
+}
+
+export function jsxs(type: ServerElementType, props: ServerProps, _key?: unknown): ServerNode {
+  return createServerElement(type, props, true)
+}
+
+export function jsxDEV(
+  type: ServerElementType,
+  props: ServerProps,
+  _key?: unknown,
+  isStaticChildren = false,
+): ServerNode {
+  return createServerElement(type, props, isStaticChildren)
+}
+
+function createServerElement(
+  type: ServerElementType,
+  props: ServerProps,
+  multipleChildren: boolean,
+): ServerNode {
   if (type === Fragment) {
-    return serverNode((context) =>
-      Object.hasOwn(props ?? {}, 'children')
-        ? serializeChild(props?.children as ServerChild, context)
-        : '',
+    return serverNode(
+      (context) =>
+        Object.hasOwn(props ?? {}, 'children')
+          ? multipleChildren
+            ? serializeChildren(props?.children as ServerChild, context, true)
+            : serializeSlot(props?.children as ServerChild, context)
+          : '',
+      'transparent',
     )
   }
   if (typeof type === 'function') {
-    return serverNode((context) => {
-      const content = serializeChild(type(props ?? {}), context)
-      return context.hydrationMarkers && !serverBuiltins.has(type)
-        ? hydrationRange('c', content)
-        : content
-    })
+    const builtin = serverBuiltins.has(type)
+    return serverNode(
+      (context) => {
+        const content = serializeSlot(type(props ?? {}) as ServerChild, context)
+        return context.hydrationMarkers && !builtin ? hydrationRange('c', content) : content
+      },
+      builtin ? 'transparent' : 'component',
+    )
   }
 
   if (!VALID_ATTRIBUTE_NAME.test(type)) throw new TypeError(`invalid server element name ${type}`)
@@ -168,13 +197,13 @@ export function jsx(type: ServerElementType, props: ServerProps, _key?: unknown)
     const children =
       rawHtml ??
       (hasChildren
-        ? serializeChild(props?.children as ServerChild, context, !isRawTextElement(type))
+        ? multipleChildren
+          ? serializeChildren(props?.children as ServerChild, context, !isRawTextElement(type))
+          : serializeSlot(props?.children as ServerChild, context, !isRawTextElement(type))
         : '')
     return `<${type}${attributes}>${children}</${type}>`
-  })
+  }, 'intrinsic')
 }
-
-export const jsxs = jsx
 
 export function renderToString(
   value: ServerChild | (() => ServerChild),
@@ -190,7 +219,7 @@ export function renderToString(
   try {
     return hydrationRange(
       'r',
-      serializeChild(typeof value === 'function' ? value() : value, context),
+      serializeSlot(typeof value === 'function' ? value() : value, context),
     )
   } finally {
     activeRender = previous
@@ -296,7 +325,7 @@ export function createContext<Value>(defaultValue: Value): ServerContext<Value> 
       } finally {
         context[SERVER_CONTEXT].stack.pop()
       }
-    })
+    }, 'transparent')
   context = { [SERVER_CONTEXT]: { defaultValue, stack: [] }, Provider }
   serverBuiltins.add(Provider)
   return context
@@ -317,8 +346,11 @@ export function createPortal(_children: ServerChild, _container: unknown): never
   )
 }
 
-function serverNode(render: (context: RenderContext) => string): ServerNode {
-  return { [SERVER_NODE]: render }
+function serverNode(
+  render: (context: RenderContext) => string,
+  kind: ServerNode[typeof SERVER_NODE_KIND],
+): ServerNode {
+  return { [SERVER_NODE]: render, [SERVER_NODE_KIND]: kind }
 }
 
 function isServerNode(value: unknown): value is ServerNode {
@@ -329,9 +361,15 @@ function serializeChild(value: ServerChild, context: RenderContext, markScalar =
   if (value === null || value === undefined || typeof value === 'boolean') {
     return context.hydrationMarkers && markScalar ? hydrationRange('t', '') : ''
   }
-  if (isServerNode(value)) return value[SERVER_NODE](context)
+  if (isServerNode(value)) {
+    const content = value[SERVER_NODE](context)
+    return context.hydrationMarkers && value[SERVER_NODE_KIND] === 'intrinsic'
+      ? hydrationRange('s', content)
+      : content
+  }
   if (Array.isArray(value)) {
-    return value.map((child) => serializeChild(child, context, markScalar)).join('')
+    const content = value.map((child) => serializeChild(child, context, markScalar)).join('')
+    return context.hydrationMarkers ? hydrationRange('a', content) : content
   }
   if (typeof value === 'object' || typeof value === 'function' || typeof value === 'symbol') {
     throw new TypeError('unsupported server child value')
@@ -423,7 +461,22 @@ function escapeAttribute(value: string): string {
   return escapeText(value).replaceAll('"', '&quot;').replaceAll("'", '&#x27;')
 }
 
-function hydrationRange(kind: 'c' | 'r' | 't', content: string): string {
+function serializeChildren(
+  value: ServerChild,
+  context: RenderContext,
+  markScalar: boolean,
+): string {
+  return Array.isArray(value)
+    ? value.map((child) => serializeSlot(child, context, markScalar)).join('')
+    : serializeSlot(value, context, markScalar)
+}
+
+function serializeSlot(value: ServerChild, context: RenderContext, markScalar = true): string {
+  const content = serializeChild(value, context, markScalar)
+  return context.hydrationMarkers ? hydrationRange('b', content) : content
+}
+
+function hydrationRange(kind: 'a' | 'b' | 'c' | 'r' | 's' | 't', content: string): string {
   return `<!--${HYDRATION_PREFIX}:${kind}-->${content}<!--/${HYDRATION_PREFIX}:${kind}-->`
 }
 

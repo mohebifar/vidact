@@ -9,13 +9,19 @@ import {
   claimHydrationComponentMount,
   claimHydrationComponentRange,
   claimHydrationNode,
+  claimHydrationSlotRange,
   claimHydrationText,
   claimHydrationTextRange,
   hydrationRangeParent,
   hydrationRootMarkers,
   finishHydration,
+  hydrationCursor,
+  hydrationInsertionPoint,
   isHydrating,
   isHydrationMismatch,
+  noteHydrationStructuralParent,
+  withHydrationInsertion,
+  withHydrationCursor,
 } from './hydration.ts'
 import { createIndexedList } from './indexed-list.ts'
 import { createKeyedList } from './keyed-list.ts'
@@ -101,6 +107,7 @@ export type CompiledBinding<T> = readonly [
 export type OwnedBlock = readonly [
   brand: typeof STRUCTURAL,
   mount: (parent: Node, before: Node | null) => void,
+  hydrationKind?: 'array' | 'slot',
 ]
 
 export type StructuralBinding = OwnedBlock
@@ -141,7 +148,16 @@ export function hasInvalidChild(children: readonly unknown[]): boolean {
 }
 
 export function deferred(render: () => CompiledRenderValue): StructuralBinding {
-  return [STRUCTURAL, (parent, before) => insertValue(parent, render(), before)]
+  noteHydrationStructuralParent()
+  return [
+    STRUCTURAL,
+    (parent, before) => {
+      const hydrated = claimHydrationSlotRange(parent)
+      if (hydrated === undefined) insertValue(parent, render(), before)
+      else insertValue(parent, render(), hydrated[1])
+    },
+    'slot',
+  ]
 }
 
 export function errorBoundary(
@@ -755,51 +771,61 @@ export function when(
   additionalScope?: CompiledScope,
   additionalReads?: SourceMask,
 ): StructuralBinding {
-  return structural(scope, (parent, before) => {
-    const start = document.createComment(DEV ? 'vidact:when' : '')
-    const end = document.createComment(DEV ? '/vidact:when' : '')
-    parent.insertBefore(start, before)
-    parent.insertBefore(end, before)
-    let branchOwner: Owner | null = null
-    let mounted = false
+  return structural(
+    scope,
+    (parent, before) => {
+      const [start, end, hydrated] = structuralRange(parent, before, 'when')
+      let branchOwner: Owner | null = null
+      let mounted = false
+      let hydrationPending = hydrated
 
-    const update = (): void => {
-      const next = Boolean(condition())
-      if (next === mounted) return
-      const currentParent = rangeParent(start, end, 'conditional block')
-      if (!next) {
-        const owner = branchOwner
-        branchOwner = null
-        mounted = false
-        disposeRange(owner, start, end)
-        return
+      const update = (): void => {
+        const next = Boolean(condition())
+        if (hydrationPending && !next) {
+          claimHydrationText(parent, '')
+          hydrationPending = false
+          return
+        }
+        if (next === mounted) return
+        const currentParent = rangeParent(start, end, 'conditional block')
+        if (!next) {
+          const owner = branchOwner
+          branchOwner = null
+          mounted = false
+          disposeRange(owner, start, end)
+          return
+        }
+
+        const nextOwner = createOwner()
+        const [fragment, staged] = hydrationPending
+          ? withHydrationInsertion(currentParent, end, () => stageRender(render, nextOwner))
+          : stageRender(render, nextOwner)
+        hydrationPending = false
+        currentParent.insertBefore(fragment, end)
+        commitPublishedNodes(staged)
+        branchOwner = nextOwner
+        mounted = true
       }
 
-      const nextOwner = createOwner()
-      const [fragment, staged] = stageRender(render, nextOwner)
-      currentParent.insertBefore(fragment, end)
-      commitPublishedNodes(staged)
-      branchOwner = nextOwner
-      mounted = true
-    }
-
-    const removeUpdater = subscribe(scope, reads, update, additionalScope, additionalReads)
-    try {
-      update()
-    } catch (error) {
-      removeUpdater()
-      throw error
-    }
-    onCleanup(() => {
-      removeUpdater()
+      const removeUpdater = subscribe(scope, reads, update, additionalScope, additionalReads)
       try {
-        disposeRange(branchOwner, start, end)
-      } finally {
-        start.remove()
-        end.remove()
+        update()
+      } catch (error) {
+        removeUpdater()
+        throw error
       }
-    })
-  })
+      onCleanup(() => {
+        removeUpdater()
+        try {
+          disposeRange(branchOwner, start, end)
+        } finally {
+          start.remove()
+          end.remove()
+        }
+      })
+    },
+    'slot',
+  )
 }
 
 export type ChoiceMode = 'truthy' | 'not-nullish'
@@ -814,56 +840,62 @@ export function choose(
   additionalScope?: CompiledScope,
   additionalReads?: SourceMask,
 ): StructuralBinding {
-  return structural(scope, (parent, before) => {
-    const start = document.createComment(DEV ? 'vidact:choice' : '')
-    const end = document.createComment(DEV ? '/vidact:choice' : '')
-    parent.insertBefore(start, before)
-    parent.insertBefore(end, before)
-    let selected = -1
-    let branchOwner: Owner | null = null
-    let branchNodes: readonly Node[] = []
+  return structural(
+    scope,
+    (parent, before) => {
+      const [start, end, hydrated] = structuralRange(parent, before, 'choice')
+      let selected = -1
+      let branchOwner: Owner | null = null
+      let branchNodes: readonly Node[] = []
 
-    const update = (): void => {
-      const value = select()
-      const next =
-        mode === 'not-nullish' ? (value === null || value === undefined ? 1 : 0) : value ? 0 : 1
-      if (next === selected) return
-      const currentParent = rangeParent(start, end, 'choice block')
-      const nextOwner = createOwner()
-      const [fragment, nodes] = stageRender(next === 0 ? consequent : alternate, nextOwner)
-      currentParent.insertBefore(fragment, end)
+      const update = (): void => {
+        const value = select()
+        const next =
+          mode === 'not-nullish' ? (value === null || value === undefined ? 1 : 0) : value ? 0 : 1
+        if (next === selected) return
+        const currentParent = rangeParent(start, end, 'choice block')
+        const nextOwner = createOwner()
+        const [fragment, nodes] =
+          hydrated && selected === -1
+            ? withHydrationInsertion(currentParent, end, () =>
+                stageRender(next === 0 ? consequent : alternate, nextOwner),
+              )
+            : stageRender(next === 0 ? consequent : alternate, nextOwner)
+        currentParent.insertBefore(fragment, end)
+        try {
+          commitPublishedNodes(nodes)
+        } catch (error) {
+          disposePublished(nextOwner, nodes)
+          throw error
+        }
+
+        const previousOwner = branchOwner
+        const previousNodes = branchNodes
+        branchOwner = nextOwner
+        branchNodes = nodes
+        selected = next
+        disposePublished(previousOwner, previousNodes)
+      }
+
+      const removeUpdater = subscribe(scope, reads, update, additionalScope, additionalReads)
       try {
-        commitPublishedNodes(nodes)
+        update()
       } catch (error) {
-        disposePublished(nextOwner, nodes)
+        removeUpdater()
         throw error
       }
-
-      const previousOwner = branchOwner
-      const previousNodes = branchNodes
-      branchOwner = nextOwner
-      branchNodes = nodes
-      selected = next
-      disposePublished(previousOwner, previousNodes)
-    }
-
-    const removeUpdater = subscribe(scope, reads, update, additionalScope, additionalReads)
-    try {
-      update()
-    } catch (error) {
-      removeUpdater()
-      throw error
-    }
-    onCleanup(() => {
-      removeUpdater()
-      try {
-        disposePublished(branchOwner, branchNodes)
-      } finally {
-        start.remove()
-        end.remove()
-      }
-    })
-  })
+      onCleanup(() => {
+        removeUpdater()
+        try {
+          disposePublished(branchOwner, branchNodes)
+        } finally {
+          start.remove()
+          end.remove()
+        }
+      })
+    },
+    'slot',
+  )
 }
 
 export function dispatch(
@@ -875,64 +907,68 @@ export function dispatch(
   additionalScope?: CompiledScope,
   additionalReads?: SourceMask,
 ): StructuralBinding {
-  return structural(scope, (parent, before) => {
-    const start = document.createComment(DEV ? 'vidact:dispatch' : '')
-    const end = document.createComment(DEV ? '/vidact:dispatch' : '')
-    parent.insertBefore(start, before)
-    parent.insertBefore(end, before)
-    const unset = Symbol('Vidact.UnsetIdentity')
-    let currentType: unknown = unset
-    let currentKey: unknown = unset
-    let currentOwner: Owner | null = null
-    let currentNodes: readonly Node[] = []
+  return structural(
+    scope,
+    (parent, before) => {
+      const [start, end, hydrated] = structuralRange(parent, before, 'dispatch')
+      const unset = Symbol('Vidact.UnsetIdentity')
+      let currentType: unknown = unset
+      let currentKey: unknown = unset
+      let currentOwner: Owner | null = null
+      let currentNodes: readonly Node[] = []
 
-    const update = (): void => {
-      const nextType = type()
-      const nextKey = key()
-      if (
-        currentType !== unset &&
-        Object.is(nextType, currentType) &&
-        Object.is(nextKey, currentKey)
-      ) {
-        return
+      const update = (): void => {
+        const nextType = type()
+        const nextKey = key()
+        if (
+          currentType !== unset &&
+          Object.is(nextType, currentType) &&
+          Object.is(nextKey, currentKey)
+        ) {
+          return
+        }
+        const currentParent = rangeParent(start, end, 'dispatch block')
+        const nextOwner = createOwner()
+        const [fragment, nodes] =
+          hydrated && currentType === unset
+            ? withHydrationInsertion(currentParent, end, () => stageRender(render, nextOwner))
+            : stageRender(render, nextOwner)
+        currentParent.insertBefore(fragment, end)
+        try {
+          commitPublishedNodes(nodes)
+        } catch (error) {
+          disposePublished(nextOwner, nodes)
+          throw error
+        }
+
+        const previousOwner = currentOwner
+        const previousNodes = currentNodes
+        currentType = nextType
+        currentKey = nextKey
+        currentOwner = nextOwner
+        currentNodes = nodes
+        disposePublished(previousOwner, previousNodes)
       }
-      const currentParent = rangeParent(start, end, 'dispatch block')
-      const nextOwner = createOwner()
-      const [fragment, nodes] = stageRender(render, nextOwner)
-      currentParent.insertBefore(fragment, end)
+
+      const removeUpdater = subscribe(scope, reads, update, additionalScope, additionalReads)
       try {
-        commitPublishedNodes(nodes)
+        update()
       } catch (error) {
-        disposePublished(nextOwner, nodes)
+        removeUpdater()
         throw error
       }
-
-      const previousOwner = currentOwner
-      const previousNodes = currentNodes
-      currentType = nextType
-      currentKey = nextKey
-      currentOwner = nextOwner
-      currentNodes = nodes
-      disposePublished(previousOwner, previousNodes)
-    }
-
-    const removeUpdater = subscribe(scope, reads, update, additionalScope, additionalReads)
-    try {
-      update()
-    } catch (error) {
-      removeUpdater()
-      throw error
-    }
-    onCleanup(() => {
-      removeUpdater()
-      try {
-        disposePublished(currentOwner, currentNodes)
-      } finally {
-        start.remove()
-        end.remove()
-      }
-    })
-  })
+      onCleanup(() => {
+        removeUpdater()
+        try {
+          disposePublished(currentOwner, currentNodes)
+        } finally {
+          start.remove()
+          end.remove()
+        }
+      })
+    },
+    'slot',
+  )
 }
 
 export function keyed<T, K>(
@@ -944,57 +980,61 @@ export function keyed<T, K>(
   additionalScope?: CompiledScope,
   additionalReads?: SourceMask,
 ): StructuralBinding {
-  return structural(scope, (parent, before) => {
-    const itemSource = 1
-    const indexSource = 2
-    const list = createKeyedList(
-      parent,
-      {
-        key,
-        render(value, index) {
-          const owner = createOwner()
-          const itemScope = createNarrowCompiledScope()
-          const valueSlot = createCompiledState(itemScope, itemSource, value)
-          const indexSlot = createCompiledState(itemScope, indexSource, index)
-          try {
-            const nodes = withOwner(owner, () => {
-              onCleanup(itemScope[3])
-              return materialize(render(valueSlot, indexSlot, itemScope))
-            })
-            return [
-              nodes,
-              (nextValue: T, nextIndex: number) => {
-                itemScope[2](() => {
-                  valueSlot.set(nextValue)
-                  indexSlot.set(nextIndex)
-                })
-              },
-              () => disposeOwner(owner),
-            ] as const
-          } catch (error) {
-            disposeOwner(owner)
-            throw error
-          }
+  return structural(
+    scope,
+    (parent, before) => {
+      const itemSource = 1
+      const indexSource = 2
+      const list = createKeyedList(
+        parent,
+        {
+          key,
+          render(value, index) {
+            const owner = createOwner()
+            const itemScope = createNarrowCompiledScope()
+            const valueSlot = createCompiledState(itemScope, itemSource, value)
+            const indexSlot = createCompiledState(itemScope, indexSource, index)
+            try {
+              const nodes = withOwner(owner, () => {
+                onCleanup(itemScope[3])
+                return materialize(render(valueSlot, indexSlot, itemScope))
+              })
+              return [
+                nodes,
+                (nextValue: T, nextIndex: number) => {
+                  itemScope[2](() => {
+                    valueSlot.set(nextValue)
+                    indexSlot.set(nextIndex)
+                  })
+                },
+                () => disposeOwner(owner),
+              ] as const
+            } catch (error) {
+              disposeOwner(owner)
+              throw error
+            }
+          },
         },
-      },
-      before,
-    )
-    const update = (): void => {
-      try {
-        commitPublishedNodes(list.update(values()))
-      } catch (error) {
-        const currentParent = list.parent()
-        if (currentParent !== null) commitPendingRefs(currentParent)
-        throw error
+        before,
+      )
+      const update = (): void => {
+        try {
+          commitPublishedNodes(list.update(values()))
+        } catch (error) {
+          const currentParent = list.parent()
+          if (currentParent !== null) commitPendingRefs(currentParent)
+          throw error
+        }
       }
-    }
-    update()
-    const removeUpdater = subscribe(scope, reads, update, additionalScope, additionalReads)
-    onCleanup(() => {
-      removeUpdater()
-      list.dispose()
-    })
-  })
+      update()
+      const removeUpdater = subscribe(scope, reads, update, additionalScope, additionalReads)
+      onCleanup(() => {
+        removeUpdater()
+        list.dispose()
+      })
+    },
+    'array',
+  )
 }
 
 export function indexed<T>(
@@ -1005,56 +1045,60 @@ export function indexed<T>(
   additionalScope?: CompiledScope,
   additionalReads?: SourceMask,
 ): StructuralBinding {
-  return structural(scope, (parent, before) => {
-    const itemSource = 1
-    const indexSource = 2
-    const list = createIndexedList<T>(
-      parent,
-      {
-        render(value, index) {
-          const owner = createOwner()
-          const itemScope = createNarrowCompiledScope()
-          const valueSlot = createCompiledState(itemScope, itemSource, value)
-          const indexSlot = createCompiledState(itemScope, indexSource, index)
-          try {
-            const nodes = withOwner(owner, () => {
-              onCleanup(itemScope[3])
-              return materialize(render(valueSlot, indexSlot, itemScope))
-            })
-            return [
-              nodes,
-              (nextValue: T, nextIndex: number) => {
-                itemScope[2](() => {
-                  valueSlot.set(nextValue)
-                  indexSlot.set(nextIndex)
-                })
-              },
-              () => disposeOwner(owner),
-            ] as const
-          } catch (error) {
-            disposeOwner(owner)
-            throw error
-          }
+  return structural(
+    scope,
+    (parent, before) => {
+      const itemSource = 1
+      const indexSource = 2
+      const list = createIndexedList<T>(
+        parent,
+        {
+          render(value, index) {
+            const owner = createOwner()
+            const itemScope = createNarrowCompiledScope()
+            const valueSlot = createCompiledState(itemScope, itemSource, value)
+            const indexSlot = createCompiledState(itemScope, indexSource, index)
+            try {
+              const nodes = withOwner(owner, () => {
+                onCleanup(itemScope[3])
+                return materialize(render(valueSlot, indexSlot, itemScope))
+              })
+              return [
+                nodes,
+                (nextValue: T, nextIndex: number) => {
+                  itemScope[2](() => {
+                    valueSlot.set(nextValue)
+                    indexSlot.set(nextIndex)
+                  })
+                },
+                () => disposeOwner(owner),
+              ] as const
+            } catch (error) {
+              disposeOwner(owner)
+              throw error
+            }
+          },
         },
-      },
-      before,
-    )
-    const update = (): void => {
-      try {
-        commitPublishedNodes(list.update(values()))
-      } catch (error) {
-        const currentParent = list.parent()
-        if (currentParent !== null) commitPendingRefs(currentParent)
-        throw error
+        before,
+      )
+      const update = (): void => {
+        try {
+          commitPublishedNodes(list.update(values()))
+        } catch (error) {
+          const currentParent = list.parent()
+          if (currentParent !== null) commitPendingRefs(currentParent)
+          throw error
+        }
       }
-    }
-    update()
-    const removeUpdater = subscribe(scope, reads, update, additionalScope, additionalReads)
-    onCleanup(() => {
-      removeUpdater()
-      list.dispose()
-    })
-  })
+      update()
+      const removeUpdater = subscribe(scope, reads, update, additionalScope, additionalReads)
+      onCleanup(() => {
+        removeUpdater()
+        list.dispose()
+      })
+    },
+    'array',
+  )
 }
 
 export function compiledRoot(
@@ -1082,9 +1126,12 @@ export function compiledRoot(
 
   try {
     const renderParent = hydrationRangeParent(start, end) ?? fragment
-    withOwner(owner, () =>
-      withScopeNamespace(scope, () => insertValue(renderParent, render(), end)),
-    )
+    const insertRender = () =>
+      withOwner(owner, () =>
+        withScopeNamespace(scope, () => insertValue(renderParent, render(), end)),
+      )
+    if (hydratedRange === undefined) insertRender()
+    else withHydrationCursor(renderParent, start.nextSibling, insertRender)
   } catch (error) {
     try {
       scope[3]()
@@ -1592,6 +1639,7 @@ export function hydrateCompiled(
         try {
           hydratedMount?.dispose()
         } finally {
+          removeBetween(rootMarkers[0], rootMarkers[1])
           rootMarkers[0].remove()
           rootMarkers[1].remove()
         }
@@ -1768,20 +1816,39 @@ export function mountCompiledPropTransition<T>(
   onCleanup(removeUpdater)
 }
 
-function structural(scope: CompiledScope, mount: StructuralBinding[1]): StructuralBinding {
+function structural(
+  scope: CompiledScope,
+  mount: StructuralBinding[1],
+  hydrationKind?: StructuralBinding[2],
+): StructuralBinding {
+  if (hydrationKind !== undefined) noteHydrationStructuralParent()
   let mounted = false
   const owner = activeOwner ?? scopeOwners.get(scope)!
   const context = activeContextFrame ?? owner[2]
-  return [
-    STRUCTURAL,
-    (parent, before) => {
-      if (mounted) throw new Error(DEV ? 'compiled block is already mounted' : 'V008')
-      mounted = true
-      withOwner(owner, () =>
-        withContextFrame(context, () => withScopeNamespace(scope, () => mount(parent, before))),
-      )
-    },
-  ]
+  const mountOnce: StructuralBinding[1] = (parent, before) => {
+    if (mounted) throw new Error(DEV ? 'compiled block is already mounted' : 'V008')
+    mounted = true
+    withOwner(owner, () =>
+      withContextFrame(context, () => withScopeNamespace(scope, () => mount(parent, before))),
+    )
+  }
+  return hydrationKind === undefined
+    ? [STRUCTURAL, mountOnce]
+    : [STRUCTURAL, mountOnce, hydrationKind]
+}
+
+function structuralRange(
+  parent: Node,
+  before: Node | null,
+  label: string,
+): readonly [start: Comment, end: Comment, hydrated: boolean] {
+  const hydrated = claimHydrationSlotRange(parent)
+  if (hydrated !== undefined) return [hydrated[0], hydrated[1], true]
+  const start = document.createComment(DEV ? `vidact:${label}` : '')
+  const end = document.createComment(DEV ? `/vidact:${label}` : '')
+  parent.insertBefore(start, before)
+  parent.insertBefore(end, before)
+  return [start, end, false]
 }
 
 function subscribe(
@@ -2043,6 +2110,19 @@ function mountCompiledBindingBefore(
 }
 
 function materialize(value: RenderValue): Node[] {
+  const insertionPoint = hydrationInsertionPoint()
+  if (insertionPoint !== undefined) {
+    const [parent, before] = insertionPoint
+    const first = hydrationCursor(parent)
+    if (first === undefined) throw new Error('hydration insertion point requires active hydration')
+    insertValue(parent, value, before)
+    const after = hydrationCursor(parent)
+    const nodes: Node[] = []
+    for (let node = first; node !== null && node !== after; node = node.nextSibling) {
+      nodes.push(node)
+    }
+    return nodes
+  }
   const fragment = document.createDocumentFragment()
   const moves: NodePosition[] = []
   try {
@@ -2058,6 +2138,18 @@ function stageValue(
   value: RenderValue,
   owner: Owner,
 ): readonly [fragment: DocumentFragment, nodes: readonly Node[]] {
+  const insertionPoint = hydrationInsertionPoint()
+  if (insertionPoint !== undefined) {
+    const [parent, before] = insertionPoint
+    const first = hydrationCursor(parent)
+    if (first === undefined) throw new Error('hydration insertion point requires active hydration')
+    withOwner(owner, () => insertValue(parent, value, before))
+    const nodes: Node[] = []
+    for (let node = first; node !== null && node !== before; node = node.nextSibling) {
+      nodes.push(node)
+    }
+    return [document.createDocumentFragment(), nodes]
+  }
   const fragment = document.createDocumentFragment()
   const moves: NodePosition[] = []
   try {
@@ -2101,7 +2193,7 @@ function insertValue(
     return
   }
   if (isStructuralBinding(value)) {
-    if (isHydrating() && !isCompiledComponentResult(value)) {
+    if (isHydrating() && !isCompiledComponentResult(value) && value[2] === undefined) {
       throw new HydrationMismatch('structural binding hydration markers are not available')
     }
     adoptCompiledRoot(value)

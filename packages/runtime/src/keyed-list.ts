@@ -31,12 +31,16 @@ export function createKeyedList<T, K>(
   options: KeyedListOptions<T, K>,
   before: Node | null = null,
 ): KeyedList<T> {
-  const start = document.createComment(DEV ? 'vidact:list' : '')
-  const end = document.createComment(DEV ? '/vidact:list' : '')
-  parent.insertBefore(start, before)
-  parent.insertBefore(end, before)
+  const hydratedRange = claimHydrationArrayRange(parent)
+  const start = hydratedRange?.[0] ?? document.createComment(DEV ? 'vidact:list' : '')
+  const end = hydratedRange?.[1] ?? document.createComment(DEV ? '/vidact:list' : '')
+  if (hydratedRange === undefined) {
+    parent.insertBefore(start, before)
+    parent.insertBefore(end, before)
+  }
 
   let disposed = false
+  let hydrationPending = hydratedRange !== undefined
   let records: readonly RecordState<T, K>[] = []
 
   const update = (values: readonly T[]): readonly Node[] => {
@@ -65,7 +69,9 @@ export function createKeyedList<T, K>(
           return previous
         }
 
-        const item = normalizeRenderResult(options.render(value, index))
+        const item = normalizeRenderResult(
+          withHydrationInsertion(parent, end, () => options.render(value, index)),
+        )
         const record: RecordState<T, K> = [key, item[0], item[1], item[2]]
         created.push(record)
         return record
@@ -117,6 +123,10 @@ export function createKeyedList<T, K>(
     }
 
     records = nextRecords
+    if (hydrationPending) {
+      hydrationPending = false
+      finishHydrationArrayRange(currentParent, end)
+    }
     if (cleanup[1]) throw cleanup[0]
     return created.flatMap((record) => record[1])
   }
@@ -216,3 +226,8 @@ function disposeRecords<T, K>(
   }
   return [firstError, failed]
 }
+import {
+  claimHydrationArrayRange,
+  finishHydrationArrayRange,
+  withHydrationInsertion,
+} from './hydration.ts'

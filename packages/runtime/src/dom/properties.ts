@@ -160,8 +160,10 @@ export function applyDomProp(element: Element, name: string, value: unknown): vo
     return
   }
   if (booleanAttributes.has(name)) {
-    if (name in element) Reflect.set(element, name, Boolean(value))
-    else if (value) element.setAttribute(attribute, '')
+    if (name in element) {
+      const next = Boolean(value)
+      if (!Object.is(Reflect.get(element, name), next)) Reflect.set(element, name, next)
+    } else if (value) element.setAttribute(attribute, '')
     else element.removeAttribute(attribute)
     return
   }
@@ -169,15 +171,33 @@ export function applyDomProp(element: Element, name: string, value: unknown): vo
     element.removeAttribute(attribute)
     return
   }
-  if (!(name in element && Reflect.set(element, name, value))) {
-    element.setAttribute(attribute, String(value))
+  if (name in element) {
+    const current = Reflect.get(element, name)
+    if (
+      !isCustomElement(element) &&
+      (Object.is(current, value) || String(current) === String(value))
+    ) {
+      validateRawHtmlProp(element, name)
+      return
+    }
+    if (Reflect.set(element, name, value)) {
+      validateRawHtmlProp(element, name)
+      return
+    }
+  }
+  const serialized = String(value)
+  if (element.getAttribute(attribute) !== serialized) {
+    element.setAttribute(attribute, serialized)
   }
   validateRawHtmlProp(element, name)
 }
 
 function applyStringAttribute(element: Element, name: string, value: unknown): void {
   if (value === null || value === undefined) element.removeAttribute(name)
-  else element.setAttribute(name, String(value))
+  else {
+    const serialized = String(value)
+    if (element.getAttribute(name) !== serialized) element.setAttribute(name, serialized)
+  }
 }
 
 function applyNamespacedAttribute(element: Element, name: string, value: unknown): void {

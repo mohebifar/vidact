@@ -6,10 +6,13 @@ interface HydrationState {
   readonly host: ParentNode
   readonly root: HydrationRange
   readonly components: readonly HydrationRange[]
+  readonly claimedElements: WeakSet<Element>
   readonly elements: readonly Element[]
   readonly cursors: WeakMap<Node, Node | null>
+  readonly slots: WeakMap<Node, Comment[]>
   componentIndex: number
-  elementIndex: number
+  claimedElementCount: number
+  pendingStructuralParents: number
 }
 
 export interface HydrationMismatchInfo {
@@ -24,6 +27,7 @@ export class HydrationMismatch extends Error {
 }
 
 let activeHydration: HydrationState | undefined
+let activeInsertionPoint: readonly [parent: Node, before: Node] | undefined
 
 export function beginHydration(host: ParentNode): () => void {
   if (activeHydration !== undefined) {
@@ -38,10 +42,13 @@ export function beginHydration(host: ParentNode): () => void {
     host,
     root,
     components: ranges.components,
+    claimedElements: new WeakSet(),
     elements: collectPostorderElements(root),
     cursors: new WeakMap([[host as Node, root[0].nextSibling]]),
+    slots: new WeakMap(),
     componentIndex: 0,
-    elementIndex: 0,
+    claimedElementCount: 0,
+    pendingStructuralParents: 0,
   }
   return () => {
     activeHydration = undefined
@@ -55,11 +62,16 @@ export function finishHydration(): void {
       `claimed ${state.componentIndex} of ${state.components.length} server component ranges`,
     )
   }
-  if (state.elementIndex !== state.elements.length) {
-    throw mismatch(`claimed ${state.elementIndex} of ${state.elements.length} server elements`)
+  if (state.claimedElementCount !== state.elements.length) {
+    throw mismatch(
+      `claimed ${state.claimedElementCount} of ${state.elements.length} server elements`,
+    )
   }
-  if (cursor(state, state.host as Node) !== state.root[1]) {
-    throw mismatch('compiled root did not consume the complete server root range')
+  const rootCursor = cursor(state, state.host as Node)
+  if (rootCursor !== state.root[1]) {
+    throw mismatch(
+      `compiled root did not consume the complete server root range; stopped at ${JSON.stringify(markerValue(rootCursor as Node) ?? rootCursor?.nodeName ?? null)}`,
+    )
   }
 }
 
@@ -81,14 +93,26 @@ export function claimHydrationElement(
 ): Element | undefined {
   const state = activeHydration
   if (state === undefined) return undefined
-  const element = state.elements[state.elementIndex]
+  const matches = state.elements.filter(
+    (candidate) =>
+      !state.claimedElements.has(candidate) &&
+      candidate.localName === localName &&
+      candidate.namespaceURI === namespace,
+  )
+  const element =
+    state.pendingStructuralParents > 0
+      ? (matches.find(containsArrayMarker) ?? matches[0])
+      : matches[0]
   if (element === undefined) throw mismatch(`missing server element <${localName}>`)
-  if (element.localName !== localName || element.namespaceURI !== namespace) {
-    throw mismatch(`expected <${localName}> but found <${element.localName}> during hydration`)
-  }
-  state.elementIndex += 1
+  if (state.pendingStructuralParents > 0) state.pendingStructuralParents -= 1
+  state.claimedElements.add(element)
+  state.claimedElementCount += 1
   state.cursors.set(element, element.firstChild)
   return element
+}
+
+export function noteHydrationStructuralParent(): void {
+  if (activeHydration !== undefined) activeHydration.pendingStructuralParents += 1
 }
 
 export function claimHydrationComponentRange(): HydrationRange | undefined {
@@ -101,24 +125,51 @@ export function claimHydrationComponentRange(): HydrationRange | undefined {
   if (parent === null || range[1].parentNode !== parent) {
     throw mismatch('server component marker range is detached')
   }
-  state.cursors.set(parent, range[0].nextSibling)
   return range
+}
+
+export function withHydrationCursor<Result>(
+  parent: Node,
+  value: Node | null,
+  operation: () => Result,
+): Result {
+  const state = activeHydration
+  if (state === undefined) return operation()
+  const hadCursor = state.cursors.has(parent)
+  const previous = state.cursors.get(parent) ?? null
+  state.cursors.set(parent, value)
+  try {
+    return operation()
+  } finally {
+    if (hadCursor) state.cursors.set(parent, previous)
+    else state.cursors.delete(parent)
+  }
 }
 
 export function claimHydrationNode(parent: Node, node: Node): boolean {
   const state = activeHydration
   if (state === undefined) return false
+  enterHydrationSlot(state, parent)
   const next = cursor(state, parent)
+  if (isMarker(next, `${HYDRATION_PREFIX}:s`)) {
+    const end = findClosingSibling(next, `${HYDRATION_PREFIX}:s`)
+    if (next.nextSibling !== node || node.nextSibling !== end) {
+      throw mismatch(`server node range does not contain exactly the expected ${node.nodeName}`)
+    }
+    setHydrationCursor(state, parent, end.nextSibling)
+    return true
+  }
   if (next !== node) {
     throw mismatch(`expected existing ${node.nodeName} at the current hydration position`)
   }
-  state.cursors.set(parent, node.nextSibling)
+  setHydrationCursor(state, parent, node.nextSibling)
   return true
 }
 
 export function claimHydrationComponentMount(parent: Node, start: Comment, end: Comment): boolean {
   const state = activeHydration
   if (state === undefined) return false
+  enterHydrationSlot(state, parent)
   const current = cursor(state, parent)
   if (
     (current !== start && current !== end) ||
@@ -127,7 +178,7 @@ export function claimHydrationComponentMount(parent: Node, start: Comment, end: 
   ) {
     throw mismatch('server component range does not match the compiled child position')
   }
-  state.cursors.set(parent, end.nextSibling)
+  setHydrationCursor(state, parent, end.nextSibling)
   return true
 }
 
@@ -141,6 +192,7 @@ export function claimHydrationTextRange(
 ): readonly [start: Comment, end: Comment, text: Text | null] | undefined {
   const state = activeHydration
   if (state === undefined) return undefined
+  enterHydrationSlot(state, parent)
   const start = cursor(state, parent)
   if (!isMarker(start, `${HYDRATION_PREFIX}:t`)) {
     throw mismatch('expected a vidact:v1 text marker')
@@ -159,8 +211,68 @@ export function claimHydrationTextRange(
       `server text ${JSON.stringify(text?.data ?? '')} does not match ${JSON.stringify(expected)}`,
     )
   }
-  state.cursors.set(parent, end.nextSibling)
+  setHydrationCursor(state, parent, end.nextSibling)
   return [start, end, text]
+}
+
+export function claimHydrationArrayRange(parent: Node): HydrationRange | undefined {
+  const state = activeHydration
+  if (state === undefined) return undefined
+  enterHydrationSlot(state, parent)
+  const start = cursor(state, parent)
+  if (!isMarker(start, `${HYDRATION_PREFIX}:a`)) {
+    throw mismatch('expected a vidact:v1 array marker')
+  }
+  const end = findClosingSibling(start, `${HYDRATION_PREFIX}:a`)
+  state.cursors.set(parent, start.nextSibling)
+  return [start, end]
+}
+
+export function finishHydrationArrayRange(parent: Node, end: Comment): void {
+  const state = requireHydration()
+  if (cursor(state, parent) !== end) {
+    throw mismatch('compiled collection did not consume its complete server array range')
+  }
+  setHydrationCursor(state, parent, end.nextSibling)
+}
+
+export function claimHydrationSlotRange(parent: Node): HydrationRange | undefined {
+  const state = activeHydration
+  if (state === undefined) return undefined
+  const start = cursor(state, parent)
+  if (!isMarker(start, `${HYDRATION_PREFIX}:b`)) {
+    throw mismatch('expected a vidact:v1 child-slot marker')
+  }
+  const end = findClosingSibling(start, `${HYDRATION_PREFIX}:b`)
+  const slots = state.slots.get(parent) ?? []
+  slots.push(end)
+  state.slots.set(parent, slots)
+  state.cursors.set(parent, start.nextSibling)
+  return [start, end]
+}
+
+export function withHydrationInsertion<Result>(
+  parent: Node,
+  before: Node,
+  operation: () => Result,
+): Result {
+  if (activeHydration === undefined) return operation()
+  const previous = activeInsertionPoint
+  activeInsertionPoint = [parent, before]
+  try {
+    return operation()
+  } finally {
+    activeInsertionPoint = previous
+  }
+}
+
+export function hydrationInsertionPoint(): readonly [parent: Node, before: Node] | undefined {
+  return activeInsertionPoint
+}
+
+export function hydrationCursor(parent: Node): Node | null | undefined {
+  const state = activeHydration
+  return state === undefined ? undefined : cursor(state, parent)
 }
 
 export function hydrationRangeParent(start: Comment, end: Comment): Node | undefined {
@@ -180,6 +292,30 @@ function cursor(state: HydrationState, parent: Node): Node | null {
   return state.cursors.get(parent) ?? null
 }
 
+function enterHydrationSlot(state: HydrationState, parent: Node): void {
+  const start = cursor(state, parent)
+  if (!isMarker(start, `${HYDRATION_PREFIX}:b`)) return
+  const end = findClosingSibling(start, `${HYDRATION_PREFIX}:b`)
+  const slots = state.slots.get(parent) ?? []
+  slots.push(end)
+  state.slots.set(parent, slots)
+  state.cursors.set(parent, start.nextSibling)
+}
+
+function setHydrationCursor(state: HydrationState, parent: Node, value: Node | null): void {
+  const slots = state.slots.get(parent)
+  let next = value
+  if (slots !== undefined) {
+    for (;;) {
+      const end = slots.at(-1)
+      if (end !== next) break
+      slots.pop()
+      next = end.nextSibling
+    }
+  }
+  state.cursors.set(parent, next)
+}
+
 function mismatch(message: string): HydrationMismatch {
   return new HydrationMismatch(message)
 }
@@ -193,8 +329,15 @@ function isMarker(node: Node | null, value: string): node is Comment {
 }
 
 function findClosingSibling(start: Comment, kind: string): Comment {
+  let depth = 0
   for (let node = start.nextSibling; node !== null; node = node.nextSibling) {
-    if (isMarker(node, `/${kind}`)) return node
+    if (isMarker(node, kind)) {
+      depth += 1
+      continue
+    }
+    if (!isMarker(node, `/${kind}`)) continue
+    if (depth === 0) return node
+    depth -= 1
   }
   throw mismatch(`missing closing ${kind} marker`)
 }
@@ -209,9 +352,9 @@ function scanRanges(host: ParentNode): {
   const walker = document.createTreeWalker(host, NodeFilter.SHOW_COMMENT)
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
     const comment = node as Comment
-    const match = comment.data.match(/^\/?vidact:v1:([crt])$/)
+    const match = comment.data.match(/^\/?vidact:v1:([abcrst])$/)
     if (match === null) continue
-    const kind = match[1] as 'c' | 'r' | 't'
+    const kind = match[1] as 'a' | 'b' | 'c' | 'r' | 's' | 't'
     if (!comment.data.startsWith('/')) {
       const stack = stacks.get(kind) ?? []
       stack.push(comment)
@@ -239,4 +382,12 @@ function collectPostorderElements(root: HydrationRange): Element[] {
     if (node instanceof Element) visit(node)
   }
   return elements
+}
+
+function containsArrayMarker(element: Element): boolean {
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_COMMENT)
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    if (isMarker(node, `${HYDRATION_PREFIX}:a`)) return true
+  }
+  return false
 }

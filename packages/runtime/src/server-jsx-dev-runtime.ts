@@ -1,1 +1,1 @@
-export { Fragment, jsx as jsxDEV } from './server.ts'
+export { Fragment, jsxDEV } from './server.ts'

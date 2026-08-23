@@ -41,7 +41,7 @@ describe('server rendering', () => {
       '<p id=":app-r0:">2</p>',
     )
     expect(renderToString(() => <Greeting />, { identifierPrefix: 'app-' })).toBe(
-      '<!--vidact:v1:r--><!--vidact:v1:c--><p id=":app-r0:"><!--vidact:v1:t-->2<!--/vidact:v1:t--></p><!--/vidact:v1:c--><!--/vidact:v1:r-->',
+      '<!--vidact:v1:r--><!--vidact:v1:b--><!--vidact:v1:c--><!--vidact:v1:b--><!--vidact:v1:s--><p id=":app-r0:"><!--vidact:v1:b--><!--vidact:v1:t-->2<!--/vidact:v1:t--><!--/vidact:v1:b--></p><!--/vidact:v1:s--><!--/vidact:v1:b--><!--/vidact:v1:c--><!--/vidact:v1:b--><!--/vidact:v1:r-->',
     )
   })
 
@@ -68,6 +68,20 @@ describe('server rendering', () => {
   it('rejects unbranded object children instead of stringifying them', () => {
     expect(() => renderToString({ value: '<unsafe>' } as never)).toThrow(
       'unsupported server child value',
+    )
+  })
+
+  it('marks a single array child as an owned hydration range', () => {
+    expect(
+      renderToString(() => (
+        <ul>
+          {['one', 'two'].map((label) => (
+            <li>{label}</li>
+          ))}
+        </ul>
+      )),
+    ).toBe(
+      '<!--vidact:v1:r--><!--vidact:v1:b--><!--vidact:v1:s--><ul><!--vidact:v1:b--><!--vidact:v1:a--><!--vidact:v1:s--><li><!--vidact:v1:b--><!--vidact:v1:t-->one<!--/vidact:v1:t--><!--/vidact:v1:b--></li><!--/vidact:v1:s--><!--vidact:v1:s--><li><!--vidact:v1:b--><!--vidact:v1:t-->two<!--/vidact:v1:t--><!--/vidact:v1:b--></li><!--/vidact:v1:s--><!--/vidact:v1:a--><!--/vidact:v1:b--></ul><!--/vidact:v1:s--><!--/vidact:v1:b--><!--/vidact:v1:r-->',
     )
   })
 })
