@@ -162,6 +162,53 @@ fn stages_server_profiler_only_when_profiling_is_enabled() {
 }
 
 #[test]
+fn gates_and_preserves_framework_server_apis_and_directives() {
+    let input = ModuleInput {
+        filename: "FrameworkServer.tsx",
+        source: r#"
+            "use server";
+            import { cache, cacheSignal } from 'react';
+            import { preconnect } from 'react-dom';
+            const read = cache(() => cacheSignal()?.aborted ? 'aborted' : 'ready');
+            export function FrameworkServer() {
+                preconnect('https://cdn.example.test');
+                return <p>{read()}</p>;
+            }
+        "#,
+    };
+    let diagnostics =
+        compile_server_module(input).expect_err("framework server APIs must remain feature-gated");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.message.contains("`framework`")
+            && diagnostic.span.is_some()
+    }));
+
+    let compilation = compile_server_module_with_options(
+        input,
+        &CompilationOptions::new(CompilerTarget::Server).with_feature(CompilerFeature::Framework),
+    )
+    .expect("framework server APIs and directives should compile");
+    assert!(
+        compilation.code.starts_with("\"use server\";"),
+        "{}",
+        compilation.code
+    );
+    assert!(
+        compilation.code.contains("cacheSignal()"),
+        "{}",
+        compilation.code
+    );
+    assert!(
+        compilation
+            .code
+            .contains("preconnect(\"https://cdn.example.test\")"),
+        "{}",
+        compilation.code
+    );
+}
+
+#[test]
 fn gates_concurrent_server_hooks_at_their_calls() {
     let input = ModuleInput {
         filename: "ServerConcurrent.tsx",

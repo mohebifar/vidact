@@ -30,6 +30,21 @@ export interface ServerRenderOptions {
   readonly identifierPrefix?: string
 }
 
+type FrameworkCacheEntry = {
+  readonly args: readonly unknown[]
+  readonly status: 'fulfilled' | 'rejected'
+  readonly value: unknown
+}
+
+/** @internal */
+export interface ServerFrameworkRenderContext {
+  readonly signal: AbortSignal
+  readonly pending: Set<PromiseLike<unknown>>
+  readonly cache: Map<Function, FrameworkCacheEntry[]>
+  readonly head: Map<string, { readonly html: string; readonly precedence: string }>
+  sawHead: boolean
+}
+
 interface RenderContext {
   hydrationMarkers: boolean
   identifierPrefix: string
@@ -54,6 +69,7 @@ type ServerAsyncState<Value> =
 
 export interface ServerAsyncResource<Value> {
   readonly [SERVER_ASYNC_RESOURCE]: ServerAsyncState<Value>
+  readonly promise: PromiseLike<Value>
 }
 
 type ServerSuspension = {
@@ -155,10 +171,137 @@ const HYDRATION_PREFIX = 'vidact:v1'
 const UNSAFE_HTML = typeof __VIDACT_UNSAFE_HTML__ !== 'undefined' && __VIDACT_UNSAFE_HTML__
 
 let activeRender: RenderContext | undefined
+let activeFrameworkRender: ServerFrameworkRenderContext | undefined
 const serverBuiltins = new WeakSet<ServerComponent>()
 const serverPromiseResources = new WeakMap<object, ServerAsyncResource<unknown>>()
 
+const FRAMEWORK_HEAD_PLACEHOLDER = '<!--vidact-framework:v1:head-->'
+
 export const Fragment = Symbol('Vidact.ServerFragment')
+
+/** @internal */
+export function createServerFrameworkRenderContext(
+  signal: AbortSignal,
+): ServerFrameworkRenderContext {
+  return {
+    signal,
+    pending: new Set(),
+    cache: new Map(),
+    head: new Map(),
+    sawHead: false,
+  }
+}
+
+/** @internal */
+export function withServerFrameworkRenderContext<Result>(
+  context: ServerFrameworkRenderContext,
+  operation: () => Result,
+): Result {
+  const previous = activeFrameworkRender
+  activeFrameworkRender = context
+  try {
+    return operation()
+  } finally {
+    activeFrameworkRender = previous
+  }
+}
+
+export function cache<Arguments extends readonly unknown[], Result>(
+  operation: (...arguments_: Arguments) => Result,
+): (...arguments_: Arguments) => Result {
+  return (...arguments_) => {
+    const context = activeFrameworkRender
+    if (context === undefined) return operation(...arguments_)
+    let entries = context.cache.get(operation)
+    if (entries === undefined) {
+      entries = []
+      context.cache.set(operation, entries)
+    }
+    const existing = entries.find(
+      (entry) =>
+        entry.args.length === arguments_.length &&
+        entry.args.every((argument, index) => Object.is(argument, arguments_[index])),
+    )
+    if (existing !== undefined) {
+      if (existing.status === 'rejected') throw existing.value
+      return existing.value as Result
+    }
+    try {
+      const value = operation(...arguments_)
+      entries.push({ args: [...arguments_], status: 'fulfilled', value })
+      return value
+    } catch (error) {
+      entries.push({ args: [...arguments_], status: 'rejected', value: error })
+      throw error
+    }
+  }
+}
+
+export function cacheSignal(): AbortSignal | null {
+  return activeFrameworkRender?.signal ?? null
+}
+
+export interface ResourceHintOptions {
+  readonly crossOrigin?: '' | 'anonymous' | 'use-credentials'
+}
+
+export interface PreloadOptions extends ResourceHintOptions {
+  readonly as: string
+  readonly fetchPriority?: 'high' | 'low' | 'auto'
+  readonly imageSizes?: string
+  readonly imageSrcSet?: string
+  readonly integrity?: string
+  readonly nonce?: string
+  readonly referrerPolicy?: string
+  readonly type?: string
+}
+
+export interface PreinitOptions extends ResourceHintOptions {
+  readonly as: 'script' | 'style'
+  readonly precedence?: string
+  readonly integrity?: string
+  readonly nonce?: string
+}
+
+export function preconnect(href: string, options: ResourceHintOptions = {}): void {
+  registerResourceHint('preconnect', href, options)
+}
+
+export function prefetchDNS(href: string): void {
+  registerResourceHint('dns-prefetch', href, {})
+}
+
+export function preload(href: string, options: PreloadOptions): void {
+  registerResourceHint('preload', href, options)
+}
+
+export function preloadModule(href: string, options: ResourceHintOptions = {}): void {
+  registerResourceHint('modulepreload', href, options)
+}
+
+export function preinit(href: string, options: PreinitOptions): void {
+  if (options.as === 'style') {
+    registerHeadEntry(
+      `style:${href}`,
+      `<link rel="stylesheet" href="${escapeAttribute(href)}"${serializeHintOptions(options)}>`,
+      options.precedence ?? 'default',
+    )
+    return
+  }
+  registerHeadEntry(
+    `script:${href}`,
+    `<script src="${escapeAttribute(href)}"${serializeHintOptions(options)}></script>`,
+    'script',
+  )
+}
+
+export function preinitModule(href: string, options: ResourceHintOptions = {}): void {
+  registerHeadEntry(
+    `module:${href}`,
+    `<script type="module" src="${escapeAttribute(href)}"${serializeHintOptions(options)}></script>`,
+    'module',
+  )
+}
 
 export function jsx(type: ServerElementType, props: ServerProps, _key?: unknown): ServerNode {
   return createServerElement(type, props, false)
@@ -205,42 +348,73 @@ function createServerElement(
   }
 
   if (!VALID_ATTRIBUTE_NAME.test(type)) throw new TypeError(`invalid server element name ${type}`)
-  return serverNode((context) => {
-    const hiddenByActivity = context.activityHidden
-    const previousActivityHidden = context.activityHidden
-    context.activityHidden = false
-    try {
-      const attributes = serializeAttributes(props, hiddenByActivity)
-      if (VOID_ELEMENTS.has(type)) {
-        if (
-          hasRenderableChild(props?.children as ServerChild) ||
-          readRawHtml(props) !== undefined
-        ) {
-          throw new TypeError(`${type} is a void element and cannot have children or raw HTML`)
-        }
-        return `<${type}${attributes}>`
-      }
+  return serverNode(
+    (context) => serializeIntrinsicElement(type, props, multipleChildren, context),
+    'intrinsic',
+  )
+}
 
-      const rawHtml = readRawHtml(props)
-      if (rawHtml !== undefined && hasRenderableChild(props?.children as ServerChild)) {
-        throw new TypeError('cannot set both children and dangerouslySetInnerHTML')
-      }
-      const hasChildren = Object.hasOwn(props ?? {}, 'children')
-      const children =
-        rawHtml === undefined
-          ? hasChildren
-            ? multipleChildren
-              ? serializeChildren(props?.children as ServerChild, context, !isRawTextElement(type))
-              : serializeSlot(props?.children as ServerChild, context, !isRawTextElement(type))
-            : ''
-          : context.hydrationMarkers
-            ? hydrationRange('h', assertSafeHydrationRawHtml(rawHtml))
-            : rawHtml
-      return `<${type}${attributes}>${children}</${type}>`
+function serializeIntrinsicElement(
+  type: string,
+  props: ServerProps,
+  multipleChildren: boolean,
+  context: RenderContext,
+): string {
+  if (activeFrameworkRender !== undefined && isHoistableHeadElement(type, props)) {
+    const hydrationMarkers = context.hydrationMarkers
+    context.hydrationMarkers = false
+    try {
+      const html = serializeIntrinsicContents(type, props, multipleChildren, context)
+      registerHeadEntry(metadataKey(type, props), html, metadataPrecedence(type, props))
+      return ''
     } finally {
-      context.activityHidden = previousActivityHidden
+      context.hydrationMarkers = hydrationMarkers
     }
-  }, 'intrinsic')
+  }
+  return serializeIntrinsicContents(type, props, multipleChildren, context)
+}
+
+function serializeIntrinsicContents(
+  type: string,
+  props: ServerProps,
+  multipleChildren: boolean,
+  context: RenderContext,
+): string {
+  const hiddenByActivity = context.activityHidden
+  const previousActivityHidden = context.activityHidden
+  context.activityHidden = false
+  try {
+    const attributes = serializeAttributes(props, hiddenByActivity)
+    if (VOID_ELEMENTS.has(type)) {
+      if (hasRenderableChild(props?.children as ServerChild) || readRawHtml(props) !== undefined) {
+        throw new TypeError(`${type} is a void element and cannot have children or raw HTML`)
+      }
+      return `<${type}${attributes}>`
+    }
+
+    const rawHtml = readRawHtml(props)
+    if (rawHtml !== undefined && hasRenderableChild(props?.children as ServerChild)) {
+      throw new TypeError('cannot set both children and dangerouslySetInnerHTML')
+    }
+    const hasChildren = Object.hasOwn(props ?? {}, 'children')
+    const children =
+      rawHtml === undefined
+        ? hasChildren
+          ? multipleChildren
+            ? serializeChildren(props?.children as ServerChild, context, !isRawTextElement(type))
+            : serializeSlot(props?.children as ServerChild, context, !isRawTextElement(type))
+          : ''
+        : context.hydrationMarkers
+          ? hydrationRange('h', assertSafeHydrationRawHtml(rawHtml))
+          : rawHtml
+    if (type === 'head' && activeFrameworkRender !== undefined) {
+      activeFrameworkRender.sawHead = true
+      return `<head${attributes}>${children}${FRAMEWORK_HEAD_PLACEHOLDER}</head>`
+    }
+    return `<${type}${attributes}>${children}</${type}>`
+  } finally {
+    context.activityHidden = previousActivityHidden
+  }
 }
 
 export function renderToString(
@@ -248,6 +422,7 @@ export function renderToString(
   options: ServerRenderOptions = {},
 ): string {
   const previous = activeRender
+  beginFrameworkRenderPass()
   const context = {
     hydrationMarkers: true,
     identifierPrefix: options.identifierPrefix ?? '',
@@ -256,10 +431,11 @@ export function renderToString(
   }
   activeRender = context
   try {
-    return hydrationRange(
+    const html = hydrationRange(
       'r',
       serializeSlot(typeof value === 'function' ? value() : value, context),
     )
+    return finalizeFrameworkHtml(html)
   } finally {
     activeRender = previous
   }
@@ -270,6 +446,7 @@ export function renderToStaticMarkup(
   options: ServerRenderOptions = {},
 ): string {
   const previous = activeRender
+  beginFrameworkRenderPass()
   const context = {
     hydrationMarkers: false,
     identifierPrefix: options.identifierPrefix ?? '',
@@ -278,7 +455,9 @@ export function renderToStaticMarkup(
   }
   activeRender = context
   try {
-    return serializeChild(typeof value === 'function' ? value() : value, context)
+    return finalizeFrameworkHtml(
+      serializeChild(typeof value === 'function' ? value() : value, context),
+    )
   } finally {
     activeRender = previous
   }
@@ -426,7 +605,7 @@ export function createResource<Value>(input: PromiseLike<Value>): ServerAsyncRes
     | undefined
   if (existing !== undefined) return existing
   let state: ServerAsyncState<Value> = { status: 'pending' }
-  const resource = {} as ServerAsyncResource<Value>
+  const resource = { promise: input } as ServerAsyncResource<Value>
   Object.defineProperty(resource, SERVER_ASYNC_RESOURCE, { get: () => state })
   serverPromiseResources.set(input as object, resource as ServerAsyncResource<unknown>)
   void Promise.resolve(input).then(
@@ -478,6 +657,7 @@ export function Suspense(props: Record<string, unknown>): ServerNode {
       return serializeChild((render as () => ServerChild)(), context)
     } catch (error) {
       if (!isServerSuspension(error)) throw error
+      activeFrameworkRender?.pending.add(error.resource.promise)
       const pendingMarker = context.hydrationMarkers ? `<!--${HYDRATION_PREFIX}:p-->` : ''
       return pendingMarker + serializeChild((fallback as () => ServerChild)(), context)
     }
@@ -619,6 +799,7 @@ function serializeAttribute(name: string, value: unknown): string {
     name === 'children' ||
     name === 'dangerouslySetInnerHTML' ||
     name === 'key' ||
+    name === 'precedence' ||
     name === 'ref' ||
     /^on/i.test(name) ||
     value === null ||
@@ -637,6 +818,122 @@ function serializeAttribute(name: string, value: unknown): string {
   if (typeof value === 'boolean') return ''
   if (!VALID_ATTRIBUTE_NAME.test(normalizedName)) return ''
   return ` ${normalizedName}="${escapeAttribute(String(value))}"`
+}
+
+function beginFrameworkRenderPass(): void {
+  const framework = activeFrameworkRender
+  if (framework === undefined) return
+  if (framework.signal.aborted) throw frameworkAbortReason(framework.signal)
+  framework.pending.clear()
+  framework.head.clear()
+  framework.sawHead = false
+}
+
+function finalizeFrameworkHtml(html: string): string {
+  const framework = activeFrameworkRender
+  if (framework === undefined) return html
+  const head = [...framework.head.entries()]
+    .toSorted(
+      ([leftKey, left], [rightKey, right]) =>
+        left.precedence.localeCompare(right.precedence) || leftKey.localeCompare(rightKey),
+    )
+    .map(([, entry]) => entry.html)
+    .join('')
+  if (framework.sawHead) return html.replace(FRAMEWORK_HEAD_PLACEHOLDER, head)
+  if (head === '') return html
+  const htmlStart = html.indexOf('<html')
+  if (htmlStart !== -1) {
+    const htmlOpenEnd = html.indexOf('>', htmlStart)
+    if (htmlOpenEnd !== -1) {
+      return `${html.slice(0, htmlOpenEnd + 1)}<head>${head}</head>${html.slice(htmlOpenEnd + 1)}`
+    }
+  }
+  return `<head>${head}</head>${html}`
+}
+
+function isHoistableHeadElement(type: string, props: ServerProps): boolean {
+  if (type === 'title' || type === 'meta' || type === 'link') return true
+  if (type === 'style') return typeof props?.precedence === 'string'
+  return type === 'script' && props?.async === true && typeof props.src === 'string'
+}
+
+function metadataKey(type: string, props: ServerProps): string {
+  if (type === 'title') return 'title'
+  if (type === 'meta') {
+    for (const name of ['charSet', 'name', 'property', 'httpEquiv'] as const) {
+      const value = props?.[name]
+      if (value !== undefined) return `meta:${name}:${String(value)}`
+    }
+  }
+  if (type === 'link') {
+    return `link:${String(props?.rel ?? '')}:${String(props?.href ?? '')}:${String(props?.as ?? '')}`
+  }
+  if (type === 'style') return `style-inline:${String(props?.href ?? props?.children ?? '')}`
+  if (type === 'script') return `script:${String(props?.src ?? '')}`
+  return `${type}:${JSON.stringify(props)}`
+}
+
+function metadataPrecedence(type: string, props: ServerProps): string {
+  if (type === 'style' || (type === 'link' && props?.rel === 'stylesheet')) {
+    return `2:${String(props?.precedence ?? 'default')}`
+  }
+  if (type === 'script') return '3:script'
+  return '1:metadata'
+}
+
+function registerResourceHint(
+  relation: string,
+  href: string,
+  options: ResourceHintOptions | PreloadOptions,
+): void {
+  if (typeof href !== 'string' || href.length === 0)
+    throw new TypeError('resource href must be non-empty')
+  const as =
+    'as' in options && typeof options.as === 'string' ? ` as="${escapeAttribute(options.as)}"` : ''
+  registerHeadEntry(
+    `hint:${relation}:${href}:${as}`,
+    `<link rel="${relation}" href="${escapeAttribute(href)}"${as}${serializeHintOptions(options)}>`,
+    '0:hint',
+  )
+}
+
+function registerHeadEntry(key: string, html: string, precedence: string): void {
+  activeFrameworkRender?.head.set(key, { html, precedence })
+}
+
+function serializeHintOptions(
+  options: ResourceHintOptions | PreloadOptions | PreinitOptions,
+): string {
+  const attributes: string[] = []
+  if (options.crossOrigin !== undefined) {
+    attributes.push(` crossorigin="${escapeAttribute(options.crossOrigin)}"`)
+  }
+  if ('fetchPriority' in options && options.fetchPriority !== undefined) {
+    attributes.push(` fetchpriority="${options.fetchPriority}"`)
+  }
+  if ('imageSizes' in options && options.imageSizes !== undefined) {
+    attributes.push(` imagesizes="${escapeAttribute(options.imageSizes)}"`)
+  }
+  if ('imageSrcSet' in options && options.imageSrcSet !== undefined) {
+    attributes.push(` imagesrcset="${escapeAttribute(options.imageSrcSet)}"`)
+  }
+  if ('integrity' in options && options.integrity !== undefined) {
+    attributes.push(` integrity="${escapeAttribute(options.integrity)}"`)
+  }
+  if ('nonce' in options && options.nonce !== undefined) {
+    attributes.push(` nonce="${escapeAttribute(options.nonce)}"`)
+  }
+  if ('referrerPolicy' in options && options.referrerPolicy !== undefined) {
+    attributes.push(` referrerpolicy="${escapeAttribute(options.referrerPolicy)}"`)
+  }
+  if ('type' in options && options.type !== undefined) {
+    attributes.push(` type="${escapeAttribute(options.type)}"`)
+  }
+  return attributes.join('')
+}
+
+function frameworkAbortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
 }
 
 function attributeName(name: string): string {

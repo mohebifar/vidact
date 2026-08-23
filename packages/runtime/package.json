@@ -80,6 +80,30 @@
       "types": "./dist/server-profiling.d.ts",
       "import": "./dist/server-profiling.js"
     },
+    "./framework": {
+      "types": "./dist/framework.d.ts",
+      "import": "./dist/framework.js"
+    },
+    "./framework/hydrate": {
+      "types": "./dist/framework-hydrate.d.ts",
+      "import": "./dist/framework-hydrate.js"
+    },
+    "./framework/protocol": {
+      "types": "./dist/framework-protocol.d.ts",
+      "import": "./dist/framework-protocol.js"
+    },
+    "./framework/server": {
+      "types": "./dist/server-framework.d.ts",
+      "import": "./dist/server-framework.js"
+    },
+    "./framework/server/jsx-dev-runtime": {
+      "types": "./dist/server-framework-jsx-dev-runtime.d.ts",
+      "import": "./dist/server-framework-jsx-dev-runtime.js"
+    },
+    "./framework/server/jsx-runtime": {
+      "types": "./dist/server-framework-jsx-runtime.d.ts",
+      "import": "./dist/server-framework-jsx-runtime.js"
+    },
     "./hydrate/jsx-dev-runtime": {
       "types": "./dist/hydrate-jsx-dev-runtime.d.ts",
       "import": "./dist/hydrate-jsx-dev-runtime.js"

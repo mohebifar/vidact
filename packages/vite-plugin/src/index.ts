@@ -18,6 +18,8 @@ import {
 
 const REACT_MODULE = '\0vidact:react'
 const REACT_DOM_MODULE = '\0vidact:react-dom'
+const REACT_DOM_SERVER_MODULE = '\0vidact:react-dom-server'
+const REACT_DOM_STATIC_MODULE = '\0vidact:react-dom-static'
 
 export interface VidactPluginOptions {
   /** Path to the Rust workspace Cargo.toml. Relative paths resolve from Vite's root. */
@@ -107,7 +109,9 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
     },
     resolveId(source) {
       if (source === 'react') return REACT_MODULE
-      return source === 'react-dom' ? REACT_DOM_MODULE : null
+      if (source === 'react-dom') return REACT_DOM_MODULE
+      if (source === 'react-dom/server') return REACT_DOM_SERVER_MODULE
+      return source === 'react-dom/static' ? REACT_DOM_STATIC_MODULE : null
     },
     load(id) {
       if (id === REACT_MODULE) {
@@ -116,6 +120,7 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
         const actionsEnabled = configuration.features.includes('actions')
         const retainedUiEnabled = configuration.features.includes('retained-ui')
         const profilingEnabled = configuration.features.includes('profiling')
+        const frameworkEnabled = configuration.features.includes('framework')
         const clientRuntime = clientRuntimeEntry(
           asyncEnabled,
           concurrentEnabled,
@@ -129,7 +134,7 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
         const actionExports = actionsEnabled ? 'useActionState, useOptimistic, ' : ''
         const core =
           configuration.target === 'server'
-            ? `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "${serverRuntime}"`
+            ? `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}${frameworkEnabled ? 'cache, cacheSignal, ' : ''}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "${frameworkEnabled ? '@vidact/runtime/framework/server' : serverRuntime}"`
             : `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "${clientRuntime}"`
         const exports = [core]
         if (retainedUiEnabled) {
@@ -156,11 +161,28 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       }
       const actionsEnabled = configuration.features.includes('actions')
       const concurrentEnabled = configuration.features.includes('concurrent')
-      return id === REACT_DOM_MODULE
-        ? configuration.target === 'server'
+      const frameworkEnabled = configuration.features.includes('framework')
+      if (id === REACT_DOM_SERVER_MODULE || id === REACT_DOM_STATIC_MODULE) {
+        if (!frameworkEnabled || configuration.target !== 'server') {
+          return `throw new Error("${id === REACT_DOM_SERVER_MODULE ? 'react-dom/server' : 'react-dom/static'} requires the server target and framework feature")`
+        }
+        return id === REACT_DOM_SERVER_MODULE
+          ? 'export { renderToPipeableStream, renderToReadableStream, resume, resumeToPipeableStream } from "@vidact/runtime/framework/server"'
+          : 'export { prerender, prerenderToNodeStream } from "@vidact/runtime/framework/server"'
+      }
+      if (id !== REACT_DOM_MODULE) return null
+      const core =
+        configuration.target === 'server'
           ? `export { createPortal${concurrentEnabled ? ', flushSync' : ''}${actionsEnabled ? ', useFormStatus' : ''} } from "${serverRuntimeEntry(configuration.features.includes('async'), concurrentEnabled, actionsEnabled)}"`
           : `export { createPortal${concurrentEnabled ? ', flushSync' : ''}${actionsEnabled ? ', useFormStatus' : ''} } from "${clientRuntimeEntry(configuration.features.includes('async'), concurrentEnabled, actionsEnabled, configuration.target === 'hydrate')}"`
-        : null
+      if (!frameworkEnabled) return core
+      const frameworkRuntime =
+        configuration.target === 'server'
+          ? '@vidact/runtime/framework/server'
+          : configuration.target === 'hydrate'
+            ? '@vidact/runtime/framework/hydrate'
+            : '@vidact/runtime/framework'
+      return `${core}\nexport { preconnect, prefetchDNS, preinit, preinitModule, preload, preloadModule } from "${frameworkRuntime}"`
     },
     async transform(source, id) {
       const filename = id.split('?', 1)[0] ?? id

@@ -60,6 +60,12 @@ export type DirectProps = Record<string, unknown> | null
 export type DirectComponent = (props: Record<string, unknown>) => CompiledRenderValue
 
 export const Fragment = Symbol(DEV ? 'Vidact.Fragment' : undefined)
+let frameworkMetadataHandler: ((element: Element) => Node) | undefined
+
+/** @internal */
+export function installFrameworkMetadata(handler: (element: Element) => Node): void {
+  frameworkMetadataHandler = handler
+}
 
 export function h<Tag extends keyof HTMLElementTagNameMap>(
   type: Tag,
@@ -121,6 +127,9 @@ export function h(
     appendChildren(element, children),
   )
   if (restoreAfterChildren) restoreControlledFormState(element)
+  if (frameworkMetadataHandler !== undefined && namespace === 'html') {
+    return frameworkMetadataHandler(element)
+  }
   return element
 }
 

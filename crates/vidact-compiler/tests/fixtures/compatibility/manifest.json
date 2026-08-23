@@ -389,6 +389,31 @@
       "spanContains": "captureOwnerStack"
     },
     {
+      "path": "accepted/framework-hints.tsx",
+      "expectation": "accepted",
+      "features": ["framework"],
+      "components": ["FrameworkHints"]
+    },
+    {
+      "path": "rejected/framework-hint-disabled.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "preconnect"
+    },
+    {
+      "path": "rejected/framework-directive-disabled.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "\"use client\""
+    },
+    {
+      "path": "rejected/framework-cache-client.tsx",
+      "expectation": "rejected",
+      "features": ["framework"],
+      "code": "UnsupportedSyntax",
+      "spanContains": "cache"
+    },
+    {
       "path": "rejected/action-hook-disabled.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",

@@ -45,6 +45,120 @@ fn compile_profiling(input: ModuleInput<'_>) -> Result<String, Vec<Diagnostic>> 
     )
 }
 
+fn compile_framework(input: ModuleInput<'_>) -> Result<String, Vec<Diagnostic>> {
+    compile_surgical_module_with_options(
+        input,
+        &CompilationOptions::default().with_feature(CompilerFeature::Framework),
+    )
+}
+
+#[test]
+fn gates_framework_resource_hints_and_server_only_cache_apis() {
+    let hints = ModuleInput {
+        filename: "FrameworkHints.tsx",
+        source: r#"
+            import { preconnect, preload } from 'react-dom';
+            export function App() {
+                preconnect('https://cdn.example.test');
+                preload('/app.css', { as: 'style' });
+                return <main>framework</main>;
+            }
+        "#,
+    };
+    let diagnostics = compile_surgical_module(hints)
+        .expect_err("framework resource hints must remain feature-gated");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.message.contains("`framework`")
+            && diagnostic.span.is_some()
+    }));
+    let output = compile_framework(hints).expect("framework resource hints should remain callable");
+    assert!(
+        output.contains("preconnect(\"https://cdn.example.test\")"),
+        "{output}"
+    );
+    assert!(output.contains("preload(\"/app.css\""), "{output}");
+
+    let cache = ModuleInput {
+        filename: "ClientCache.tsx",
+        source: r#"
+            import { cache } from 'react';
+            const read = cache(() => 'value');
+            export function App() { return <main>{read()}</main>; }
+        "#,
+    };
+    let diagnostics =
+        compile_framework(cache).expect_err("React cache must remain a server-only framework API");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("server target") && diagnostic.span.is_some()
+    }));
+}
+
+#[test]
+fn gates_framework_module_directives_at_their_source_span() {
+    let client = ModuleInput {
+        filename: "ClientBoundary.tsx",
+        source: r#"
+            "use client";
+            export function ClientBoundary() { return <button>client</button>; }
+        "#,
+    };
+    let diagnostics = compile_surgical_module(client)
+        .expect_err("client boundaries must require the framework feature");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("use client") && diagnostic.span.is_some()
+    }));
+    let output = compile_framework(client).expect("framework client boundaries should compile");
+    assert!(output.starts_with("\"use client\";"), "{output}");
+
+    let server = ModuleInput {
+        filename: "ServerFunction.tsx",
+        source: r#"
+            export function ServerFunction() {
+                "use server";
+                return <p>server</p>;
+            }
+        "#,
+    };
+    let diagnostics =
+        compile_framework(server).expect_err("use server must require the server compiler target");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("server compiler target") && diagnostic.span.is_some()
+    }));
+}
+
+#[test]
+fn activates_framework_metadata_only_for_html_head_elements() {
+    let output = compile_framework(ModuleInput {
+        filename: "FrameworkMetadata.tsx",
+        source: r#"
+            export function FrameworkMetadata({ title }) {
+                return <><title>{title}</title><meta name="description" content={title} /><svg><title>icon</title></svg></>;
+            }
+        "#,
+    })
+    .expect("framework metadata should compile");
+    assert!(
+        output.contains("enableFrameworkMetadata as __vidactEnableFrameworkMetadata"),
+        "{output}"
+    );
+    assert!(
+        output.contains("from \"@vidact/runtime/framework\""),
+        "{output}"
+    );
+    assert!(
+        output.contains("__vidactEnableFrameworkMetadata();"),
+        "{output}"
+    );
+
+    let output = compile_framework(ModuleInput {
+        filename: "FrameworkWithoutMetadata.tsx",
+        source: r#"export function App() { return <svg><title>icon</title></svg>; }"#,
+    })
+    .expect("SVG titles are not document metadata");
+    assert!(!output.contains("enableFrameworkMetadata"), "{output}");
+}
+
 #[test]
 fn gates_and_stages_profiling_apis() {
     let source = r#"

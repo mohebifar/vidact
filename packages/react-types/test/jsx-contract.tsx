@@ -3,6 +3,8 @@ import {
   Activity,
   Profiler,
   Suspense,
+  cache,
+  cacheSignal,
   createContext,
   lazy,
   use,
@@ -10,7 +12,18 @@ import {
   useOptimistic,
   type ReactElement,
 } from 'react'
-import { createPortal, useFormStatus } from 'react-dom'
+import {
+  createPortal,
+  preconnect,
+  prefetchDNS,
+  preinit,
+  preinitModule,
+  preload,
+  preloadModule,
+  useFormStatus,
+} from 'react-dom'
+import { renderToReadableStream, resume } from 'react-dom/server'
+import { prerender } from 'react-dom/static'
 
 const child: VidactNode = 'child'
 
@@ -99,6 +112,17 @@ const functionFormAction = (
     <button formAction={async (data) => void data.get('value')}>save</button>
   </form>
 )
+const cachedRead = cache((id: string) => id)
+const requestSignal: AbortSignal | null = cacheSignal()
+preconnect('https://cdn.example.test')
+prefetchDNS('https://dns.example.test')
+preload('/app.css', { as: 'style' })
+preloadModule('/chunk.js')
+preinit('/app.css', { as: 'style', precedence: 'app' })
+preinitModule('/app.js')
+const readable = renderToReadableStream('server')
+const prerendered = prerender('server')
+const resumed = resume('continuation')
 
 void nativeElements
 void customElement
@@ -118,6 +142,11 @@ void optimisticState
 void addOptimistic
 void formStatus
 void functionFormAction
+void cachedRead('id')
+void requestSignal
+void readable
+void prerendered
+void resumed
 
 // @ts-expect-error `href` is not a button attribute.
 const invalidAttribute = <button href="/not-a-button-link" />

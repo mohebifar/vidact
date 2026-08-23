@@ -36,6 +36,13 @@ function virtualReactDomModule(options: Parameters<typeof vidact>[0]): string {
   return load(resolve('react-dom')!)!
 }
 
+function virtualModule(source: string, options: Parameters<typeof vidact>[0]): string {
+  const plugin = vidact(options)
+  const resolve = Reflect.get(plugin, 'resolveId') as (specifier: string) => string | null
+  const load = Reflect.get(plugin, 'load') as (id: string) => string | null
+  return load(resolve(source)!)!
+}
+
 describe('vidact compiler client', () => {
   it('returns the Rust compiler analysis protocol for TSX arrays', async () => {
     const analysis = await analyzeWithCompiler(
@@ -183,6 +190,31 @@ describe('vidact compiler client', () => {
       '@vidact/runtime/profiling/server',
     )
     expect(virtualReactModule({})).not.toContain('captureOwnerStack')
+  })
+
+  it('exposes framework caches, resource hints, streaming, and static rendering only when enabled', () => {
+    expect(virtualReactModule({ target: 'server', features: ['framework'] })).toContain(
+      'cache, cacheSignal',
+    )
+    expect(virtualReactModule({ target: 'server', features: ['framework'] })).toContain(
+      '@vidact/runtime/framework/server',
+    )
+    expect(virtualReactDomModule({ features: ['framework'] })).toContain(
+      'preconnect, prefetchDNS, preinit, preinitModule, preload, preloadModule',
+    )
+    expect(virtualReactDomModule({ target: 'hydrate', features: ['framework'] })).toContain(
+      '@vidact/runtime/framework/hydrate',
+    )
+    expect(virtualReactDomModule({})).not.toContain('preconnect')
+    expect(
+      virtualModule('react-dom/server', { target: 'server', features: ['framework'] }),
+    ).toContain('renderToPipeableStream, renderToReadableStream, resume, resumeToPipeableStream')
+    expect(
+      virtualModule('react-dom/static', { target: 'server', features: ['framework'] }),
+    ).toContain('prerender, prerenderToNodeStream')
+    expect(virtualModule('react-dom/server', { target: 'server' })).toContain(
+      'requires the server target and framework feature',
+    )
   })
 
   it('selects isolated Actions facades and exposes form APIs only when enabled', () => {

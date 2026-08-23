@@ -78,7 +78,7 @@ metadata. Implementing another gated family requires a compiler-side semantic
 check and compatibility fixtures for both disabled and enabled behavior.
 
 `unsafe-html`, `css-insertion`, `async`, `concurrent`, `actions`, `retained-ui`,
-and `profiling` now consume feature flags. Async
+`profiling`, and `framework` now consume feature flags. Async
 selects isolated client, hydrate, and server entries and enables compiler-owned
 Suspense factories, resource reads, and lazy module records. Actions selects
 its form and state entries; retained UI selects the Activity facade, whose first
@@ -87,10 +87,14 @@ its staged descendants are constructed. An enabled but unused retained feature
 therefore produces the exact default artifact. Profiling selects staged
 Profiler boundaries, reactive debug values, logical owner stacks, and
 development-only performance tracks. Its entrypoint-driven activation also
-preserves an exact default artifact when enabled but unused. The other accepted
-names remain reserved configuration values whose syntax is unsupported;
-transporting them does not claim runtime parity. `hydrate` and `server` now
-select implemented hydration and SSR lowering targets.
+preserves an exact default artifact when enabled but unused. Framework selects
+request-scoped server caches, settled streaming/static continuations, explicit
+module and Server Function protocols, resource hints, metadata hoisting, and
+independent hydration helpers. Client metadata activation is usage-local, so an
+enabled but unused framework feature also preserves the exact default artifact.
+The complete adapted semantics and trust boundary are recorded in
+[Framework streaming, continuations, and trust boundaries](framework-streaming-continuations-and-trust-boundaries.md).
+`hydrate` and `server` select implemented hydration and SSR lowering targets.
 
 The `unsafe-html` implementation is absent from chunks built without the
 feature. Forms, styles, namespaces, events, and refs still share the default DOM

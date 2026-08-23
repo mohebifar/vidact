@@ -77,6 +77,7 @@ const CREATE_MEMO: &str = "__vidactCreateMemo";
 const CREATE_OPTIMISTIC: &str = "__vidactCreateOptimistic";
 const DEFERRED: &str = "__vidactDeferred";
 const DISPATCH: &str = "__vidactDispatch";
+const ENABLE_FRAMEWORK_METADATA: &str = "__vidactEnableFrameworkMetadata";
 const INDEXED: &str = "__vidactIndexed";
 const KEYED: &str = "__vidactKeyed";
 const ITEM_INDEX: &str = "__vidactItemIndex";
@@ -126,6 +127,8 @@ pub fn compile_surgical_module_with_ir_and_options(
             input.filename, parsed.diagnostics
         ))]);
     }
+    crate::framework_directives::validate_framework_directives(&parsed.program, options)
+        .map_err(|diagnostic| vec![diagnostic])?;
     let anonymous_defaults =
         normalize_expression_bodied_component_arrows(&allocator, &mut parsed.program);
     let semantic = SemanticBuilder::new()
@@ -228,6 +231,69 @@ impl<'a> Visit<'a> for ReactClassComponentFinder<'_, '_> {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+enum MetadataNamespace {
+    #[default]
+    Html,
+    MathMl,
+    Svg,
+}
+
+#[derive(Default)]
+struct FrameworkMetadataFinder {
+    namespace: MetadataNamespace,
+    found: bool,
+}
+
+impl<'a> Visit<'a> for FrameworkMetadataFinder {
+    fn visit_jsx_element(&mut self, element: &JSXElement<'a>) {
+        if self.found {
+            return;
+        }
+        let previous = self.namespace;
+        if let JSXElementName::Identifier(tag) = &element.opening_element.name {
+            if matches!(self.namespace, MetadataNamespace::Html)
+                && is_framework_metadata_element(tag.name.as_str(), element)
+            {
+                self.found = true;
+                return;
+            }
+            self.namespace = match (self.namespace, tag.name.as_str()) {
+                (_, "svg") => MetadataNamespace::Svg,
+                (_, "math") => MetadataNamespace::MathMl,
+                (MetadataNamespace::Svg, "foreignObject") => MetadataNamespace::Html,
+                (namespace, _) => namespace,
+            };
+        }
+        oxc_ast_visit::walk::walk_jsx_element(self, element);
+        self.namespace = previous;
+    }
+}
+
+fn has_framework_metadata(program: &Program<'_>) -> bool {
+    let mut finder = FrameworkMetadataFinder::default();
+    finder.visit_program(program);
+    finder.found
+}
+
+fn is_framework_metadata_element(name: &str, element: &JSXElement<'_>) -> bool {
+    if matches!(name, "title" | "meta" | "link") {
+        return true;
+    }
+    let has_attribute = |expected: &str| {
+        element.opening_element.attributes.iter().any(|item| {
+            matches!(
+                item,
+                JSXAttributeItem::Attribute(attribute)
+                    if matches!(&attribute.name, JSXAttributeName::Identifier(name) if name.name == expected)
+                        && (expected == "async" || attribute.value.is_some())
+            )
+        })
+    };
+    (name == "style" && has_attribute("precedence"))
+        || (name == "script" && has_attribute("async") && has_attribute("src"))
+}
+
 fn transform_program<'a>(
     allocator: &'a Allocator,
     scoping: &Scoping,
@@ -294,6 +360,16 @@ fn transform_program<'a>(
             .map_err(|diagnostic| diagnostic.with_fallback_span(component.span))?;
     }
     remove_lowered_react_state_imports(scoping, options, program)?;
+    if options.feature_enabled(CompilerFeature::Framework) && has_framework_metadata(program) {
+        program.body.insert(
+            0,
+            Statement::new_expression_statement(
+                SPAN,
+                call_name(&ast, ENABLE_FRAMEWORK_METADATA, []),
+                &ast,
+            ),
+        );
+    }
     let import = runtime_import(&ast, program, options);
     program.body.insert(0, import);
     Ok(())
@@ -318,6 +394,9 @@ fn remove_lowered_react_state_imports(
         remaining_action_call: None,
         profiling_enabled: options.feature_enabled(CompilerFeature::Profiling),
         remaining_profiling_call: None,
+        framework_enabled: options.feature_enabled(CompilerFeature::Framework),
+        remaining_framework_call: None,
+        remaining_server_framework_call: None,
         remaining_lazy_call: None,
     };
     usage.visit_program(program);
@@ -352,6 +431,18 @@ fn remove_lowered_react_state_imports(
     if let Some((name, span)) = usage.remaining_profiling_call {
         return Err(
             unsupported(format!("{name} requires the `profiling` compiler feature"))
+                .with_span(SourceSpan::new(span.start, span.end)),
+        );
+    }
+    if let Some((name, span)) = usage.remaining_server_framework_call {
+        return Err(unsupported(format!(
+            "{name} is only supported by the server target with the `framework` compiler feature"
+        ))
+        .with_span(SourceSpan::new(span.start, span.end)));
+    }
+    if let Some((name, span)) = usage.remaining_framework_call {
+        return Err(
+            unsupported(format!("{name} requires the `framework` compiler feature"))
                 .with_span(SourceSpan::new(span.start, span.end)),
         );
     }
@@ -427,11 +518,26 @@ struct PostTransformReactUsage<'r, 's> {
     remaining_action_call: Option<(&'static str, Span)>,
     profiling_enabled: bool,
     remaining_profiling_call: Option<(&'static str, Span)>,
+    framework_enabled: bool,
+    remaining_framework_call: Option<(&'static str, Span)>,
+    remaining_server_framework_call: Option<(&'static str, Span)>,
     remaining_lazy_call: Option<Span>,
 }
 
 impl<'a> Visit<'a> for PostTransformReactUsage<'_, '_> {
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if let Some(name) = self.react.framework_call_name(call) {
+            if self.react.is_server_framework_call(call) {
+                self.remaining_server_framework_call
+                    .get_or_insert((name, call.span));
+            } else if !self.framework_enabled {
+                self.remaining_framework_call
+                    .get_or_insert((name, call.span));
+            } else {
+                walk_call_expression(self, call);
+            }
+            return;
+        }
         if self.react.is_lazy_call(call) && !self.async_enabled {
             self.remaining_lazy_call.get_or_insert(call.span);
             return;
@@ -2528,6 +2634,23 @@ pub(super) fn prepare_known_suspense_element<'a>(
 
 impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
     fn visit_call_expression(&mut self, call: &mut CallExpression<'a>) {
+        if let Some(name) = self.react.framework_call_name(call) {
+            let message = if self.react.is_server_framework_call(call) {
+                Some(format!(
+                    "{name} is only supported by the server target with the `framework` compiler feature"
+                ))
+            } else if !self.options.feature_enabled(CompilerFeature::Framework) {
+                Some(format!("{name} requires the `framework` compiler feature"))
+            } else {
+                None
+            };
+            if let Some(message) = message {
+                self.diagnostic = Some(
+                    unsupported(message).with_span(SourceSpan::new(call.span.start, call.span.end)),
+                );
+                return;
+            }
+        }
         if !self.options.feature_enabled(CompilerFeature::Profiling) {
             let name = if self.react.is_debug_value_call(call) {
                 Some("useDebugValue")
@@ -4296,6 +4419,7 @@ fn runtime_import<'a>(
         ("createCompiledTransition", CREATE_TRANSITION),
         ("deferred", DEFERRED),
         ("dispatch", DISPATCH),
+        ("enableFrameworkMetadata", ENABLE_FRAMEWORK_METADATA),
         ("indexed", INDEXED),
         ("keyed", KEYED),
         ("nestedProp", NESTED_PROP),
@@ -4304,6 +4428,7 @@ fn runtime_import<'a>(
     ];
     let mut references = GeneratedReferenceFinder::default();
     references.visit_program(program);
+    let framework_metadata = references.names.contains(ENABLE_FRAMEWORK_METADATA);
     let specifiers = oxc_allocator::Vec::from_iter_in(
         names
             .into_iter()
@@ -4324,24 +4449,32 @@ fn runtime_import<'a>(
         Some(specifiers),
         StringLiteral::new(
             SPAN,
-            match (
-                options.feature_enabled(CompilerFeature::Async),
-                options.feature_enabled(CompilerFeature::Concurrent),
-                options.feature_enabled(CompilerFeature::Actions),
-                options.target() == crate::CompilerTarget::Hydrate,
-            ) {
-                (true, _, true, true) => "@vidact/runtime/async/actions/hydrate",
-                (true, _, true, false) => "@vidact/runtime/async/actions",
-                (false, _, true, true) => "@vidact/runtime/actions/hydrate",
-                (false, _, true, false) => "@vidact/runtime/actions",
-                (true, true, false, true) => "@vidact/runtime/async/concurrent/hydrate",
-                (true, true, false, false) => "@vidact/runtime/async/concurrent",
-                (true, false, false, true) => "@vidact/runtime/async/hydrate",
-                (true, false, false, false) => "@vidact/runtime/async",
-                (false, true, false, true) => "@vidact/runtime/concurrent/hydrate",
-                (false, true, false, false) => "@vidact/runtime/concurrent",
-                (false, false, false, true) => "@vidact/runtime/hydrate",
-                (false, false, false, false) => "@vidact/runtime",
+            if framework_metadata {
+                if options.target() == crate::CompilerTarget::Hydrate {
+                    "@vidact/runtime/framework/hydrate"
+                } else {
+                    "@vidact/runtime/framework"
+                }
+            } else {
+                match (
+                    options.feature_enabled(CompilerFeature::Async),
+                    options.feature_enabled(CompilerFeature::Concurrent),
+                    options.feature_enabled(CompilerFeature::Actions),
+                    options.target() == crate::CompilerTarget::Hydrate,
+                ) {
+                    (true, _, true, true) => "@vidact/runtime/async/actions/hydrate",
+                    (true, _, true, false) => "@vidact/runtime/async/actions",
+                    (false, _, true, true) => "@vidact/runtime/actions/hydrate",
+                    (false, _, true, false) => "@vidact/runtime/actions",
+                    (true, true, false, true) => "@vidact/runtime/async/concurrent/hydrate",
+                    (true, true, false, false) => "@vidact/runtime/async/concurrent",
+                    (true, false, false, true) => "@vidact/runtime/async/hydrate",
+                    (true, false, false, false) => "@vidact/runtime/async",
+                    (false, true, false, true) => "@vidact/runtime/concurrent/hydrate",
+                    (false, true, false, false) => "@vidact/runtime/concurrent",
+                    (false, false, false, true) => "@vidact/runtime/hydrate",
+                    (false, false, false, false) => "@vidact/runtime",
+                }
             },
             None,
             ast,

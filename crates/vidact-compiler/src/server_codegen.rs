@@ -60,6 +60,8 @@ pub fn compile_server_module_with_options(
             ),
         )]);
     }
+    crate::framework_directives::validate_framework_directives(&parsed.program, options)
+        .map_err(|diagnostic| vec![diagnostic])?;
     let anonymous_defaults =
         normalize_expression_bodied_component_arrows(&allocator, &mut parsed.program);
 
@@ -107,6 +109,7 @@ pub fn compile_server_module_with_options(
         concurrent_enabled: options.feature_enabled(CompilerFeature::Concurrent),
         actions_enabled: options.feature_enabled(CompilerFeature::Actions),
         profiling_enabled: options.feature_enabled(CompilerFeature::Profiling),
+        framework_enabled: options.feature_enabled(CompilerFeature::Framework),
         suspense_spans: BTreeSet::new(),
         activity_spans: BTreeSet::new(),
         profiler_spans: BTreeSet::new(),
@@ -252,6 +255,7 @@ struct ServerSourceValidator<'r, 's> {
     concurrent_enabled: bool,
     actions_enabled: bool,
     profiling_enabled: bool,
+    framework_enabled: bool,
     suspense_spans: BTreeSet<u32>,
     activity_spans: BTreeSet<u32>,
     profiler_spans: BTreeSet<u32>,
@@ -261,6 +265,18 @@ struct ServerSourceValidator<'r, 's> {
 impl<'a> Visit<'a> for ServerSourceValidator<'_, '_> {
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
         if self.diagnostic.is_some() {
+            return;
+        }
+        if !self.framework_enabled
+            && let Some(name) = self.react.framework_call_name(call)
+        {
+            self.diagnostic = Some(
+                Diagnostic::new(
+                    DiagnosticCode::UnsupportedSyntax,
+                    format!("{name} requires the `framework` compiler feature"),
+                )
+                .with_span(SourceSpan::new(call.span.start, call.span.end)),
+            );
             return;
         }
         if self.react.is_lazy_call(call) && !self.async_enabled {

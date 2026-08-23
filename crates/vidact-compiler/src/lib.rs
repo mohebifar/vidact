@@ -8,6 +8,7 @@ pub mod analysis;
 mod ast_utils;
 mod custom_hooks;
 mod diagnostic;
+mod framework_directives;
 pub mod ir;
 mod options;
 mod oxc_react;

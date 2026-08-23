@@ -256,6 +256,36 @@ impl<'s> ReactBindings<'s> {
         self.is_named_call(call, "captureOwnerStack")
     }
 
+    pub(crate) fn framework_call_name(&self, call: &CallExpression<'_>) -> Option<&'static str> {
+        for name in ["cache", "cacheSignal"] {
+            if self.is_named_call(call, name) {
+                return Some(name);
+            }
+        }
+        for name in [
+            "preconnect",
+            "prefetchDNS",
+            "preinit",
+            "preinitModule",
+            "preload",
+            "preloadModule",
+        ] {
+            if self.is_named_expression_from(
+                &call.callee,
+                name,
+                &self.dom_named,
+                &self.dom_namespaces,
+            ) {
+                return Some(name);
+            }
+        }
+        None
+    }
+
+    pub(crate) fn is_server_framework_call(&self, call: &CallExpression<'_>) -> bool {
+        self.is_named_call(call, "cache") || self.is_named_call(call, "cacheSignal")
+    }
+
     pub(crate) fn is_named_expression(&self, expression: &Expression<'_>, name: &str) -> bool {
         self.is_named_expression_from(expression, name, &self.named, &self.namespaces)
     }

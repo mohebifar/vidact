@@ -64,6 +64,18 @@ const fixtures = [
     gzipBudget: 11_500,
   },
   {
+    name: 'framework-unused',
+    entry: path.join(directory, 'fixtures/counter.tsx'),
+    features: ['framework'],
+    gzipBudget: 8_104,
+  },
+  {
+    name: 'framework',
+    entry: path.join(directory, 'fixtures/framework.tsx'),
+    features: ['framework'],
+    gzipBudget: 11_500,
+  },
+  {
     name: 'control-flow',
     entry: path.join(directory, 'fixtures/control-flow.tsx'),
     gzipBudget: 8_526,
@@ -103,6 +115,9 @@ const retainedUiUnused = measurements.find(
 const profilingUnused = measurements.find(
   (measurement) => measurement.fixture === 'profiling-unused',
 )
+const frameworkUnused = measurements.find(
+  (measurement) => measurement.fixture === 'framework-unused',
+)
 if (
   counter === undefined ||
   asyncUnused === undefined ||
@@ -110,6 +125,7 @@ if (
   actionsUnused === undefined ||
   retainedUiUnused === undefined ||
   profilingUnused === undefined ||
+  frameworkUnused === undefined ||
   counter.minified !== asyncUnused.minified ||
   counter.gzip !== asyncUnused.gzip ||
   counter.minified !== concurrentUnused.minified ||
@@ -119,11 +135,18 @@ if (
   counter.minified !== retainedUiUnused.minified ||
   counter.gzip !== retainedUiUnused.gzip ||
   counter.minified !== profilingUnused.minified ||
-  counter.gzip !== profilingUnused.gzip
+  counter.gzip !== profilingUnused.gzip ||
+  counter.minified !== frameworkUnused.minified ||
+  counter.gzip !== frameworkUnused.gzip
 ) {
   regressions.push(
-    'enabling an unused async, concurrent, Actions, retained UI, or profiling family changed the counter artifact',
+    'enabling an unused async, concurrent, Actions, retained UI, profiling, or framework family changed the counter artifact',
   )
+}
+if (
+  frameworkUnused?.modules.some((module) => module.id.endsWith('packages/runtime/dist/metadata.js'))
+) {
+  regressions.push('enabling an unused framework family retained the metadata runtime')
 }
 if (regressions.length > 0) {
   throw new Error(`gzip budget exceeded:\n${regressions.join('\n')}`)

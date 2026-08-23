@@ -1,0 +1,199 @@
+/** @jsxImportSource @vidact/runtime/framework/server */
+
+import {
+  Suspense,
+  cache,
+  cacheSignal,
+  createClientModuleManifest,
+  createClientReference,
+  createServerFunctionRegistry,
+  createServerFunctionReference,
+  decodeFrameworkValue,
+  decodeServerComponentPayload,
+  encodeFrameworkValue,
+  invokeServerFunctionPayload,
+  preconnect,
+  preload,
+  prerender,
+  renderServerComponentPayload,
+  renderToPipeableStream,
+  renderToReadableStream,
+  resume,
+  use,
+  type FrameworkValue,
+  type ServerChild,
+} from '@vidact/runtime/framework/server'
+import { describe, expect, it } from 'vitest'
+
+describe('framework server runtime', () => {
+  it('waits for resources, preserves request cache identity, and emits a backpressured web stream', async () => {
+    let resolve!: (value: string) => void
+    let calls = 0
+    const readMessage = cache((_key: string) => {
+      calls += 1
+      return new Promise<string>((resolvePromise) => {
+        resolve = resolvePromise
+      })
+    })
+    function Message(): ServerChild {
+      expect(cacheSignal()).toBeInstanceOf(AbortSignal)
+      return <strong>{use(readMessage('message'))}</strong>
+    }
+    const application = () =>
+      Suspense({ children: () => <Message />, fallback: () => <p>loading</p> })
+
+    const stream = await renderToReadableStream(application, { progressiveChunkSize: 7 })
+    resolve('ready')
+    const html = await readStream(stream)
+    await stream.allReady
+    expect(html).toContain('<strong>')
+    expect(html).toContain('ready')
+    expect(html).not.toContain('loading')
+    expect(calls).toBe(1)
+  })
+
+  it('hoists and deduplicates metadata and resource hints into the document head', async () => {
+    const stream = await renderToReadableStream(() => {
+      preconnect('https://cdn.example.test', { crossOrigin: 'anonymous' })
+      preconnect('https://cdn.example.test', { crossOrigin: 'anonymous' })
+      preload('/app.css', { as: 'style', fetchPriority: 'high' })
+      return (
+        <html>
+          <head>
+            <meta name="description" content="first" />
+          </head>
+          <body>
+            <title>Vidact framework</title>
+            <meta name="description" content="second" />
+            <main>content</main>
+          </body>
+        </html>
+      )
+    })
+    const html = await readStream(stream)
+    expect(html.indexOf('<title>Vidact framework</title>')).toBeLessThan(html.indexOf('<body>'))
+    expect(html.match(/rel="preconnect"/g)).toHaveLength(1)
+    expect(html).toContain('rel="preload" href="/app.css" as="style" fetchpriority="high"')
+    expect(html.match(/name="description"/g)).toHaveLength(1)
+    expect(html).toContain('content="second"')
+  })
+
+  it('produces integrity-checked prerender continuations and resumes final HTML', async () => {
+    let resolve!: (value: string) => void
+    const message = new Promise<string>((resolvePromise) => {
+      resolve = resolvePromise
+    })
+    const application = () =>
+      Suspense({
+        children: () => <strong>{use(message)}</strong>,
+        fallback: () => <p>loading</p>,
+      })
+    queueMicrotask(() => resolve('complete'))
+    const result = await prerender(application)
+    expect(await readStream(result.prelude)).toContain('loading')
+    expect(result.postponed).not.toBeNull()
+    expect(await readStream(await resume(result.postponed!))).toContain('complete')
+    expect(() => decodeFrameworkValue(result.postponed!.replace('complete', 'tampered'))).toThrow(
+      'integrity check failed',
+    )
+  })
+
+  it('supports pipeable rendering with drain backpressure and lifecycle callbacks', async () => {
+    const chunks: Uint8Array[] = []
+    const callbacks: string[] = []
+    let ended!: () => void
+    const complete = new Promise<void>((resolve) => {
+      ended = resolve
+    })
+    const stream = renderToPipeableStream(() => <p>pipeable</p>, {
+      progressiveChunkSize: 3,
+      onShellReady: () => callbacks.push('shell'),
+      onAllReady: () => callbacks.push('all'),
+    })
+    stream.pipe({
+      write(chunk) {
+        chunks.push(chunk)
+        return chunks.length % 2 === 0
+      },
+      once(event, listener) {
+        expect(event).toBe('drain')
+        queueMicrotask(listener)
+      },
+      end() {
+        ended()
+      },
+    })
+    await complete
+    expect(new TextDecoder().decode(concatenate(chunks))).toContain('pipeable')
+    expect(callbacks).toEqual(['shell', 'all'])
+  })
+
+  it('serializes manifest-checked client references and allowlisted Server Functions', async () => {
+    const manifest = createClientModuleManifest({ 'app/Counter': ['default'] })
+    const reference = createClientReference('app/Counter')
+    const payload = await renderServerComponentPayload(
+      () => <main>server component</main>,
+      { reference },
+      { clientManifest: manifest },
+    )
+    const decoded = decodeServerComponentPayload(payload, manifest)
+    expect(decoded.html).toContain('server component')
+    expect(decoded.model).toEqual({ reference })
+
+    const registry = createServerFunctionRegistry()
+    registry.register('math/add', (left, right) => Number(left) + Number(right))
+    const request = encodeFrameworkValue({ id: 'math/add', args: [2, 3] })
+    expect(decodeFrameworkValue(await invokeServerFunctionPayload(registry, request))).toBe(5)
+    await expect(
+      invokeServerFunctionPayload(
+        registry,
+        encodeFrameworkValue({ id: 'math/delete-everything', args: [] }),
+      ),
+    ).rejects.toThrow('unknown server function')
+    expect(
+      decodeFrameworkValue(
+        encodeFrameworkValue(createServerFunctionReference('math/add', [2] as FrameworkValue[])),
+      ),
+    ).toEqual(createServerFunctionReference('math/add', [2]))
+
+    const tagShapedUserValue = {
+      $vidact: 'undefined',
+      nested: { $vidact: 'server-function', id: 'user-data', bound: [] },
+    }
+    expect(decodeFrameworkValue(encodeFrameworkValue(tagShapedUserValue))).toEqual(
+      tagShapedUserValue,
+    )
+  })
+
+  it('propagates abort signals through pending framework renders', async () => {
+    const pending = new Promise<string>(() => {})
+    const controller = new AbortController()
+    const stream = await renderToReadableStream(
+      () => Suspense({ children: () => use(pending), fallback: () => 'waiting' }),
+      { signal: controller.signal },
+    )
+    controller.abort(new Error('cancel framework render'))
+    await expect(stream.allReady).rejects.toThrow('cancel framework render')
+  })
+})
+
+async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
+  const reader = stream.getReader()
+  const chunks: Uint8Array[] = []
+  while (true) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- A stream reader is inherently sequential.
+    const result = await reader.read()
+    if (result.done) return new TextDecoder().decode(concatenate(chunks))
+    chunks.push(result.value)
+  }
+}
+
+function concatenate(chunks: readonly Uint8Array[]): Uint8Array {
+  const output = new Uint8Array(chunks.reduce((length, chunk) => length + chunk.length, 0))
+  let offset = 0
+  for (const chunk of chunks) {
+    output.set(chunk, offset)
+    offset += chunk.length
+  }
+  return output
+}
