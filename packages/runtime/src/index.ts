@@ -25,6 +25,7 @@ export {
   indexed,
   keyed,
   mountCompiled,
+  mountCompiledRef,
   when,
   type CompiledBinding,
   type CompiledComponentResult,

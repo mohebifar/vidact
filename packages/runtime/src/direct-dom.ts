@@ -6,6 +6,7 @@ import {
   constructCompiledComponent,
   mountCompiledBinding,
   mountCompiledProp,
+  mountCompiledRef,
   mountCompiledPropTransition,
   queueElementRef,
   registerCompiledCleanup,
@@ -120,7 +121,8 @@ function applyProps(
     if (name === 'value' && element instanceof HTMLSelectElement) restoreAfterChildren = true
     if (name === 'ref') {
       if (isCompiledBinding(value)) {
-        throw new Error(DEV ? 'reactive ref identities are not supported' : 'V101')
+        mountCompiledRef(element, value)
+        continue
       }
       queueElementRef(element, value)
       continue

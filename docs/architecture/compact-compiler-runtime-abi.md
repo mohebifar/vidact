@@ -86,6 +86,17 @@ from fixtures that use only `useState`:
 | Keyed list | 8,046 B | 8,070 B | +24 B |
 | TodoMVC | 9,628 B | 9,671 B | +43 B |
 
+Reactive host refs are default-core DOM behavior and therefore remain reachable
+from direct element construction. Their staged attach/rollback/cleanup path adds
+the following measured cost while staying below every accepted ceiling:
+
+| Fixture | Disposed-write guard gzip | Reactive-ref gzip | Change |
+| --- | ---: | ---: | ---: |
+| Counter | 6,954 B | 7,080 B | +126 B |
+| Control flow | 7,283 B | 7,415 B | +132 B |
+| Keyed list | 8,070 B | 8,213 B | +143 B |
+| TodoMVC | 9,671 B | 9,802 B | +131 B |
+
 ## Consequences
 
 - Compiler and runtime changes that touch tuple positions must land together.

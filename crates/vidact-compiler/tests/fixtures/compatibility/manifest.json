@@ -98,10 +98,9 @@
       "spanContains": "items.map"
     },
     {
-      "path": "rejected/branch-varying-ref.tsx",
-      "expectation": "rejected",
-      "code": "UnsupportedSyntax",
-      "spanContains": "ref={first}"
+      "path": "accepted/branch-varying-ref.tsx",
+      "expectation": "accepted",
+      "components": ["BranchVaryingRef"]
     },
     {
       "path": "rejected/intrinsic-component-child.tsx",

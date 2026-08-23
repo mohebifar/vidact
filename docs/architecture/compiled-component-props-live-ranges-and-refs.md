@@ -64,9 +64,8 @@ resolved ref value enters the same host ref commit lifecycle.
 
 This is a Vidact compiled-value ABI, not arbitrary React element
 reconciliation. Owned structural blocks still mount once. External
-`ReactElement[]`, reactive ref identity changes,
-imperative handles, effects, portals, Suspense, and SSR/hydration remain outside
-the accepted contract.
+`ReactElement[]`, imperative handles, effects, portals, Suspense, and
+SSR/hydration remain outside the accepted contract.
 
 ## Compiler and runtime contract
 
@@ -105,7 +104,10 @@ range and ownership.
 Refs are queued while elements are constructed, claimed by the active owner,
 and committed after insertion. Callback-returned cleanup takes precedence over
 a fallback `ref(null)` clear. Object refs clear only if they still point at the
-element being disposed.
+element being disposed. A compiled ref binding stages its next attachment before
+clearing the previous ref. A thrown attachment leaves the previous ref owned and
+active; successful transitions retain the host element and transfer cleanup to
+the next ref.
 
 ## Invariants
 
@@ -162,10 +164,10 @@ reactive prop, comment markers for general binding ranges, and owner allocation
 for each non-scalar range value.
 
 The ABI is intentionally narrow. Prop additions/deletions through spreads, rest
-and nested destructuring, foreign React element objects, and ref identity
-updates require separate decisions. Multi-root component ranges and aliased
-direct destructuring are supported. `useRef` is naturally stable under the
-compiled construct-once path.
+and nested destructuring, and foreign React element objects require separate
+decisions. Multi-root component ranges, aliased direct destructuring, ref-as-prop,
+and reactive host ref identity are supported. `useRef` is naturally stable under
+the compiled construct-once path.
 The former rerendering compatibility runtime was removed by
 [Single client compiler and runtime path](compiled-only-client-runtime.md).
 

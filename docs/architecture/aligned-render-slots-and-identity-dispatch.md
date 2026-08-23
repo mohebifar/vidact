@@ -41,10 +41,12 @@ then remains live. Selector/identity updaters are registered before bindings
 owned by the selected branch, so a branch that is leaving cannot receive a DOM
 write during the same flush.
 
-Reactive ref identity remains a compile-time error. Slot-valued JSX component
-callees also remain deferred until codegen can lower both the identity read and
-the callable JSX site; emitting `<Type>` while `Type` is a state/prop slot would
-be unsound.
+Branch-varying refs on an aligned host lower to a compiled ref binding. The
+runtime attaches the next ref before clearing the previous one, rolls back a
+failed attachment, and retains the host throughout. Slot-valued JSX component
+callees remain deferred until codegen can lower both the identity read and the
+callable JSX site; emitting `<Type>` while `Type` is a state/prop slot would be
+unsound.
 
 ## Invariants
 
@@ -54,6 +56,8 @@ be unsound.
   rerun its render factory for ordinary prop or child changes.
 - Event replacement and removal leave at most one active listener, and owner
   disposal detaches static and reactive listeners.
+- Ref replacement transfers cleanup without replacing the host; a failed next
+  attachment leaves the prior ref active.
 - Failed replacement does not detach the previous handler or refs and does not
   leak the staged owner.
 - `choose` and `dispatch` are named ESM capabilities imported only when emitted.
@@ -82,8 +86,8 @@ JSX objects as reconcilable values.
 ## Verification
 
 - `crates/vidact-compiler/tests/surgical_codegen.rs` proves aligned emission,
-  helper tree shaking, dynamic-key dispatch, and precise ref/component-type
-  diagnostics.
+  helper tree shaking, dynamic-key dispatch, reactive ref bindings, and precise
+  component-type diagnostics.
 - `packages/runtime/test/reactivity/component-ranges.browser.test.ts` proves
   retained dispatch identity, key replacement, event cleanup, and failed
   replacement rollback.

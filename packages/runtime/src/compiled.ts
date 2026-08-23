@@ -93,9 +93,13 @@ export function hasInvalidChild(children: readonly unknown[]): boolean {
   return false
 }
 
-type RefValue = ((value: Element | null) => void | (() => void)) | { current: unknown }
+type RefValue =
+  | ((value: Element | null) => void | (() => void))
+  | { current: unknown }
+  | null
+  | undefined
 
-type PendingRef = [owner: Owner | null, value: RefValue]
+type PendingRef = [owner: Owner | null, value: RefValue, attached?: (cleanup: () => void) => void]
 
 type NodePosition = readonly [node: Node, parent: Node | null, nextSibling: Node | null]
 
@@ -717,6 +721,52 @@ export function queueElementRef(element: Element, value: unknown): void {
   pendingRefs.set(element, [activeOwner, value])
 }
 
+export function mountCompiledRef(element: Element, value: CompiledBinding<unknown>): void {
+  const initial = value[1]()
+  if (!isRefValue(initial)) {
+    throw new TypeError(DEV ? 'ref must be null, a callback, or an object with current' : 'V006')
+  }
+  let current: RefValue = initial
+  let cleanup = (): void => {}
+  const pending: PendingRef = [activeOwner, current, (attached) => (cleanup = attached)]
+  pendingRefs.set(element, pending)
+
+  const removeUpdater = subscribeBinding(value, () => {
+    const next = value[1]()
+    if (Object.is(next, current)) return
+    if (!isRefValue(next)) {
+      throw new TypeError(DEV ? 'ref must be null, a callback, or an object with current' : 'V006')
+    }
+    const previous = current
+    let nextCleanup: (() => void) | undefined
+    let committed = false
+    stagePublication([
+      () => {
+        nextCleanup = attachRef(next, element)
+        cleanup()
+        cleanup = nextCleanup
+        current = next
+        committed = true
+      },
+      () => {
+        if (!committed) {
+          nextCleanup?.()
+          return
+        }
+        cleanup()
+        cleanup = attachRef(previous, element)
+        current = previous
+        committed = false
+      },
+    ])
+  })
+  onCleanup(() => {
+    removeUpdater()
+    if (pendingRefs.get(element) === pending) pendingRefs.delete(element)
+    cleanup()
+  })
+}
+
 export function registerCompiledCleanup(cleanup: () => void): void {
   onCleanup(cleanup)
 }
@@ -1155,6 +1205,8 @@ function isScalarRenderValue(
 
 function isRefValue(value: unknown): value is RefValue {
   return (
+    value === null ||
+    value === undefined ||
     typeof value === 'function' ||
     (typeof value === 'object' && value !== null && 'current' in value)
   )
@@ -1174,7 +1226,8 @@ function commitPendingRefs(root: Node): void {
     pendingRefs.delete(element)
     const owner = pending[0] ?? activeOwner
     const cleanup = attachRef(pending[1], element)
-    owner?.[1].add(cleanup)
+    if (pending[2] === undefined) owner?.[1].add(cleanup)
+    else pending[2](cleanup)
   })
 }
 
@@ -1194,6 +1247,7 @@ function visitElements(root: Node, visit: (element: Element) => void): void {
 }
 
 function attachRef(value: RefValue, element: Element): () => void {
+  if (value === null || value === undefined) return () => {}
   if (typeof value === 'function') {
     const cleanup = value(element)
     return typeof cleanup === 'function' ? cleanup : () => value(null)

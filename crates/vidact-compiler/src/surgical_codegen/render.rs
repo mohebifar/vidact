@@ -380,16 +380,6 @@ impl<'a> RenderLowerer<'a, '_> {
             let right = alternate_indexes
                 .get(&name)
                 .map(|index| &alternate.attributes[*index]);
-            if name == "ref" {
-                let span = left
-                    .or(right)
-                    .expect("ref came from one alternative")
-                    .span();
-                return Err(
-                    super::unsupported("branch-varying ref identity is unsupported")
-                        .with_span(SourceSpan::from_oxc(span)),
-                );
-            }
             let left_value = self.attribute_expression(left)?;
             let right_value = self.attribute_expression(right)?;
             if left_value.content_eq(&right_value) {

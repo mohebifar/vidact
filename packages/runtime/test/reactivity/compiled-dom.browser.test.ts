@@ -830,6 +830,36 @@ describe('compiled DOM corpus', () => {
     expect(callbackCleanups).toBe(1)
   })
 
+  it('retains the previous reactive ref when the next attachment throws', () => {
+    const refSource = source(0)
+    let setBroken!: ReturnType<typeof createCompiledState<boolean>>['set']
+    let previousCleanups = 0
+    const previousRef = (): (() => void) => () => {
+      previousCleanups += 1
+    }
+    const brokenRef = (): never => {
+      throw new Error('reactive ref failed')
+    }
+    const host = document.createElement('div')
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const broken = createCompiledState(scope, refSource, false)
+      setBroken = broken.set
+      return compiledRoot(scope, () =>
+        h('input', {
+          ref: binding(scope, refSource, () => (broken.get() ? brokenRef : previousRef)),
+        }),
+      )
+    }, host)
+
+    expect(() => setBroken(true)).toThrow('reactive ref failed')
+    expect(previousCleanups).toBe(0)
+    expect(host.querySelector('input')).not.toBeNull()
+
+    mounted.dispose()
+    expect(previousCleanups).toBe(1)
+  })
+
   it('removes the compiled root even when ref cleanup throws', () => {
     const host = document.createElement('div')
     const mounted = mountCompiled(() => {

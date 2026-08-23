@@ -123,3 +123,28 @@ export function SwitchFlowApp(): JSX.Element {
       return <></>
   }
 }
+
+const reactiveRefTrace: string[] = []
+
+export function takeReactiveRefTrace(): string[] {
+  return reactiveRefTrace.splice(0)
+}
+
+export function ReactiveRefApp(): JSX.Element {
+  const [first, setFirst] = useState(false)
+  const firstRef = (node: HTMLInputElement | null): (() => void) | void => {
+    if (node === null) return
+    reactiveRefTrace.push('attach:first')
+    return () => reactiveRefTrace.push('clear:first')
+  }
+  const secondRef = (node: HTMLInputElement | null): (() => void) | void => {
+    if (node === null) return
+    reactiveRefTrace.push('attach:second')
+    return () => reactiveRefTrace.push('clear:second')
+  }
+  return first ? (
+    <input data-reactive-ref ref={firstRef} onClick={() => setFirst(false)} />
+  ) : (
+    <input data-reactive-ref ref={secondRef} onClick={() => setFirst(true)} />
+  )
+}

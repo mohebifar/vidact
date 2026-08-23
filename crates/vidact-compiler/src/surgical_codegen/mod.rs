@@ -792,9 +792,6 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             }
             return;
         }
-        if name.name == "ref" {
-            return;
-        }
         if is_event_attribute(name.name.as_str()) {
             if let Some(JSXAttributeValue::ExpressionContainer(container)) = &mut attribute.value
                 && let Some(expression) = container.expression.as_expression_mut()

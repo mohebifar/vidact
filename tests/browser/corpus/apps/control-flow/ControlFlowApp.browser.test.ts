@@ -6,7 +6,9 @@ import {
   ControlFlowApp,
   KeyedControlFlowApp,
   LogicalFlowApp,
+  ReactiveRefApp,
   SwitchFlowApp,
+  takeReactiveRefTrace,
 } from './ControlFlowApp.tsx'
 
 let dispose: (() => void) | undefined
@@ -227,5 +229,29 @@ describe('compiled render control flow', () => {
     )
     expect(host.querySelector('[data-switch-a]')).not.toBe(first)
     expect(host.querySelector('[data-switch-b]')).toBeNull()
+  })
+
+  it('transitions a reactive ref without replacing its host element', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    takeReactiveRefTrace()
+    dispose = mountCompiled(ReactiveRefApp, host).dispose
+
+    const input = host.querySelector<HTMLInputElement>('[data-reactive-ref]')!
+    expect(takeReactiveRefTrace()).toEqual(['attach:second'])
+
+    const first = await captureMutations(host, () => input.click())
+    expect(host.querySelector('[data-reactive-ref]')).toBe(input)
+    expect(first.records).toEqual([])
+    expect(takeReactiveRefTrace()).toEqual(['attach:first', 'clear:second'])
+
+    const second = await captureMutations(host, () => input.click())
+    expect(host.querySelector('[data-reactive-ref]')).toBe(input)
+    expect(second.records).toEqual([])
+    expect(takeReactiveRefTrace()).toEqual(['attach:second', 'clear:first'])
+
+    dispose()
+    dispose = undefined
+    expect(takeReactiveRefTrace()).toEqual(['clear:second'])
   })
 })

@@ -961,8 +961,8 @@ fn preserves_try_catch_inside_derived_updaters() {
 }
 
 #[test]
-fn rejects_branch_varying_refs_at_the_component_site() {
-    let diagnostics = compile_surgical_module(ModuleInput {
+fn compiles_branch_varying_refs_as_reactive_ref_bindings() {
+    let output = compile_surgical_module(ModuleInput {
         filename: "Refs.tsx",
         source: r#"
             import { useRef, useState } from 'react';
@@ -974,12 +974,11 @@ fn rejects_branch_varying_refs_at_the_component_site() {
             }
         "#,
     })
-    .expect_err("reactive ref identity needs a dedicated lifecycle");
+    .expect("branch-varying refs should retain the host and transition ref ownership");
 
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == DiagnosticCode::UnsupportedSyntax
-            && diagnostic.message.contains("branch-varying ref identity")
-    }));
+    assert_eq!(output.matches("<input").count(), 1, "{output}");
+    assert!(output.contains("ref={__vidactBinding("), "{output}");
+    assert!(output.contains("ready.get() ? first : second"), "{output}");
 }
 
 #[test]
