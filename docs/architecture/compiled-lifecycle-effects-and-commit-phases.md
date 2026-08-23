@@ -29,6 +29,13 @@ allows the function to be referenced only inside an inline effect callback,
 which supports passing it to subscriptions without exposing it as a render or
 DOM event handler. Calling a retained effect event after owner disposal fails.
 
+`useInsertionEffect` is an explicit `css-insertion` compatibility feature. It
+uses the same static dependency and snapshot contract as the other effect
+hooks, but enters a dedicated synchronous insertion phase. Vidact completes
+all insertion callbacks for a newly published node set before attaching any
+refs in that set; refs then publish before layout resources. This ordering is
+also preserved for reactive publications and structural replacements.
+
 Each effect callback is rebuilt for a run with compiler-generated snapshots of
 the reactive values it captures. Cleanup closures therefore retain the values
 from the run that created them even though the component itself is never
@@ -45,6 +52,9 @@ disposal; passive cleanup is deferred to the passive phase.
 
 - `compiledLayoutEffect(scope, reads, readCreate, readDependencies?)` owns a
   synchronous post-DOM resource.
+- `compiledInsertionEffect(scope, reads, readCreate, readDependencies?)` owns a
+  synchronous pre-ref resource and is emitted only when `css-insertion` is
+  enabled.
 - `compiledEffect(scope, reads, readCreate, readDependencies?)` owns a passive
   microtask resource.
 - `readCreate()` returns a fresh callback whose reactive captures are snapshots
@@ -65,6 +75,8 @@ them.
 ## Invariants
 
 - Host refs are attached before the first layout effect reads the DOM.
+- Insertion effects run after host publication but before refs and layout
+  effects; they therefore cannot observe an attached host ref.
 - A layout rerun sees committed DOM and follows imperative-handle publication.
 - A passive run never executes for an owner disposed before its microtask.
 - Cleanup observes the reactive snapshot from its own effect run.
@@ -92,8 +104,8 @@ them.
 Common subscription, measurement, and imperative-library effects now compose
 with Vidact ownership without component reruns. The runtime pays scheduling
 bytes only in chunks that import an effect capability. Custom hooks,
-insertion effects, error routing, and a public `act` drain API remain follow-up
-work on this phase model.
+error routing, and a public `act` drain API remain follow-up work on this phase
+model.
 
 ## Verification
 
@@ -103,11 +115,15 @@ work on this phase model.
   records effects in the accepted syntax contract.
 - `crates/vidact-compiler/tests/fixtures/compatibility/accepted/effect-event.tsx`
   records live, stable effect events and compiler-enforced reference placement.
+- `crates/vidact-compiler/tests/fixtures/compatibility/accepted/insertion-effect.tsx`
+  records the feature-gated insertion-effect contract.
 - `tests/browser/corpus/apps/multi-component/MultiComponentApp.browser.test.ts`
   proves ref/DOM timing, dependency reruns, snapshot cleanup, and layout/passive
   disposal order.
 - `tests/browser/corpus/apps/effect-event/EffectEventApp.browser.test.ts` proves
   stable subscription identity, live state reads, and post-disposal failure.
+- `tests/browser/corpus/apps/insertion-effect/InsertionEffectApp.browser.test.ts`
+  proves initial and reactive insertion → ref → layout ordering.
 - `cargo test -p vidact-compiler`
 - `pnpm --filter @vidact/browser-corpus test`
 - `pnpm size`

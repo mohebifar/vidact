@@ -90,7 +90,7 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
     },
     load(id) {
       if (id === REACT_MODULE) {
-        return 'export { createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "@vidact/runtime"'
+        return 'export { createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "@vidact/runtime"'
       }
       return id === REACT_DOM_MODULE ? 'export { createPortal } from "@vidact/runtime"' : null
     },

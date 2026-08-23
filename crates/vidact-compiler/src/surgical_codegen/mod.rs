@@ -48,6 +48,7 @@ const COMPILED_EVENT: &str = "__vidactEvent";
 const COMPILED_COMPONENT_SPREAD: &str = "__vidactComponentSpread";
 const COMPILED_EFFECT: &str = "__vidactEffect";
 const COMPILED_IMPERATIVE_HANDLE: &str = "__vidactImperativeHandle";
+const COMPILED_INSERTION_EFFECT: &str = "__vidactInsertionEffect";
 const COMPILED_LAYOUT_EFFECT: &str = "__vidactLayoutEffect";
 const COMPILED_SPREAD: &str = "__vidactSpread";
 const COMPILED_ROOT: &str = "__vidactCompiledRoot";
@@ -178,6 +179,7 @@ fn transform_program<'a>(
         COMPILED_COMPONENT_SPREAD,
         COMPILED_EFFECT,
         COMPILED_IMPERATIVE_HANDLE,
+        COMPILED_INSERTION_EFFECT,
         COMPILED_LAYOUT_EFFECT,
         COMPILED_SPREAD,
         COMPILED_ROOT,
@@ -1460,6 +1462,15 @@ enum ReactiveSpreadKind {
 impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
     fn visit_call_expression(&mut self, call: &mut CallExpression<'a>) {
         if let Some(effect) = self.react.effect_hook_call(call) {
+            if effect == EffectHook::Insertion
+                && !self.options.feature_enabled(CompilerFeature::CssInsertion)
+            {
+                self.diagnostic = Some(
+                    unsupported("useInsertionEffect requires the `css-insertion` compiler feature")
+                        .with_span(SourceSpan::new(call.span.start, call.span.end)),
+                );
+                return;
+            }
             if !(1..=2).contains(&call.arguments.len())
                 || call.arguments.iter().any(Argument::is_spread)
             {
@@ -1549,6 +1560,7 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             call.callee = ident(
                 self.ast,
                 match effect {
+                    EffectHook::Insertion => COMPILED_INSERTION_EFFECT,
                     EffectHook::Layout => COMPILED_LAYOUT_EFFECT,
                     EffectHook::Passive => COMPILED_EFFECT,
                 },
@@ -3015,6 +3027,7 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>, program: &Program<'a>) -> Statement<
         ("compiledEffect", COMPILED_EFFECT),
         ("compiledEvent", COMPILED_EVENT),
         ("compiledImperativeHandle", COMPILED_IMPERATIVE_HANDLE),
+        ("compiledInsertionEffect", COMPILED_INSERTION_EFFECT),
         ("compiledLayoutEffect", COMPILED_LAYOUT_EFFECT),
         ("compiledSpread", COMPILED_SPREAD),
         ("compiledRoot", COMPILED_ROOT),

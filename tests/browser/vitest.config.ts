@@ -3,7 +3,7 @@ import { playwright } from '@vitest/browser-playwright'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
-  plugins: [vidact({ features: ['unsafe-html'] })],
+  plugins: [vidact({ features: ['css-insertion', 'unsafe-html'] })],
   test: {
     include: ['corpus/**/*.browser.test.ts'],
     browser: {

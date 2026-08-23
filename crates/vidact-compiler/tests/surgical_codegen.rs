@@ -853,6 +853,45 @@ fn compiles_layout_and_passive_effect_dependencies_into_owner_resources() {
 }
 
 #[test]
+fn gates_and_compiles_insertion_effects() {
+    let source = r#"
+        import { useInsertionEffect, useState } from 'react';
+        export function InsertionEffect(): Node {
+            const [theme, setTheme] = useState('red');
+            useInsertionEffect(() => console.log(theme), [theme]);
+            return <button onClick={() => setTheme('blue')}>{theme}</button>;
+        }
+    "#;
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "InsertionEffect.tsx",
+        source,
+    })
+    .expect_err("insertion effects are opt-in");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.message.contains("`css-insertion`")
+            && diagnostic.span.is_some()
+    }));
+
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "InsertionEffect.tsx",
+            source,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::CssInsertion),
+    )
+    .expect("css-insertion enables compiler-owned insertion effects");
+    assert!(
+        output.contains("compiledInsertionEffect as __vidactInsertionEffect"),
+        "{output}"
+    );
+    assert!(
+        output.contains("__vidactInsertionEffect(__vidactScope, 1"),
+        "{output}"
+    );
+}
+
+#[test]
 fn compiles_memo_and_callback_dependencies_into_cached_slots() {
     let output = compile_surgical_module(ModuleInput {
         filename: "MemoCounter.tsx",

@@ -20,6 +20,7 @@ pub(crate) enum StateHook {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum EffectHook {
+    Insertion,
     Layout,
     Passive,
 }
@@ -118,7 +119,9 @@ impl<'s> ReactBindings<'s> {
     }
 
     pub(crate) fn effect_hook_call(&self, call: &CallExpression<'_>) -> Option<EffectHook> {
-        if self.is_named_call(call, "useLayoutEffect") {
+        if self.is_named_call(call, "useInsertionEffect") {
+            Some(EffectHook::Insertion)
+        } else if self.is_named_call(call, "useLayoutEffect") {
             Some(EffectHook::Layout)
         } else if self.is_named_call(call, "useEffect") {
             Some(EffectHook::Passive)

@@ -150,6 +150,12 @@
       "components": ["PortalChild", "Portal"]
     },
     {
+      "path": "accepted/insertion-effect.tsx",
+      "expectation": "accepted",
+      "features": ["css-insertion"],
+      "components": ["InsertionEffect"]
+    },
+    {
       "path": "rejected/foreign-array-call.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",

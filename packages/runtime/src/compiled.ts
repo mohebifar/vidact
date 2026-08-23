@@ -226,6 +226,7 @@ const scopeNamespaces = new WeakMap<CompiledScope, IntrinsicNamespace>()
 const componentRanges = new WeakMap<CompiledComponentResult, ComponentRange>()
 const pendingRefs = new WeakMap<Element, PendingRef>()
 const componentCommitOwners = new WeakMap<Comment, Owner>()
+const pendingInsertionCommits = new WeakMap<Owner, Set<() => void>>()
 const pendingOwnerCommits = new WeakMap<Owner, Set<() => void>>()
 const pendingRootPortals = new WeakMap<RootIdentity, Set<PortalPublication>>()
 
@@ -652,7 +653,7 @@ export function when(
       const nextOwner = createOwner()
       const [fragment, staged] = stageRender(render, nextOwner)
       currentParent.insertBefore(fragment, end)
-      for (const node of staged) commitPendingRefs(node)
+      commitPublishedNodes(staged)
       branchOwner = nextOwner
       mounted = true
     }
@@ -707,7 +708,7 @@ export function choose(
       const [fragment, nodes] = stageRender(next === 0 ? consequent : alternate, nextOwner)
       currentParent.insertBefore(fragment, end)
       try {
-        for (const node of nodes) commitPendingRefs(node)
+        commitPublishedNodes(nodes)
       } catch (error) {
         disposePublished(nextOwner, nodes)
         throw error
@@ -775,7 +776,7 @@ export function dispatch(
       const [fragment, nodes] = stageRender(render, nextOwner)
       currentParent.insertBefore(fragment, end)
       try {
-        for (const node of nodes) commitPendingRefs(node)
+        commitPublishedNodes(nodes)
       } catch (error) {
         disposePublished(nextOwner, nodes)
         throw error
@@ -855,7 +856,7 @@ export function keyed<T, K>(
     )
     const update = (): void => {
       try {
-        for (const node of list.update(values())) commitPendingRefs(node)
+        commitPublishedNodes(list.update(values()))
       } catch (error) {
         const currentParent = list.parent()
         if (currentParent !== null) commitPendingRefs(currentParent)
@@ -915,7 +916,7 @@ export function indexed<T>(
     )
     const update = (): void => {
       try {
-        for (const node of list.update(values())) commitPendingRefs(node)
+        commitPublishedNodes(list.update(values()))
       } catch (error) {
         const currentParent = list.parent()
         if (currentParent !== null) commitPendingRefs(currentParent)
@@ -1061,6 +1062,29 @@ export function useLayoutEffect(
   registerEffect(create, dependencies, false)
 }
 
+export function useInsertionEffect(
+  create: () => EffectResult,
+  dependencies?: readonly unknown[],
+): void {
+  const owner = activeConstructionOwner
+  if (owner === null) {
+    throw new Error(
+      DEV ? 'insertion effects must run during compiled component construction' : 'V016',
+    )
+  }
+  if (dependencies !== undefined && dependencies.length !== 0) {
+    throw new Error(
+      DEV ? 'reactive insertion effect dependencies require compiler lowering' : 'V017',
+    )
+  }
+  let cleanup = (): void => {}
+  queueInsertionCommit(owner, () => {
+    cleanup()
+    cleanup = readEffectCleanup(create())
+  })
+  owner[1].add(() => cleanup())
+}
+
 export function useEffect(create: () => EffectResult, dependencies?: readonly unknown[]): void {
   registerEffect(create, dependencies, true)
 }
@@ -1107,6 +1131,43 @@ export function compiledLayoutEffect(
   readDependencies?: () => readonly unknown[],
 ): void {
   compiledEffect(scope, reads, readCreate, readDependencies, false)
+}
+
+export function compiledInsertionEffect(
+  scope: CompiledScope,
+  reads: SourceMask,
+  readCreate: () => () => EffectResult,
+  readDependencies?: () => readonly unknown[],
+): void {
+  const owner = activeConstructionOwner
+  if (owner === null || scopeOwners.get(scope) !== owner) {
+    throw new Error(DEV ? 'compiled insertion effects must run in their component scope' : 'V016')
+  }
+  let mounted = false
+  let currentDependencies: readonly unknown[] | undefined
+  let cleanup = (): void => {}
+  const run = (): void => {
+    const nextDependencies = readDependencies?.()
+    if (
+      mounted &&
+      readDependencies !== undefined &&
+      equalDependencies(nextDependencies, currentDependencies)
+    ) {
+      return
+    }
+    cleanup()
+    cleanup = readEffectCleanup(readCreate()())
+    currentDependencies = nextDependencies
+    mounted = true
+  }
+  queueInsertionCommit(owner, run)
+  const removeUpdater = subscribe(scope, reads, () =>
+    stagePublication([() => {}, () => {}, undefined, run, -20]),
+  )
+  owner[1].add(() => {
+    removeUpdater()
+    cleanup()
+  })
 }
 
 export function compiledEffect(
@@ -1289,6 +1350,15 @@ function queueOwnerCommit(owner: Owner, commit: () => void): void {
   commits.add(commit)
 }
 
+function queueInsertionCommit(owner: Owner, commit: () => void): void {
+  let commits = pendingInsertionCommits.get(owner)
+  if (commits === undefined) {
+    commits = new Set()
+    pendingInsertionCommits.set(owner, commits)
+  }
+  commits.add(commit)
+}
+
 function readImperativeRef<T>(ref: RefValue<T>): RefValue<T> {
   if (!isRefValue(ref)) {
     throw new TypeError(
@@ -1381,13 +1451,15 @@ export function mountCompiled(
   const previous = [...host.childNodes]
   try {
     root[1](host, previous[0] ?? null)
-    const rootIdentity = scopeOwners.get(range[2])?.[3]
+    const rootOwner = scopeOwners.get(range[2])
+    const rootIdentity = rootOwner?.[3]
     if (rootIdentity !== undefined) {
       rootIdentity.mounted = true
       commitRootPortals(rootIdentity)
     }
+    commitOwnerInsertions(rootOwner)
     commitRangeRefs(range[0], range[1])
-    commitOwnerResources(scopeOwners.get(range[2]))
+    commitOwnerResources(rootOwner)
     for (const node of previous) host.removeChild(node)
   } catch (error) {
     try {
@@ -1674,6 +1746,7 @@ function onCleanup(cleanup: () => void): void {
 function disposeOwner(owner: Owner): void {
   if (owner[0]) return
   owner[0] = true
+  pendingInsertionCommits.delete(owner)
   pendingOwnerCommits.delete(owner)
   const cleanups = [...owner[1]]
   owner[1].clear()
@@ -1750,7 +1823,7 @@ function mountCompiledBindingBefore(
     }
     currentOwner = nextOwner
     currentParent.insertBefore(fragment, end)
-    for (const node of staged) commitPendingRefs(node)
+    commitPublishedNodes(staged)
     current = next
   }
 
@@ -1939,6 +2012,22 @@ function claimPendingRefOwners(root: Node): void {
 }
 
 function commitPendingRefs(root: Node): void {
+  commitPublishedNodes([root])
+}
+
+function commitPublishedNodes(nodes: readonly Node[]): void {
+  for (const node of nodes) commitNodeInsertions(node)
+  for (const node of nodes) commitNodeRefs(node)
+  for (const node of nodes) commitNodeResources(node)
+}
+
+function commitNodeInsertions(root: Node): void {
+  visitNodes(root, (node) => {
+    if (node instanceof Comment) commitOwnerInsertions(componentCommitOwners.get(node))
+  })
+}
+
+function commitNodeRefs(root: Node): void {
   visitNodes(root, (node) => {
     if (node instanceof Element) {
       const pending = pendingRefs.get(node)
@@ -1950,8 +2039,21 @@ function commitPendingRefs(root: Node): void {
         else pending[2](cleanup)
       }
     }
+  })
+}
+
+function commitNodeResources(root: Node): void {
+  visitNodes(root, (node) => {
     if (node instanceof Comment) commitOwnerResources(componentCommitOwners.get(node))
   })
+}
+
+function commitOwnerInsertions(owner: Owner | undefined): void {
+  if (owner === undefined || owner[0]) return
+  const commits = pendingInsertionCommits.get(owner)
+  if (commits === undefined) return
+  pendingInsertionCommits.delete(owner)
+  for (const commit of commits) commit()
 }
 
 function commitOwnerResources(owner: Owner | undefined): void {
@@ -1969,7 +2071,7 @@ function commitRangeRefs(start: Node, end: Node): void {
     nodes.push(node)
     node = node.nextSibling
   }
-  for (const rangeNode of nodes) commitPendingRefs(rangeNode)
+  commitPublishedNodes(nodes)
 }
 
 function visitNodes(root: Node, visit: (node: Node) => void): void {
