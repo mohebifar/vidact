@@ -54,6 +54,11 @@ Staging records original node positions and restores them in reverse order when
 a later value fails, so validating a mixed array cannot steal nodes from the
 previous committed range.
 
+Component `children` values use a one-shot deferred wrapper when their
+construction depends on the receiving namespace. The wrapper crosses the prop
+slot like any other compiled value and evaluates only when the child inserts it,
+under that intrinsic's HTML, SVG, MathML, or `foreignObject` child context.
+
 Host object refs and callback refs attach only after their element enters the
 committed DOM range. Their clear or callback-cleanup operation belongs to the
 same owner as the element. `useRef` is an ordinary stable cell in compiled

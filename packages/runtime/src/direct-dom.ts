@@ -11,6 +11,7 @@ import {
   queueElementRef,
   registerCompiledCleanup,
   type CompiledBinding,
+  type CompiledRenderValue,
   type StructuralBinding,
 } from './compiled.ts'
 import { attachEventProp, isEventProp } from './dom/events.ts'
@@ -23,7 +24,9 @@ import {
   INTERNAL_NAMESPACE_PROP,
   createComponentProps,
   createIntrinsicElement,
+  intrinsicChildrenNamespace,
   readIntrinsicNamespace,
+  resolveIntrinsicNamespace,
   withIntrinsicNamespace,
 } from './dom/namespace.ts'
 import { applyDomProp } from './dom/properties.ts'
@@ -44,7 +47,7 @@ export type DirectChild =
   | CompiledBinding<unknown>
   | StructuralBinding
 export type DirectProps = Record<string, unknown> | null
-export type DirectComponent = (props: Record<string, unknown>) => DirectChild
+export type DirectComponent = (props: Record<string, unknown>) => CompiledRenderValue
 
 export const Fragment = Symbol(DEV ? 'Vidact.Fragment' : undefined)
 
@@ -92,10 +95,12 @@ export function h(
     return root
   }
 
-  const namespace = readIntrinsicNamespace(props)
+  const namespace = resolveIntrinsicNamespace(type, readIntrinsicNamespace(props))
   const element = createIntrinsicElement(document, type, namespace)
   const restoreAfterChildren = applyProps(element, props, children)
-  appendChildren(element, children)
+  withIntrinsicNamespace(intrinsicChildrenNamespace(type, namespace), () =>
+    appendChildren(element, children),
+  )
   if (restoreAfterChildren) restoreControlledFormState(element)
   return element
 }

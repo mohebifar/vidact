@@ -93,6 +93,10 @@ export function hasInvalidChild(children: readonly unknown[]): boolean {
   return false
 }
 
+export function deferred(render: () => CompiledRenderValue): StructuralBinding {
+  return [STRUCTURAL, (parent, before) => insertValue(parent, render(), before)]
+}
+
 type RefValue<T = Element> =
   | ((value: T | null) => void | (() => void))
   | { current: unknown }

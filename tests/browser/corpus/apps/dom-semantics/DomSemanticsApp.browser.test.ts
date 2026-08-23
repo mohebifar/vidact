@@ -33,6 +33,12 @@ describe('compiled DOM semantics app', () => {
     const htmlIsland = host.querySelector<HTMLElement>('[data-foreign-html]')!
     const componentSvg = host.querySelector<SVGRectElement>('[data-component-svg]')!
     const componentHtml = host.querySelector<HTMLElement>('[data-component-html]')!
+    const componentForeignObject = host.querySelector<SVGForeignObjectElement>(
+      '[data-component-foreign-object]',
+    )!
+    const deferredComponentChild = host.querySelector<HTMLElement>(
+      '[data-deferred-component-child]',
+    )!
     const math = host.querySelector<MathMLElement>('[data-math]')!
     const row = host.querySelector<MathMLElement>('mrow')!
 
@@ -43,6 +49,8 @@ describe('compiled DOM semantics app', () => {
     expect(htmlIsland.namespaceURI).toBe(HTML_NAMESPACE)
     expect(componentSvg.namespaceURI).toBe(SVG_NAMESPACE)
     expect(componentHtml.namespaceURI).toBe(HTML_NAMESPACE)
+    expect(componentForeignObject.namespaceURI).toBe(SVG_NAMESPACE)
+    expect(deferredComponentChild.namespaceURI).toBe(HTML_NAMESPACE)
     expect(math.namespaceURI).toBe(MATHML_NAMESPACE)
     expect(row.namespaceURI).toBe(MATHML_NAMESPACE)
     expect(use.getAttributeNS(XLINK_NAMESPACE, 'href')).toBe('#shape')

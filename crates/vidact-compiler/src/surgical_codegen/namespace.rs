@@ -1,8 +1,14 @@
+use oxc_allocator::{CloneIn, GetAllocator};
 use oxc_ast::{ast::*, builder::AstBuilder};
-use oxc_ast_visit::{VisitMut, walk_mut::walk_jsx_element};
-use oxc_span::SPAN;
+use oxc_ast_visit::{
+    VisitMut,
+    walk_mut::{walk_call_expression, walk_jsx_element},
+};
+use oxc_span::{GetSpan, SPAN};
 
 use crate::{Diagnostic, SourceSpan};
+
+use super::ast::{arrow_expression, call_name};
 
 const NAMESPACE_PROP: &str = "__vidactNamespace";
 
@@ -21,7 +27,6 @@ pub(super) fn annotate<'a>(
     let mut transformer = NamespaceTransformer {
         ast,
         context: NamespaceContext::Inherit,
-        inside_component_children: false,
         diagnostic: None,
     };
     transformer.visit_function_body(body);
@@ -31,11 +36,23 @@ pub(super) fn annotate<'a>(
 struct NamespaceTransformer<'a, 'b> {
     ast: &'b AstBuilder<'a>,
     context: NamespaceContext,
-    inside_component_children: bool,
     diagnostic: Option<Diagnostic>,
 }
 
 impl<'a> VisitMut<'a> for NamespaceTransformer<'a, '_> {
+    fn visit_call_expression(&mut self, call: &mut CallExpression<'a>) {
+        let deferred = call
+            .callee
+            .get_identifier_reference()
+            .is_some_and(|identifier| identifier.name == super::DEFERRED);
+        let previous = self.context;
+        if deferred {
+            self.context = NamespaceContext::Inherit;
+        }
+        walk_call_expression(self, call);
+        self.context = previous;
+    }
+
     fn visit_jsx_element(&mut self, element: &mut JSXElement<'a>) {
         if self.diagnostic.is_some() {
             return;
@@ -58,14 +75,10 @@ impl<'a> VisitMut<'a> for NamespaceTransformer<'a, '_> {
         let tag = super::raw_html::intrinsic_jsx_name(&element.opening_element.name)
             .filter(|name| name.chars().next().is_some_and(char::is_lowercase));
         let is_component = tag.is_none();
-        if self.inside_component_children && tag.is_some() {
-            self.diagnostic = Some(
-                super::unsupported(
-                    "JSX intrinsic children passed to a component require deferred namespace-aware construction",
-                )
-                .with_span(SourceSpan::new(element.span.start, element.span.end)),
-            );
-            return;
+        if is_component {
+            for child in &mut element.children {
+                defer_child(self.ast, child);
+            }
         }
         let element_context = element_context(self.context, tag);
         let children_context = child_context(element_context, tag);
@@ -89,13 +102,40 @@ impl<'a> VisitMut<'a> for NamespaceTransformer<'a, '_> {
         }
 
         let previous = self.context;
-        let previous_inside_component_children = self.inside_component_children;
         self.context = children_context;
-        self.inside_component_children |= is_component && !element.children.is_empty();
         walk_jsx_element(self, element);
         self.context = previous;
-        self.inside_component_children = previous_inside_component_children;
     }
+}
+
+fn defer_child<'a>(ast: &AstBuilder<'a>, child: &mut JSXChild<'a>) {
+    let expression = match child {
+        JSXChild::Element(element) => {
+            Expression::JSXElement(element.clone_in_with_semantic_ids(ast.allocator()))
+        }
+        JSXChild::Fragment(fragment) => {
+            Expression::JSXFragment(fragment.clone_in_with_semantic_ids(ast.allocator()))
+        }
+        JSXChild::ExpressionContainer(container) => {
+            let Some(expression) = container.expression.as_expression() else {
+                return;
+            };
+            expression.clone_in_with_semantic_ids(ast.allocator())
+        }
+        JSXChild::Spread(spread) => spread
+            .expression
+            .clone_in_with_semantic_ids(ast.allocator()),
+        JSXChild::Text(_) => return,
+    };
+    *child = JSXChild::new_expression_container(
+        child.span(),
+        JSXExpression::from(call_name(
+            ast,
+            super::DEFERRED,
+            [arrow_expression(ast, [], expression)],
+        )),
+        ast,
+    );
 }
 
 fn element_context(parent: NamespaceContext, intrinsic: Option<&str>) -> NamespaceContext {

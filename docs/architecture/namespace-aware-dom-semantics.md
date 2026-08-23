@@ -27,10 +27,10 @@ lowering and small runtime modules:
 - Compiler lowering annotates nested JSX with the private
   `__vidactNamespace` construction prop. SVG and MathML descendants retain
   their namespace across compiled component calls; children of SVG
-  `foreignObject` reset to HTML. Intrinsic JSX authored as a component child is
-  rejected until the compiler can defer its construction: the component may
-  insert that child across an HTML, SVG, MathML, or `foreignObject` boundary
-  that is unknowable at the call site.
+  `foreignObject` reset to HTML. JSX values authored as component children lower
+  to single-use deferred thunks because the component may insert them across an
+  HTML, SVG, MathML, or `foreignObject` boundary unknowable at the call site.
+  The child constructs only when its receiving intrinsic appends it.
 - The JSX runtime consumes that private prop before user component props are
   formed and calls `createElementNS` for SVG and MathML. It never writes the
   private prop to live DOM.
@@ -73,6 +73,12 @@ namespace. Scope updaters and owned structural mounts restore that namespace,
 so a conditional or list item created later remains in its caller's SVG or
 MathML context.
 
+Deferred children are branded compiled values, not reusable React element
+descriptors. The runtime evaluates one while the receiving intrinsic's child
+namespace is active, then immediately inserts the resulting node, binding, or
+owned range. Ownership and single-mount rules are unchanged. `foreignObject`
+switches that child context to HTML before evaluation.
+
 Vidact does not synthesize React events. Handler values are browser events with
 a native `currentTarget`. This slice also does not claim React's development
 warnings for controlled/uncontrolled transitions, event delegation,
@@ -84,8 +90,9 @@ to component replay.
 
 - Every accepted intrinsic is constructed in the namespace selected by its JSX
   host context, including across compiled component boundaries.
-- JSX intrinsic children are not eagerly passed into components; this unsafe
-  form fails compilation pending lazy, namespace-aware owned children.
+- JSX component children defer construction until their receiving intrinsic's
+  child namespace is active; evaluating a deferred value does not add a second
+  render tree or permit multiple mounts.
 - SVG `foreignObject` children are HTML; the `foreignObject` itself is SVG.
 - Namespace metadata is never visible to a user component or live element.
 - Removing a style key removes its live declaration without replacing the
@@ -103,9 +110,9 @@ to component replay.
 - **Infer namespace from the parent during append:** child JSX calls have
   already created their nodes, and recreating them would lose listeners, refs,
   state, and identity.
-- **Return lazy intrinsic descriptors:** would reintroduce a runtime element
-  tree solely to defer construction, conflicting with Vidact's direct-DOM
-  architecture.
+- **Return reusable lazy intrinsic descriptors:** would reintroduce a runtime
+  element tree solely to defer construction. A one-shot thunk preserves direct
+  DOM construction and existing owned-value insertion instead.
 - **Treat every matching DOM property uniformly:** reflected, boolean,
   namespaced, form-live, and custom-element properties have different reset
   semantics; one generic assignment rule is observably incorrect.
@@ -130,8 +137,9 @@ remain roadmap items.
 
 - `tests/browser/corpus/apps/dom-semantics/DomSemanticsApp.browser.test.ts`
   compiles a React-shaped mini app and proves namespaces, component-boundary
-  propagation including delayed branches, `foreignObject`, namespaced
-  attributes, style deletion, ARIA/data values, property removal, capture
+  propagation including delayed branches and component-child insertion through
+  `foreignObject`, namespaced attributes, style deletion, ARIA/data values,
+  property removal, capture
   order, ancestor change timing, handler-free controlled restoration, textarea,
   checkbox, external form-associated radio, and single/multiple select behavior
   while retaining node identity.

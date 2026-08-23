@@ -53,6 +53,7 @@ const CREATE_REDUCER: &str = "__vidactCreateReducer";
 const CREATE_SCOPE: &str = "__vidactCreateScope";
 const CREATE_NARROW_SCOPE: &str = "__vidactCreateNarrowScope";
 const CREATE_STATE: &str = "__vidactCreateState";
+const DEFERRED: &str = "__vidactDeferred";
 const DISPATCH: &str = "__vidactDispatch";
 const INDEXED: &str = "__vidactIndexed";
 const KEYED: &str = "__vidactKeyed";
@@ -169,6 +170,7 @@ fn transform_program<'a>(
         CREATE_SCOPE,
         CREATE_NARROW_SCOPE,
         CREATE_STATE,
+        DEFERRED,
         DISPATCH,
         INDEXED,
         KEYED,
@@ -763,9 +765,6 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             return;
         }
         let ref_expression = call.arguments[0]
-            .as_expression()
-            .expect("spread arguments were rejected");
-        let create_expression = call.arguments[1]
             .as_expression()
             .expect("spread arguments were rejected");
         if let Some(dependencies) = call.arguments.get(2) {
@@ -1703,6 +1702,7 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>, program: &Program<'a>) -> Statement<
         ("createCompiledScope", CREATE_SCOPE),
         ("createNarrowCompiledScope", CREATE_NARROW_SCOPE),
         ("createCompiledState", CREATE_STATE),
+        ("deferred", DEFERRED),
         ("dispatch", DISPATCH),
         ("indexed", INDEXED),
         ("keyed", KEYED),

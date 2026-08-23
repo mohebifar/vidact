@@ -1043,8 +1043,8 @@ fn rejects_reactive_jsx_spreads_instead_of_capturing_a_mount_snapshot() {
 }
 
 #[test]
-fn rejects_intrinsic_component_children_until_construction_can_be_deferred() {
-    let diagnostics = compile_surgical_module(ModuleInput {
+fn defers_component_children_until_the_child_namespace_is_active() {
+    let output = compile_surgical_module(ModuleInput {
         filename: "NamespaceChildren.tsx",
         source: r#"
             function ForeignObject({ children }) {
@@ -1055,12 +1055,8 @@ fn rejects_intrinsic_component_children_until_construction_can_be_deferred() {
             }
         "#,
     })
-    .expect_err("eager component children can be constructed in the wrong DOM namespace");
+    .expect("component children should defer construction to their insertion namespace");
 
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == DiagnosticCode::UnsupportedSyntax
-            && diagnostic
-                .message
-                .contains("deferred namespace-aware construction")
-    }));
+    assert!(output.contains("deferred as __vidactDeferred"), "{output}");
+    assert!(output.contains("__vidactDeferred(() => <div"), "{output}");
 }

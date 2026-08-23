@@ -119,6 +119,18 @@ pending-resource queue are default-core infrastructure for the lifecycle phase:
 | Keyed list | 8,236 B | 8,312 B | +76 B |
 | TodoMVC | 9,822 B | 9,906 B | +84 B |
 
+Deferred component children reuse the structural-binding brand and insertion
+path, so the thunk helper tree-shakes from chunks that do not author component
+children. Resolving the receiving intrinsic's child namespace remains
+default-core direct-DOM behavior:
+
+| Fixture | Component commit resources gzip | Deferred-child namespace gzip | Change |
+| --- | ---: | ---: | ---: |
+| Counter | 7,181 B | 7,231 B | +50 B |
+| Control flow | 7,516 B | 7,568 B | +52 B |
+| Keyed list | 8,312 B | 8,360 B | +48 B |
+| TodoMVC | 9,906 B | 9,948 B | +42 B |
+
 ## Consequences
 
 - Compiler and runtime changes that touch tuple positions must land together.

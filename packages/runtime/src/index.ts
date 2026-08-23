@@ -23,6 +23,7 @@ export {
   createNarrowCompiledScope,
   createCompiledState,
   dispatch,
+  deferred,
   indexed,
   keyed,
   mountCompiled,

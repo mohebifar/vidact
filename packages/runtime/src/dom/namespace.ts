@@ -46,10 +46,24 @@ export function createIntrinsicElement(
   type: string,
   namespace: IntrinsicNamespace | undefined,
 ): Element {
-  const resolved = namespace ?? rootNamespace(type, activeNamespace)
+  const resolved = resolveIntrinsicNamespace(type, namespace)
   if (resolved === 'svg') return document.createElementNS(SVG_NAMESPACE, type)
   if (resolved === 'mathml') return document.createElementNS(MATHML_NAMESPACE, type)
   return document.createElement(type)
+}
+
+export function resolveIntrinsicNamespace(
+  type: string,
+  namespace: IntrinsicNamespace | undefined,
+): IntrinsicNamespace {
+  return namespace ?? rootNamespace(type, activeNamespace)
+}
+
+export function intrinsicChildrenNamespace(
+  type: string,
+  namespace: IntrinsicNamespace,
+): IntrinsicNamespace {
+  return namespace === 'svg' && type === 'foreignObject' ? 'html' : namespace
 }
 
 function rootNamespace(type: string, inherited: IntrinsicNamespace): IntrinsicNamespace {

@@ -10,6 +10,10 @@ function HtmlComponent(): JSX.Element {
   return <p data-component-html>Component HTML island</p>
 }
 
+function ForeignObjectSlot({ children }: { children: JSX.Element }): JSX.Element {
+  return <foreignObject data-component-foreign-object>{children}</foreignObject>
+}
+
 function DeferredSvg({ visible }: { visible: boolean }): JSX.Element {
   return <>{visible && <circle data-deferred-svg cx="3" cy="3" r="2" tabIndex={0} />}</>
 }
@@ -75,6 +79,9 @@ export function DomSemanticsApp(): JSX.Element {
           <div data-foreign-html>HTML island</div>
           <HtmlComponent />
         </foreignObject>
+        <ForeignObjectSlot>
+          <div data-deferred-component-child>Deferred HTML child</div>
+        </ForeignObjectSlot>
       </svg>
       <math data-math displaystyle={false}>
         <mrow>

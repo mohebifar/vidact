@@ -113,10 +113,9 @@
       "components": ["BranchVaryingRef"]
     },
     {
-      "path": "rejected/intrinsic-component-child.tsx",
-      "expectation": "rejected",
-      "code": "UnsupportedSyntax",
-      "spanContains": "<div />"
+      "path": "accepted/intrinsic-component-child.tsx",
+      "expectation": "accepted",
+      "components": ["ForeignObject", "IntrinsicComponentChild"]
     },
     {
       "path": "accepted/slot-component-type.tsx",
