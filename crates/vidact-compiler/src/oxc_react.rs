@@ -160,7 +160,10 @@ fn run_react_analysis(
     }
 }
 
-fn lower_react_diagnostics(diagnostics: &Diagnostics, fallback: String) -> Vec<Diagnostic> {
+pub(crate) fn lower_react_diagnostics(
+    diagnostics: &Diagnostics,
+    fallback: String,
+) -> Vec<Diagnostic> {
     if diagnostics.is_empty() {
         return vec![analysis_error(fallback)];
     }

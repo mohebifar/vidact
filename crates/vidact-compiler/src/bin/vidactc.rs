@@ -5,7 +5,8 @@ use vidact_compiler::{
     CompilationOptions, CompilerFeature, CompilerTarget, ComponentIr, Diagnostic,
     OxcReactAnalysisAdapter,
     analysis::{ModuleInput, ReactAnalysisAdapter, SourceKind, UpdaterKind},
-    compile_surgical_module_with_ir_and_options, lower_component,
+    compile_server_module_with_options, compile_surgical_module_with_ir_and_options,
+    lower_component,
 };
 
 fn main() -> ExitCode {
@@ -71,23 +72,50 @@ fn run() -> Result<Value, String> {
         },
     )?;
     if command.as_deref() == Some("compile") {
+        if options.target() == CompilerTarget::Server {
+            let compilation = compile_server_module_with_options(input, &options)
+                .map_err(|diagnostics| format_diagnostics(&filename, &source, &diagnostics))?;
+            return compilation_json(
+                target,
+                features,
+                compilation.code,
+                compilation.source_map,
+                compilation.components,
+            );
+        }
         let compilation = compile_surgical_module_with_ir_and_options(input, &options)
             .map_err(|diagnostics| format_diagnostics(&filename, &source, &diagnostics))?;
-        return Ok(json!({
-            "protocol": "vidact-compile-v2",
-            "runtimeProtocol": "vidact-runtime-v1",
-            "configuration": {
-                "target": target,
-                "features": features,
-            },
-            "code": compilation.code,
-            "sourceMap": serde_json::from_str::<Value>(&compilation.source_map)
-                .map_err(|error| format!("could not serialize compiler source map: {error}"))?,
-            "analysis": analysis_json(compilation.components),
-        }));
+        return compilation_json(
+            target,
+            features,
+            compilation.code,
+            compilation.source_map,
+            compilation.components,
+        );
     }
 
     analyze(input)
+}
+
+fn compilation_json(
+    target: String,
+    features: Vec<String>,
+    code: String,
+    source_map: String,
+    components: Vec<ComponentIr>,
+) -> Result<Value, String> {
+    Ok(json!({
+        "protocol": "vidact-compile-v2",
+        "runtimeProtocol": "vidact-runtime-v1",
+        "configuration": {
+            "target": target,
+            "features": features,
+        },
+        "code": code,
+        "sourceMap": serde_json::from_str::<Value>(&source_map)
+            .map_err(|error| format!("could not serialize compiler source map: {error}"))?,
+        "analysis": analysis_json(components),
+    }))
 }
 
 fn analyze(input: ModuleInput<'_>) -> Result<Value, String> {

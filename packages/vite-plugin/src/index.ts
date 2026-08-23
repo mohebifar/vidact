@@ -90,9 +90,15 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
     },
     load(id) {
       if (id === REACT_MODULE) {
-        return 'export { createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "@vidact/runtime"'
+        return configuration.target === 'server'
+          ? 'export { createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "@vidact/runtime/server"'
+          : 'export { createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "@vidact/runtime"'
       }
-      return id === REACT_DOM_MODULE ? 'export { createPortal } from "@vidact/runtime"' : null
+      return id === REACT_DOM_MODULE
+        ? configuration.target === 'server'
+          ? 'export { createPortal } from "@vidact/runtime/server"'
+          : 'export { createPortal } from "@vidact/runtime"'
+        : null
     },
     async transform(source, id) {
       const filename = id.split('?', 1)[0] ?? id
@@ -123,7 +129,8 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
           lang: 'tsx',
           jsx: {
             runtime: 'automatic',
-            importSource: '@vidact/runtime',
+            importSource:
+              configuration.target === 'server' ? '@vidact/runtime/server' : '@vidact/runtime',
           },
           sourcemap: true,
           target: 'es2022',

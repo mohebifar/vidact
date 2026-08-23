@@ -8,10 +8,13 @@
     ".": "./src/index.ts",
     "./jsx-runtime": "./src/jsx-runtime.ts",
     "./protocol": "./src/protocol.ts",
+    "./server": "./src/server.ts",
+    "./server/jsx-dev-runtime": "./src/server-jsx-dev-runtime.ts",
+    "./server/jsx-runtime": "./src/server-jsx-runtime.ts",
     "./testing": "./src/testing.ts"
   },
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run && vitest run --config vitest.server.config.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {

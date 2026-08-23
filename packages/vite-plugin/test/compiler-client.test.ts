@@ -58,6 +58,30 @@ describe('vidact compiler client', () => {
     expect(compilation.configuration).toEqual({ target: 'client', features: [] })
   })
 
+  it('returns deterministic server code without client effect replay', async () => {
+    const compilation = await compileWithCompiler(
+      `
+        import { useEffect, useMemo, useState } from 'react'
+        export function Greeting({ name }: { name: string }) {
+          const [count] = useState(() => 2)
+          const label = useMemo(() => name + count, [name, count])
+          useEffect(() => console.log(label), [label])
+          return <p>{label}</p>
+        }
+      `,
+      'greeting.tsx',
+      manifestPath,
+      { target: 'server', features: [] },
+    )
+
+    expect(compilation.configuration).toEqual({ target: 'server', features: [] })
+    expect(compilation.analysis.components[0]?.name).toBe('Greeting')
+    expect(compilation.code).toContain('useState(')
+    expect(compilation.code).not.toContain('useEffect(')
+    expect(compilation.code).not.toContain('useMemo(')
+    expect(compilation.code).not.toContain('__vidactCompiledRoot')
+  })
+
   it('fingerprints compiler, runtime, target, features, environment, and source inputs', () => {
     const base = {
       source: 'export function App() { return <main /> }',
