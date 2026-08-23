@@ -447,6 +447,60 @@ fn compiles_unkeyed_jsx_maps_into_explicit_indexed_owners() {
 }
 
 #[test]
+fn compiles_destructured_unkeyed_map_parameters_into_path_reads() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "DestructuredItems.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function DestructuredItems(): Node {
+                const [items, setItems] = useState([
+                    { label: 'one', meta: { rank: 1 } }
+                ]);
+                return <ul>{items.map(({ label, meta: { rank } }) => (
+                    <li>{label}:{rank}</li>
+                ))}</ul>;
+            }
+        "#,
+    })
+    .expect("destructured indexed rows should retain live path reads");
+
+    assert!(output.contains("indexed as __vidactIndexed"), "{output}");
+    assert!(
+        output.contains("(__vidactItem, __vidactItemIndex, __vidactItemScope)"),
+        "{output}"
+    );
+    assert!(output.contains("__vidactItem.get()[\"label\"]"), "{output}");
+    assert!(
+        output.contains("__vidactItem.get()[\"meta\"][\"rank\"]"),
+        "{output}"
+    );
+}
+
+#[test]
+fn compiles_top_level_destructured_keys_against_raw_rows() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "DestructuredKey.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function DestructuredKey(): Node {
+                const [items, setItems] = useState([{ id: 1, label: 'one' }]);
+                return <ul>{items.map(({ id, label }) => (
+                    <li key={id}>{label}</li>
+                ))}</ul>;
+            }
+        "#,
+    })
+    .expect("a destructured top-level key should remain a raw-row selector");
+
+    assert!(output.contains("keyed as __vidactKeyed"), "{output}");
+    assert!(
+        output.contains("(__vidactItem) => __vidactItem[\"id\"]"),
+        "{output}"
+    );
+    assert!(output.contains("__vidactItem.get()[\"label\"]"), "{output}");
+}
+
+#[test]
 fn compiles_nested_keyed_maps_that_read_an_outer_item_collection() {
     let output = compile_surgical_module(ModuleInput {
         filename: "NestedItems.tsx",

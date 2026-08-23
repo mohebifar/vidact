@@ -29,7 +29,9 @@ describe('compiled render control flow', () => {
 
     const group = host.querySelector<HTMLElement>('[data-group="group"]')!
     const first = host.querySelector<HTMLOutputElement>('[data-nested-row="1"]')!
+    const destructured = host.querySelector<HTMLOutputElement>('[data-destructured-row]')!
     expect(first.textContent).toBe('one')
+    expect(destructured.textContent).toBe('row one:1')
 
     await captureMutations(host, () =>
       host.querySelector<HTMLButtonElement>('[data-update-nested]')!.click(),
@@ -39,6 +41,8 @@ describe('compiled render control flow', () => {
     expect(host.querySelector('[data-nested-row="1"]')).toBe(first)
     expect(first.textContent).toBe('ONE')
     expect(host.querySelector('[data-nested-row="2"]')?.textContent).toBe('two')
+    expect(host.querySelector('[data-destructured-row]')).toBe(destructured)
+    expect(destructured.textContent).toBe('ROW ONE:2')
   })
 
   it('preserves aligned identity and replaces only a divergent owned range', async () => {

@@ -109,6 +109,11 @@
       "components": ["NestedProps"]
     },
     {
+      "path": "accepted/destructured-map.tsx",
+      "expectation": "accepted",
+      "components": ["DestructuredMap"]
+    },
+    {
       "path": "rejected/foreign-array-call.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",

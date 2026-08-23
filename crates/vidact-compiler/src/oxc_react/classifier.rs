@@ -509,10 +509,27 @@ fn jsx_map<'a>(
         return None;
     };
     let parameter = render.params.items.first()?;
-    let BindingPattern::BindingIdentifier(item) = &parameter.pattern else {
-        return None;
+    let (item_symbol, destructured_keys) = match &parameter.pattern {
+        BindingPattern::BindingIdentifier(item) => (item.symbol_id.get(), BTreeMap::new()),
+        BindingPattern::ObjectPattern(object) if object.rest.is_none() => {
+            let keys = object
+                .properties
+                .iter()
+                .filter_map(|property| {
+                    if property.computed {
+                        return None;
+                    }
+                    let name = property.key.static_name()?.to_string();
+                    let BindingPattern::BindingIdentifier(identifier) = &property.value else {
+                        return None;
+                    };
+                    Some((identifier.symbol_id.get()?, name))
+                })
+                .collect();
+            (None, keys)
+        }
+        _ => return None,
     };
-    let item_symbol = item.symbol_id.get()?;
     let rendered = render.body.as_expression()?.without_parentheses();
     let Expression::JSXElement(element) = rendered else {
         return matches!(rendered, Expression::JSXFragment(_))
@@ -545,17 +562,22 @@ fn jsx_map<'a>(
     };
     let key = match expression.without_parentheses() {
         Expression::Identifier(identifier)
-            if reference_symbol(identifier, scoping) == Some(item_symbol) =>
+            if item_symbol.is_some() && reference_symbol(identifier, scoping) == item_symbol =>
         {
             Some(KeyPath::Identity)
         }
+        Expression::Identifier(identifier) => reference_symbol(identifier, scoping)
+            .and_then(|symbol| destructured_keys.get(&symbol))
+            .cloned()
+            .map(KeyPath::Property),
         Expression::StaticMemberExpression(key)
-            if key
-                .object
-                .without_parentheses()
-                .get_identifier_reference()
-                .and_then(|identifier| reference_symbol(identifier, scoping))
-                == Some(item_symbol) =>
+            if item_symbol.is_some()
+                && key
+                    .object
+                    .without_parentheses()
+                    .get_identifier_reference()
+                    .and_then(|identifier| reference_symbol(identifier, scoping))
+                    == item_symbol =>
         {
             Some(KeyPath::Property(key.property.name.to_string()))
         }

@@ -100,20 +100,26 @@ export function KeyedControlFlowApp(): JSX.Element {
 
 export function NestedListsApp(): JSX.Element {
   const [groups, setGroups] = useState([{ id: 'group', items: [{ id: 1, label: 'one' }] }])
+  const [rows, setRows] = useState([{ label: 'row one', meta: { rank: 1 } }])
   return (
     <section data-nested-lists>
       {groups.map((group) => (
         <article key={group.id} data-group={group.id}>
-          {group.items.map((item) => (
-            <output key={item.id} data-nested-row={item.id}>
-              {item.label}
+          {group.items.map(({ id, label }) => (
+            <output key={id} data-nested-row={id}>
+              {label}
             </output>
           ))}
         </article>
       ))}
+      {rows.map(({ label, meta: { rank } }) => (
+        <output data-destructured-row>
+          {label}:{rank}
+        </output>
+      ))}
       <button
         data-update-nested
-        onClick={() =>
+        onClick={() => {
           setGroups([
             {
               id: 'group',
@@ -123,7 +129,8 @@ export function NestedListsApp(): JSX.Element {
               ],
             },
           ])
-        }
+          setRows([{ label: 'ROW ONE', meta: { rank: 2 } }])
+        }}
       >
         update nested
       </button>

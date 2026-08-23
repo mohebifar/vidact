@@ -62,6 +62,7 @@ const INDEXED: &str = "__vidactIndexed";
 const KEYED: &str = "__vidactKeyed";
 const ITEM_INDEX: &str = "__vidactItemIndex";
 const ITEM_SCOPE: &str = "__vidactItemScope";
+const ITEM_VALUE: &str = "__vidactItem";
 const NARROW_SOURCE_BITS: u32 = 32;
 const NESTED_PROP: &str = "__vidactNestedProp";
 const PROPS: &str = "__vidactProps";
@@ -184,6 +185,7 @@ fn transform_program<'a>(
         KEYED,
         ITEM_INDEX,
         ITEM_SCOPE,
+        ITEM_VALUE,
         NESTED_PROP,
         PROPS,
         SOURCE,
@@ -351,6 +353,7 @@ fn transform_component<'a>(
             StateReference {
                 state_name: ast.allocator().alloc_str(&prop.name),
                 setter: false,
+                path: Vec::new(),
             },
         );
     }
@@ -369,6 +372,7 @@ fn transform_component<'a>(
                     StateReference {
                         state_name: ast.allocator().alloc_str(value.name),
                         setter: false,
+                        path: Vec::new(),
                     },
                 );
                 state_symbols.insert(
@@ -376,6 +380,7 @@ fn transform_component<'a>(
                     StateReference {
                         state_name: ast.allocator().alloc_str(value.name),
                         setter: true,
+                        path: Vec::new(),
                     },
                 );
             } else if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
@@ -685,10 +690,10 @@ struct PropBinding<'a> {
     container_defaults: Vec<Option<Expression<'a>>>,
 }
 
-#[derive(Clone, Copy)]
 struct StateReference<'a> {
     state_name: &'a str,
     setter: bool,
+    path: Vec<String>,
 }
 
 fn state_binding_symbols<'a>(
@@ -1256,7 +1261,7 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             return;
         }
 
-        if let Some((collection, key, mut render)) = jsx_map(expression, self.ast) {
+        if let Some((collection, key, mut render)) = jsx_map(expression, self.ast, self.scoping) {
             let reads = dependencies(
                 &collection,
                 self.scoping,
@@ -1729,6 +1734,7 @@ fn contains_jsx(expression: &Expression<'_>) -> bool {
 fn jsx_map<'a>(
     expression: &Expression<'a>,
     ast: &AstBuilder<'a>,
+    scoping: &Scoping,
 ) -> Option<(Expression<'a>, Option<Expression<'a>>, Expression<'a>)> {
     let Expression::CallExpression(call) = expression.without_parentheses() else {
         return None;
@@ -1755,23 +1761,62 @@ fn jsx_map<'a>(
         return None;
     }
     let key_expression = key_expression(render);
-    let parameter_names = render
-        .params
-        .items
-        .iter()
-        .map(|parameter| match &parameter.pattern {
-            BindingPattern::BindingIdentifier(identifier) => Some(identifier.name.as_str()),
-            _ => None,
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let key = key_expression.map(|key_expression| {
-        arrow_expression(
+    let destructured = match &render.params.items[0].pattern {
+        BindingPattern::BindingIdentifier(_) => None,
+        pattern @ BindingPattern::ObjectPattern(_) => Some(item_pattern_bindings(pattern)?),
+        _ => return None,
+    };
+    let first_name = match &render.params.items[0].pattern {
+        BindingPattern::BindingIdentifier(identifier) => identifier.name.as_str(),
+        BindingPattern::ObjectPattern(_) => ITEM_VALUE,
+        _ => unreachable!(),
+    };
+    let mut parameter_names = vec![first_name];
+    if let Some(parameter) = render.params.items.get(1) {
+        let BindingPattern::BindingIdentifier(identifier) = &parameter.pattern else {
+            return None;
+        };
+        parameter_names.push(identifier.name.as_str());
+    }
+    let key = match (key_expression, destructured.as_ref()) {
+        (Some(Expression::Identifier(identifier)), Some(bindings)) => {
+            let reference = identifier.reference_id.get()?;
+            let symbol = scoping.get_reference(reference).symbol_id()?;
+            let (_, path) = bindings
+                .iter()
+                .find(|(candidate, _)| *candidate == symbol)?;
+            let key = path.iter().fold(ident(ast, ITEM_VALUE), |object, name| {
+                Expression::from(MemberExpression::new_computed_member_expression(
+                    SPAN,
+                    object,
+                    Expression::new_string_literal(
+                        SPAN,
+                        ast.allocator().alloc_str(name),
+                        None,
+                        ast,
+                    ),
+                    false,
+                    ast,
+                ))
+            });
+            Some(arrow_expression(ast, parameter_names, key))
+        }
+        (Some(_), Some(_)) => return None,
+        (Some(key_expression), None) => Some(arrow_expression(
             ast,
             parameter_names,
             key_expression.clone_in(ast.allocator()),
-        )
-    });
+        )),
+        (None, _) => None,
+    };
     let mut render = render.clone_in_with_semantic_ids(ast.allocator());
+    if matches!(
+        render.params.items[0].pattern,
+        BindingPattern::ObjectPattern(_)
+    ) {
+        render.params.items[0].pattern =
+            BindingPattern::new_binding_identifier(SPAN, atom(ast, ITEM_VALUE), ast);
+    }
     if render.params.items.len() == 1 {
         append_arrow_parameter(ast, &mut render, ITEM_INDEX);
     }
@@ -1781,6 +1826,38 @@ fn jsx_map<'a>(
         key,
         Expression::ArrowFunctionExpression(render),
     ))
+}
+
+fn item_pattern_bindings(pattern: &BindingPattern<'_>) -> Option<Vec<(SymbolId, Vec<String>)>> {
+    fn collect(
+        pattern: &BindingPattern<'_>,
+        path: Vec<String>,
+        bindings: &mut Vec<(SymbolId, Vec<String>)>,
+    ) -> Option<()> {
+        match pattern {
+            BindingPattern::BindingIdentifier(identifier) => {
+                bindings.push((identifier.symbol_id.get()?, path));
+                Some(())
+            }
+            BindingPattern::ObjectPattern(object) if object.rest.is_none() => {
+                for property in &object.properties {
+                    if property.computed {
+                        return None;
+                    }
+                    let name = property.key.static_name()?;
+                    let mut nested = path.clone();
+                    nested.push(name.to_string());
+                    collect(&property.value, nested, bindings)?;
+                }
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
+    let mut bindings = Vec::new();
+    collect(pattern, Vec::new(), &mut bindings)?;
+    Some(bindings)
 }
 
 fn key_expression<'a>(render: &'a ArrowFunctionExpression<'a>) -> Option<&'a Expression<'a>> {
@@ -2019,20 +2096,25 @@ impl<'a> Visit<'a> for ItemParameterCollector<'a, '_> {
             })
         {
             for (index, parameter) in render.params.items.iter().take(2).enumerate() {
-                let BindingPattern::BindingIdentifier(identifier) = &parameter.pattern else {
+                let Some(bindings) = item_pattern_bindings(&parameter.pattern) else {
                     continue;
                 };
-                let Some(symbol) = identifier.symbol_id.get() else {
-                    continue;
+                let state_name = match &parameter.pattern {
+                    BindingPattern::BindingIdentifier(identifier) => identifier.name.as_str(),
+                    BindingPattern::ObjectPattern(_) if index == 0 => ITEM_VALUE,
+                    _ => continue,
                 };
-                self.sources.insert(symbol, SourceId::new(index as u32));
-                self.states.insert(
-                    symbol,
-                    StateReference {
-                        state_name: self.ast.allocator().alloc_str(identifier.name.as_str()),
-                        setter: false,
-                    },
-                );
+                for (symbol, path) in bindings {
+                    self.sources.insert(symbol, SourceId::new(index as u32));
+                    self.states.insert(
+                        symbol,
+                        StateReference {
+                            state_name: self.ast.allocator().alloc_str(state_name),
+                            setter: false,
+                            path,
+                        },
+                    );
+                }
             }
         }
         walk_call_expression(self, call);
@@ -2070,7 +2152,23 @@ impl<'a> VisitMut<'a> for MultiStateReferenceRewriter<'a, '_, '_> {
         *expression = if state.setter {
             member
         } else {
-            call(self.ast, member, [])
+            state
+                .path
+                .iter()
+                .fold(call(self.ast, member, []), |object, name| {
+                    Expression::from(MemberExpression::new_computed_member_expression(
+                        SPAN,
+                        object,
+                        Expression::new_string_literal(
+                            SPAN,
+                            self.ast.allocator().alloc_str(name),
+                            None,
+                            self.ast,
+                        ),
+                        false,
+                        self.ast,
+                    ))
+                })
         };
     }
 }

@@ -110,6 +110,7 @@ pub(super) fn register_item_sources<'a>(
             StateReference {
                 state_name: ast.allocator().alloc_str(plan.item_name),
                 setter: false,
+                path: Vec::new(),
             },
         );
     }

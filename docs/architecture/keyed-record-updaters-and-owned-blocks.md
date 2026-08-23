@@ -19,7 +19,14 @@ A keyed or conditional structural result is an owned block. The block may pass t
 
 ## Compiler and runtime contract
 
-The generated keyed callback receives `(itemSlot, indexSlot, itemScope)`. References to the source callback's item and index parameters become `.get()` calls. The key selector remains a raw-value callback so key calculation does not allocate slots before reconciliation.
+The generated keyed callback receives `(itemSlot, indexSlot, itemScope)`.
+References to identifier-form source parameters become `.get()` calls. A
+supported object-destructured row parameter is replaced by one generated item
+slot, and each leaf reference becomes a static property path from
+`itemSlot.get()`. Top-level destructured key leaves compile to a separate raw-row
+property selector, so key calculation still does not allocate slots before
+reconciliation. Nested/default/rest/array row patterns remain diagnosed until
+their key and default contracts are explicit.
 
 `binding`, `when`, `keyed`, and `indexed` accept their component scope/mask
 plus an optional item scope/mask. A nested list whose collection reads its outer
@@ -43,7 +50,8 @@ Owned blocks carry their update ownership from their producer. Passing one into 
 - Item-, index-, component-, and mixed-dependency bindings observe their current values.
 - A nested list collection observes replacement of its retained outer item and
   reconciles its own records without replacing the outer record.
-- Key extraction receives raw collection values; row rendering receives slots.
+- Key extraction receives raw collection values; identifier and destructured
+  row rendering receives slots and compiler-owned property paths.
 - Duplicate keys fail before the current DOM is changed.
 - Removing or changing a key disposes the old record exactly once.
 - One owned block has one legal mount.
@@ -63,9 +71,10 @@ and compiled arrays can be composed through prop boundaries. Explicit unkeyed
 maps and direct `for...of` accumulators use the same record engine with position
 keys; see [Compiler-owned iterative JSX](compiler-owned-iterative-jsx.md). Each
 mounted record pays for a small scope and two state slots, and mixed bindings
-register in two scopes. Nested collections derived from an outer item are
-supported while direct outer-row captures remain diagnosed. Destructured
-callback parameters, broader imperative accumulator grammars, and arbitrary
+register in two scopes. Nested collections derived from an outer item and
+direct/aliased/nested object leaf reads in map callback parameters are supported,
+while direct outer-row captures remain diagnosed. Row-pattern
+defaults/rest/arrays, broader imperative accumulator grammars, and arbitrary
 external JSX arrays remain outside the accepted contract.
 
 ## Verification
