@@ -4,10 +4,23 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import { analyzeWithCompiler, compileWithCompiler } from '../src/compiler-client.ts'
-import { compilationCacheKey } from '../src/index.ts'
+import { compilationCacheKey, vidact } from '../src/index.ts'
 
 const packageDirectory = path.dirname(fileURLToPath(import.meta.url))
 const manifestPath = path.resolve(packageDirectory, '../../../Cargo.toml')
+
+type TransformHook = (
+  this: { readonly environment: { readonly name: string } },
+  source: string,
+  id: string,
+) => Promise<unknown>
+
+function transformHook(options: Parameters<typeof vidact>[0]): TransformHook {
+  const plugin = vidact({ manifestPath, ...options })
+  const configure = Reflect.get(plugin, 'configResolved') as (config: { root: string }) => void
+  configure({ root: packageDirectory })
+  return Reflect.get(plugin, 'transform') as TransformHook
+}
 
 describe('vidact compiler client', () => {
   it('returns the Rust compiler analysis protocol for TSX arrays', async () => {
@@ -145,5 +158,26 @@ describe('vidact compiler client', () => {
     ).resolves.toMatchObject({
       configuration: { target: 'client', features: ['unsafe-html'] },
     })
+  })
+
+  it('compiles only explicitly included dependency source and honors exclusions', async () => {
+    const source = 'export function Button() { return <button>ready</button> }'
+    const dependencyId = '/app/node_modules/compatible-source/Button.tsx'
+    const context = { environment: { name: 'client' } }
+
+    await expect(transformHook({}).call(context, source, dependencyId)).resolves.toBeNull()
+    await expect(
+      transformHook({ includeDependencies: '**/node_modules/compatible-source/**' }).call(
+        context,
+        source,
+        dependencyId,
+      ),
+    ).resolves.toMatchObject({ code: expect.stringContaining('__vidactCompiledRoot') })
+    await expect(
+      transformHook({
+        includeDependencies: '**/node_modules/compatible-source/**',
+        exclude: '**/Button.tsx',
+      }).call(context, source, dependencyId),
+    ).resolves.toBeNull()
   })
 })

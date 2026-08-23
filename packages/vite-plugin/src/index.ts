@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { transformWithOxc, type Plugin } from 'vite'
+import { createFilter, transformWithOxc, type FilterPattern, type Plugin } from 'vite'
 
 import {
   compileWithCompiler,
@@ -26,6 +26,10 @@ export interface VidactPluginOptions {
   readonly target?: VidactTarget
   /** Opt-in semantic feature families. */
   readonly features?: readonly VidactFeature[]
+  /** Compatible TSX dependency sources to compile inside node_modules. */
+  readonly includeDependencies?: FilterPattern
+  /** Source files to leave untouched even when they otherwise match. */
+  readonly exclude?: FilterPattern
 }
 
 export interface CompilationCacheInput extends VidactCompilerConfiguration {
@@ -59,6 +63,11 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
     string,
     { code: string; sourceMap: Record<string, unknown>; analysis: VidactAnalysis }
   >()
+  const includeDependency =
+    options.includeDependencies === undefined
+      ? () => false
+      : createFilter(options.includeDependencies)
+  const includeSource = createFilter(undefined, options.exclude)
 
   return {
     name: 'vidact',
@@ -102,7 +111,13 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
     },
     async transform(source, id) {
       const filename = id.split('?', 1)[0] ?? id
-      if (!filename.endsWith('.tsx') || filename.includes('/node_modules/')) return null
+      if (
+        !filename.endsWith('.tsx') ||
+        !includeSource(filename) ||
+        (filename.includes('/node_modules/') && !includeDependency(filename))
+      ) {
+        return null
+      }
 
       const cacheKey = compilationCacheKey({
         source,
