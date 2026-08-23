@@ -11,6 +11,7 @@ export {
 } from './direct-dom.ts'
 export { useRef, type MutableRef } from './ref.ts'
 export { assertRuntimeProtocol, VIDACT_RUNTIME_PROTOCOL } from './protocol.ts'
+export { compiledSpread } from './spread.ts'
 export {
   binding,
   choose,
@@ -19,6 +20,7 @@ export {
   compiledRoot,
   createCompiledProp,
   createCompiledReducer,
+  createCompiledRestProp,
   createCompiledScope,
   createNarrowCompiledScope,
   createCompiledState,

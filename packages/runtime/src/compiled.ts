@@ -303,6 +303,32 @@ export function createCompiledProp<T>(
   return slot
 }
 
+export function createCompiledRestProp(
+  scope: CompiledScope,
+  sourceMask: SourceMask,
+  input: Record<string, unknown>,
+): StateSlot<Record<string, unknown>> {
+  const read = (): Record<string, unknown> =>
+    Object.fromEntries(
+      Object.entries(input).map(([name, value]) => [
+        name,
+        isCompiledBinding(value) ? value[1]() : value,
+      ]),
+    )
+  const slot = createStateSlot(scope[1], sourceMask, read(), stateWriteGuard(scope))
+  const removers = Object.values(input)
+    .filter(isCompiledBinding)
+    .map((upstream) => subscribeBinding(upstream, () => slot.replace(read())))
+  const owner = scopeOwners.get(scope)
+  if (owner === undefined) {
+    throw new Error(DEV ? 'createCompiledRestProp received an unknown scope' : 'V003')
+  }
+  owner[1].add(() => {
+    for (const remove of removers) remove()
+  })
+  return slot
+}
+
 function stateWriteGuard(scope: CompiledScope): () => void {
   const owner = scopeOwners.get(scope)
   if (owner === undefined) {

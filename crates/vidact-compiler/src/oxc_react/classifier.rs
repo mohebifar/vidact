@@ -60,10 +60,27 @@ pub(super) fn classify_component<'a>(
             ));
         };
         if let Some(rest) = &pattern.rest {
-            return Err(unsupported_at(
-                "rest props are unsupported until prop deletion is modeled",
-                rest.span,
-            ));
+            let BindingPattern::BindingIdentifier(identifier) = &rest.argument else {
+                return Err(unsupported_at(
+                    "nested rest prop patterns are unsupported",
+                    rest.span,
+                ));
+            };
+            let symbol = identifier.symbol_id.get().ok_or_else(|| {
+                Diagnostic::new(
+                    DiagnosticCode::AnalysisFailed,
+                    "semantic analysis did not resolve the rest prop binding",
+                )
+                .with_span(SourceSpan::from_oxc(identifier.span))
+            })?;
+            sources.insert(
+                identifier.name.to_string(),
+                SourceSyntax {
+                    kind: SourceKind::Prop,
+                    symbol,
+                    declaration_start: identifier.span.start,
+                },
+            );
         }
         for property in &pattern.properties {
             if property.computed {

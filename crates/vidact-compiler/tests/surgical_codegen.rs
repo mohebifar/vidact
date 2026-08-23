@@ -1023,8 +1023,8 @@ fn compiles_branch_varying_refs_as_reactive_ref_bindings() {
 }
 
 #[test]
-fn rejects_reactive_jsx_spreads_instead_of_capturing_a_mount_snapshot() {
-    let diagnostics = compile_surgical_module(ModuleInput {
+fn compiles_reactive_jsx_spreads_with_deletion_aware_property_ownership() {
+    let output = compile_surgical_module(ModuleInput {
         filename: "Spread.tsx",
         source: r#"
             import { useState } from 'react';
@@ -1034,12 +1034,39 @@ fn rejects_reactive_jsx_spreads_instead_of_capturing_a_mount_snapshot() {
             }
         "#,
     })
-    .expect_err("reactive spreads need deletion-aware updater semantics");
+    .expect("reactive spreads should lower to the owned spread descriptor");
 
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == DiagnosticCode::UnsupportedSyntax
-            && diagnostic.message.contains("reactive JSX spreads")
-    }));
+    assert!(
+        output.contains("compiledSpread as __vidactSpread"),
+        "{output}"
+    );
+    assert!(
+        output.contains("__vidactSpread(__vidactBinding("),
+        "{output}"
+    );
+}
+
+#[test]
+fn compiles_rest_props_into_a_resolved_object_slot() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "RestProps.tsx",
+        source: r#"
+            export function RestProps({ title, ...rest }): Node {
+                return <section {...rest}>{title}</section>;
+            }
+        "#,
+    })
+    .expect("rest props should resolve upstream bindings and drive a reactive spread");
+
+    assert!(
+        output.contains("createCompiledRestProp as __vidactCreateRestProp"),
+        "{output}"
+    );
+    assert!(
+        output.contains("rest = __vidactCreateRestProp("),
+        "{output}"
+    );
+    assert!(output.contains("() => rest.get()"), "{output}");
 }
 
 #[test]

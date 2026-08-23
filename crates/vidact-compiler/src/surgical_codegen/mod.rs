@@ -46,9 +46,11 @@ const BINDING: &str = "__vidactBinding";
 const COMBINE_SOURCES: &str = "__vidactCombineSources";
 const COMPILED_EVENT: &str = "__vidactEvent";
 const COMPILED_IMPERATIVE_HANDLE: &str = "__vidactImperativeHandle";
+const COMPILED_SPREAD: &str = "__vidactSpread";
 const COMPILED_ROOT: &str = "__vidactCompiledRoot";
 const CHOOSE: &str = "__vidactChoose";
 const CREATE_PROP: &str = "__vidactCreateProp";
+const CREATE_REST_PROP: &str = "__vidactCreateRestProp";
 const CREATE_REDUCER: &str = "__vidactCreateReducer";
 const CREATE_SCOPE: &str = "__vidactCreateScope";
 const CREATE_NARROW_SCOPE: &str = "__vidactCreateNarrowScope";
@@ -163,9 +165,11 @@ fn transform_program<'a>(
         COMBINE_SOURCES,
         COMPILED_EVENT,
         COMPILED_IMPERATIVE_HANDLE,
+        COMPILED_SPREAD,
         COMPILED_ROOT,
         CHOOSE,
         CREATE_PROP,
+        CREATE_REST_PROP,
         CREATE_REDUCER,
         CREATE_SCOPE,
         CREATE_NARROW_SCOPE,
@@ -444,7 +448,19 @@ fn transform_component<'a>(
                 default.clone_in_with_semantic_ids(allocator),
             ));
         }
-        assignment_statement(&ast, &prop.name, call_name(&ast, CREATE_PROP, arguments))
+        assignment_statement(
+            &ast,
+            &prop.name,
+            call_name(
+                &ast,
+                if prop.rest {
+                    CREATE_REST_PROP
+                } else {
+                    CREATE_PROP
+                },
+                arguments,
+            ),
+        )
     }));
     inserted.extend(body.statements.drain(..));
     body.statements = inserted;
@@ -556,6 +572,7 @@ fn transform_component<'a>(
         item_source_symbols: &item_source_symbols,
         options,
         react: &react,
+        reactive_spread_overrides: BTreeMap::new(),
         diagnostic: None,
     };
     jsx_transformer.visit_function_body(body);
@@ -585,6 +602,7 @@ struct PropBinding<'a> {
     symbol: SymbolId,
     source: SourceId,
     default: Option<Expression<'a>>,
+    rest: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -746,6 +764,7 @@ struct JsxBindingTransformer<'a, 'b, 's> {
     item_source_symbols: &'s BTreeMap<SymbolId, SourceId>,
     options: &'s CompilationOptions,
     react: &'s ReactBindings<'s>,
+    reactive_spread_overrides: BTreeMap<u32, Vec<String>>,
     diagnostic: Option<Diagnostic>,
 }
 
@@ -867,7 +886,8 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             self.diagnostic = Some(diagnostic);
             return;
         }
-        if raw_html::intrinsic_jsx_name(&element.opening_element.name).is_some() {
+        let intrinsic = raw_html::intrinsic_jsx_name(&element.opening_element.name).is_some();
+        if intrinsic {
             for item in &element.opening_element.attributes {
                 let JSXAttributeItem::Attribute(attribute) = item else {
                     continue;
@@ -888,6 +908,79 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
                     return;
                 }
             }
+        }
+        let reactive_spreads = element
+            .opening_element
+            .attributes
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                let JSXAttributeItem::SpreadAttribute(spread) = item else {
+                    return None;
+                };
+                (!dependencies(
+                    &spread.argument,
+                    self.scoping,
+                    self.source_symbols,
+                    self.item_source_symbols,
+                )
+                .is_empty())
+                .then_some((index, spread.span.start))
+            })
+            .collect::<Vec<_>>();
+        if !reactive_spreads.is_empty() {
+            if !intrinsic {
+                self.diagnostic = Some(
+                    unsupported(
+                        "reactive component prop spreads require the mutable prop-store ABI",
+                    )
+                    .with_span(SourceSpan::new(element.span.start, element.span.end)),
+                );
+                return;
+            }
+            if reactive_spreads.len() != 1 {
+                self.diagnostic = Some(
+                    unsupported("an intrinsic currently accepts one reactive JSX spread")
+                        .with_span(SourceSpan::new(element.span.start, element.span.end)),
+                );
+                return;
+            }
+            let (spread_index, spread_start) = reactive_spreads[0];
+            let has_preceding_prop = element.opening_element.attributes[..spread_index]
+                .iter()
+                .any(|item| match item {
+                    JSXAttributeItem::SpreadAttribute(_) => true,
+                    JSXAttributeItem::Attribute(attribute) => !attribute.is_identifier("key"),
+                });
+            let has_following_spread = element.opening_element.attributes[spread_index + 1..]
+                .iter()
+                .any(|item| matches!(item, JSXAttributeItem::SpreadAttribute(_)));
+            if has_preceding_prop || has_following_spread {
+                self.diagnostic = Some(
+                    unsupported(
+                        "reactive JSX spreads must precede explicit intrinsic props and cannot be combined with another spread",
+                    )
+                    .with_span(SourceSpan::new(element.span.start, element.span.end)),
+                );
+                return;
+            }
+            let mut overrides = element.opening_element.attributes[spread_index + 1..]
+                .iter()
+                .filter_map(|item| {
+                    let JSXAttributeItem::Attribute(attribute) = item else {
+                        return None;
+                    };
+                    let JSXAttributeName::Identifier(name) = &attribute.name else {
+                        return None;
+                    };
+                    Some(name.name.to_string())
+                })
+                .collect::<Vec<_>>();
+            if !element.children.is_empty() {
+                overrides.push("children".to_string());
+            }
+            self.reactive_spread_overrides
+                .insert(spread_start, overrides);
         }
         walk_jsx_element(self, element);
     }
@@ -942,16 +1035,47 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             self.source_symbols,
             self.item_source_symbols,
         );
-        if !reads.is_empty() {
-            self.diagnostic = Some(
-                unsupported(
-                    "reactive JSX spreads are unsupported until spread deletion semantics are implemented",
-                )
-                .with_span(SourceSpan::new(attribute.span.start, attribute.span.end)),
-            );
+        if reads.is_empty() {
+            walk_jsx_spread_attribute(self, attribute);
             return;
         }
-        walk_jsx_spread_attribute(self, attribute);
+        let Some(overrides) = self
+            .reactive_spread_overrides
+            .get(&attribute.span.start)
+            .cloned()
+        else {
+            return;
+        };
+        self.visit_expression(&mut attribute.argument);
+        let evaluate = attribute
+            .argument
+            .clone_in_with_semantic_ids(self.ast.allocator());
+        let mut binding_arguments = vec![
+            ident(self.ast, SCOPE),
+            dependency_mask(self.ast, &reads.parent),
+            arrow_expression(self.ast, [], evaluate),
+        ];
+        append_item_dependency(self.ast, &mut binding_arguments, &reads);
+        let overrides = Expression::new_array_expression(
+            SPAN,
+            oxc_allocator::Vec::from_iter_in(
+                overrides.into_iter().map(|name| {
+                    ArrayExpressionElement::from(Expression::new_string_literal(
+                        SPAN,
+                        self.ast.allocator().alloc_str(&name),
+                        None,
+                        self.ast,
+                    ))
+                }),
+                self.ast,
+            ),
+            self.ast,
+        );
+        attribute.argument = call_name(
+            self.ast,
+            COMPILED_SPREAD,
+            [call_name(self.ast, BINDING, binding_arguments), overrides],
+        );
     }
 
     fn visit_jsx_expression_container(&mut self, container: &mut JSXExpressionContainer<'a>) {
@@ -1142,12 +1266,6 @@ fn prop_binding_symbols<'a>(
         let BindingPattern::ObjectPattern(pattern) = &parameter.pattern else {
             continue;
         };
-        if let Some(rest) = &pattern.rest {
-            return Err(unsupported(
-                "rest props are unsupported until the compiled prop store models deletion",
-            )
-            .with_span(SourceSpan::new(rest.span.start, rest.span.end)));
-        }
         for property in &pattern.properties {
             if property.computed {
                 return Err(unsupported("computed prop destructuring is unsupported")
@@ -1193,7 +1311,38 @@ fn prop_binding_symbols<'a>(
                 symbol,
                 source,
                 default,
+                rest: false,
             });
+        }
+        if let Some(rest) = &pattern.rest {
+            let BindingPattern::BindingIdentifier(identifier) = &rest.argument else {
+                return Err(unsupported("nested rest prop patterns are unsupported")
+                    .with_span(SourceSpan::new(rest.span.start, rest.span.end)));
+            };
+            if prop_sources.contains(identifier.name.as_str()) {
+                let source = sources
+                    .get(identifier.name.as_str())
+                    .copied()
+                    .ok_or_else(|| {
+                        analysis_error(format!(
+                            "rest prop binding {} is absent from analysis",
+                            identifier.name
+                        ))
+                    })?;
+                let symbol = identifier.symbol_id.get().ok_or_else(|| {
+                    analysis_error(format!(
+                        "rest prop {} has no semantic symbol",
+                        identifier.name
+                    ))
+                })?;
+                bindings.push(PropBinding {
+                    name: identifier.name.to_string(),
+                    symbol,
+                    source,
+                    default: None,
+                    rest: true,
+                });
+            }
         }
     }
     if bindings.len() != prop_sources.len() {
@@ -1695,9 +1844,11 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>, program: &Program<'a>) -> Statement<
         ("combineSources", COMBINE_SOURCES),
         ("compiledEvent", COMPILED_EVENT),
         ("compiledImperativeHandle", COMPILED_IMPERATIVE_HANDLE),
+        ("compiledSpread", COMPILED_SPREAD),
         ("compiledRoot", COMPILED_ROOT),
         ("choose", CHOOSE),
         ("createCompiledProp", CREATE_PROP),
+        ("createCompiledRestProp", CREATE_REST_PROP),
         ("createCompiledReducer", CREATE_REDUCER),
         ("createCompiledScope", CREATE_SCOPE),
         ("createNarrowCompiledScope", CREATE_NARROW_SCOPE),

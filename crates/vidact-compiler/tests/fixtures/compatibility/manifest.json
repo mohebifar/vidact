@@ -79,10 +79,9 @@
       "components": ["SynchronousTry"]
     },
     {
-      "path": "rejected/reactive-spread.tsx",
-      "expectation": "rejected",
-      "code": "UnsupportedSyntax",
-      "spanContains": "{...attributes}"
+      "path": "accepted/reactive-spread.tsx",
+      "expectation": "accepted",
+      "components": ["ReactiveSpread"]
     },
     {
       "path": "accepted/aliased-prop.tsx",
@@ -90,10 +89,9 @@
       "components": ["AliasedProp"]
     },
     {
-      "path": "rejected/rest-props.tsx",
-      "expectation": "rejected",
-      "code": "UnsupportedSyntax",
-      "spanContains": "...rest"
+      "path": "accepted/rest-props.tsx",
+      "expectation": "accepted",
+      "components": ["RestProps"]
     },
     {
       "path": "rejected/foreign-array-call.tsx",

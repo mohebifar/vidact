@@ -117,6 +117,10 @@ function applyProps(
   for (const name in props) {
     if (!Object.hasOwn(props, name)) continue
     const value = props[name]
+    if (name.startsWith('__vidactSpread') && typeof value === 'function') {
+      restoreAfterChildren = Boolean(value(element)) || restoreAfterChildren
+      continue
+    }
     if (name === 'key' || name === 'children' || name === INTERNAL_NAMESPACE_PROP) continue
     if (name === 'dangerouslySetInnerHTML') continue
     if (!hasControlledRestoration && isControlledFormProp(element, name)) {

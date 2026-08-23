@@ -131,6 +131,17 @@ default-core direct-DOM behavior:
 | Keyed list | 8,312 B | 8,360 B | +48 B |
 | TodoMVC | 9,906 B | 9,948 B | +42 B |
 
+Reactive spread diffing is capability-imported from a separate module. Chunks
+without that compiler helper retain only the private-directive dispatch in the
+direct DOM loop:
+
+| Fixture | Deferred-child namespace gzip | Spread directive dispatch gzip | Change |
+| --- | ---: | ---: | ---: |
+| Counter | 7,231 B | 7,260 B | +29 B |
+| Control flow | 7,568 B | 7,597 B | +29 B |
+| Keyed list | 8,360 B | 8,390 B | +30 B |
+| TodoMVC | 9,948 B | 9,977 B | +29 B |
+
 ## Consequences
 
 - Compiler and runtime changes that touch tuple positions must land together.

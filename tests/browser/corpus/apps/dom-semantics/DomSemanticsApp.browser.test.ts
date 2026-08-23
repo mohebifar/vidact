@@ -80,6 +80,37 @@ describe('compiled DOM semantics app', () => {
     expect(row.namespaceURI).toBe(MATHML_NAMESPACE)
   })
 
+  it('adds, updates, and deletes reactive spread and rest properties without remounting', async () => {
+    const host = mountApp()
+    const target = host.querySelector<HTMLButtonElement>('[data-spread-target]')!
+    const clicks = host.querySelector<HTMLOutputElement>('[data-spread-clicks]')!
+    const rest = host.querySelector<HTMLElement>('[data-rest]')!
+    const toggle = host.querySelector<HTMLButtonElement>('[data-toggle-spread]')!
+
+    expect(target.title).toBe('first spread')
+    expect(target.dataset.spread).toBe('one')
+    expect(target.dataset.fixed).toBe('explicit')
+    target.click()
+    expect(clicks.textContent).toBe('1')
+    expect(rest.title).toBe('first spread')
+    expect(rest.dataset.rest).toBe('one')
+    expect(rest.textContent).toBe('rest one')
+
+    await captureMutations(host, () => toggle.click())
+
+    expect(host.querySelector('[data-spread-target]')).toBe(target)
+    expect(target.hasAttribute('title')).toBe(false)
+    expect(target.dataset.spread).toBe('two')
+    expect(target.dataset.fixed).toBe('explicit')
+    expect(target.hidden).toBe(true)
+    target.click()
+    expect(clicks.textContent).toBe('11')
+    expect(host.querySelector('[data-rest]')).toBe(rest)
+    expect(rest.hasAttribute('title')).toBe(false)
+    expect(rest.dataset.rest).toBe('two')
+    expect(rest.textContent).toBe('rest two')
+  })
+
   it('updates attributes and styles without retaining stale values or remounting', async () => {
     const host = mountApp()
     const semantics = host.querySelector<HTMLElement>('[data-boolean]')!

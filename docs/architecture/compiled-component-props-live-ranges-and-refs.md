@@ -109,11 +109,11 @@ changed.
 
 The current compiler accepts direct object destructuring and binds each public
 property to its resolved local semantic symbol, so `{ value: displayed }`
-updates `displayed` without reinvoking the component. It rejects rest props,
-computed or nested patterns, reactive JSX spreads, and reactive local
-derivations absent from its data-flow facts. These fail-closed checks prevent
-known mount-time snapshots while the AST classifier and diagnostics are still
-incomplete.
+updates `displayed` without reinvoking the component. Rest props resolve through
+one reactive object slot and can feed the deletion-aware intrinsic spread path
+defined in [Deletion-aware reactive spreads and rest props](deletion-aware-reactive-spreads-and-rest-props.md).
+Computed or nested patterns, reactive component spreads, and reactive local
+derivations absent from data-flow facts remain fail-closed.
 
 Each dynamic value range owns the resources created by its current non-scalar
 value. Replacing the value disposes that owner and removes only the nodes between
@@ -194,10 +194,10 @@ resource lifecycle. The cost is one child slot and one bridge updater per
 reactive prop, comment markers for general binding ranges, and owner allocation
 for each non-scalar range value.
 
-The ABI is intentionally narrow. Prop additions/deletions through spreads, rest
-and nested destructuring, and foreign React element objects require separate
-decisions. Multi-root component ranges, aliased direct destructuring, ref-as-prop,
-and reactive host ref identity are supported. `useRef` is naturally stable under
+The ABI is intentionally narrow. Arbitrary ordered component prop layers,
+nested destructuring, and foreign React element objects require separate
+decisions. Multi-root component ranges, aliased direct destructuring, rest
+objects, ref-as-prop, and reactive host ref identity are supported. `useRef` is naturally stable under
 the compiled construct-once path. `useImperativeHandle` uses the first shared
 source-mask-to-commit-resource bridge, including explicit dependency identity
 and reactive ref replacement.

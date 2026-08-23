@@ -14,6 +14,17 @@ function ForeignObjectSlot({ children }: { children: JSX.Element }): JSX.Element
   return <foreignObject data-component-foreign-object>{children}</foreignObject>
 }
 
+function RestSpread({
+  label,
+  ...rest
+}: {
+  label: string
+  title?: string | undefined
+  'data-rest'?: string | undefined
+}): JSX.Element {
+  return <section {...rest}>{label}</section>
+}
+
 function DeferredSvg({ visible }: { visible: boolean }): JSX.Element {
   return <>{visible && <circle data-deferred-svg cx="3" cy="3" r="2" tabIndex={0} />}</>
 }
@@ -43,6 +54,19 @@ export function DomSemanticsApp(): JSX.Element {
   const [modeValue, setModeValue] = useState<string | string[]>('b')
   const [notes, setNotes] = useState('notes')
   const [radio, setRadio] = useState('a')
+  const [spreadClicks, setSpreadClicks] = useState(0)
+  const [spreadProps, setSpreadProps] = useState<{
+    title?: string
+    hidden?: boolean
+    'data-fixed'?: string
+    'data-spread'?: string
+    onClick?: () => void
+  }>({
+    title: 'first spread',
+    'data-fixed': 'dynamic',
+    'data-spread': 'one',
+    onClick: () => setSpreadClicks((current) => current + 1),
+  })
 
   return (
     <main {...forgedNamespace} data-dom-semantics>
@@ -52,6 +76,29 @@ export function DomSemanticsApp(): JSX.Element {
       <button data-toggle-deferred onClick={() => setNamespacedVisible((current) => !current)}>
         Toggle deferred namespaces
       </button>
+      <button
+        data-toggle-spread
+        onClick={() =>
+          setSpreadProps({
+            hidden: true,
+            'data-fixed': 'still dynamic',
+            'data-spread': 'two',
+            onClick: () => setSpreadClicks((current) => current + 10),
+          })
+        }
+      >
+        Toggle spread
+      </button>
+
+      <button {...spreadProps} data-fixed="explicit" data-spread-target>
+        Spread target
+      </button>
+      <output data-spread-clicks>{spreadClicks}</output>
+      <RestSpread
+        label={spreadProps.hidden ? 'rest two' : 'rest one'}
+        title={spreadProps.title}
+        data-rest={spreadProps['data-spread']}
+      />
 
       <section
         data-boolean={active}
