@@ -234,7 +234,9 @@ export function claimHydrationArrayRange(parent: Node): HydrationRange | undefin
   enterHydrationSlot(state, parent)
   const start = cursor(state, parent)
   if (!isMarker(start, `${HYDRATION_PREFIX}:a`)) {
-    throw mismatch('expected a vidact:v1 array marker')
+    throw mismatch(
+      `expected a vidact:v1 array marker in ${parent.nodeName}; found ${JSON.stringify(markerValue(start as Node) ?? start?.nodeName ?? null)}`,
+    )
   }
   const end = findClosingSibling(start, `${HYDRATION_PREFIX}:a`)
   state.cursors.set(parent, start.nextSibling)

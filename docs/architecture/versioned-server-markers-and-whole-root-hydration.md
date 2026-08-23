@@ -65,6 +65,11 @@ Every structural kind requires a symmetric server emitter and hydrate claimant.
 Encountering an unrecognized structural kind recovers at the root boundary
 rather than partially adopting its DOM.
 
+Automatic JSX entry points preserve that symmetry: `jsx` represents one child
+position, while `jsxs` and development JSX with static children pass sibling
+positions separately. A static sibling list is not interchangeable with one
+dynamic array child because only the latter owns an array range.
+
 ## Invariants
 
 - Server entry points do not read `window`, `document`, `Node`, or other browser
@@ -130,3 +135,7 @@ before the claimant is enabled.
   markup from the server runtime.
 - `packages/vite-plugin/test/compiler-client.test.ts` covers isolated server and
   hydrate compiler targets and runtime imports.
+- `tests/browser/corpus/hydration/HydrationApp.browser.test.ts` runs server
+  runtime output through a TSX application compiled by the hydrate Vite target,
+  proving zero-churn adoption, ID parity, retained keyed rows, and a surgical
+  post-hydration reorder.

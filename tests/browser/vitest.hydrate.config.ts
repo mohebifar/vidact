@@ -3,9 +3,9 @@ import { playwright } from '@vitest/browser-playwright'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
-  plugins: [vidact({ features: ['css-insertion', 'unsafe-html'] })],
+  plugins: [vidact({ target: 'hydrate' })],
   test: {
-    include: ['corpus/apps/**/*.browser.test.ts'],
+    include: ['corpus/hydration/**/*.browser.test.ts'],
     browser: {
       enabled: true,
       headless: true,

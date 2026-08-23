@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run && vitest run --config vitest.hydrate.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json"
   },

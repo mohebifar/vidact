@@ -15,8 +15,21 @@ export function jsx(type: ElementType, props: JsxProps | null, _key?: unknown): 
   const children = props?.children
   const hasChildren = props !== null && Object.hasOwn(props, 'children')
   if (!hasChildren) return h(type, props)
-  if (typeof type === 'function' && Array.isArray(children)) return h(type, props, ...children)
   return h(type, props, children)
 }
 
-export const jsxs = jsx
+export function jsxs(type: ElementType, props: JsxProps | null, _key?: unknown): DirectChild {
+  const children = props?.children
+  const hasChildren = props !== null && Object.hasOwn(props, 'children')
+  if (!hasChildren) return h(type, props)
+  return Array.isArray(children) ? h(type, props, ...children) : h(type, props, children)
+}
+
+export function jsxDEV(
+  type: ElementType,
+  props: JsxProps | null,
+  key?: unknown,
+  isStaticChildren = false,
+): DirectChild {
+  return isStaticChildren ? jsxs(type, props, key) : jsx(type, props, key)
+}
