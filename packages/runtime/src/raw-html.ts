@@ -3,6 +3,7 @@ import {
   mountCompiledPropTransition,
   type CompiledPropTransition,
 } from './compiled.ts'
+import { HydrationMismatch, isHydrating } from './hydration.ts'
 
 const RAW_HTML_PUBLICATION_PRIORITY = 100
 const rawHtmlHosts = new WeakSet<HTMLElement>()
@@ -28,8 +29,38 @@ export function mountRawHtmlProp(
 function mountRawHtml(element: HTMLElement, value: unknown, children: readonly unknown[]): void {
   const html = readRawHtml(element, value, children)
   if (html === null || html === undefined) return
-  rawHtmlContainer(element).replaceChildren(adoptRawHtml(element, parseRawHtml(element, html)))
+  const container = rawHtmlContainer(element)
+  const staged = parseRawHtml(element, html)
+  if (isHydrating()) {
+    if (!hasEqualHydrationRawChildren(container, staged)) {
+      throw new HydrationMismatch('server raw HTML does not match the client value')
+    }
+  } else {
+    container.replaceChildren(adoptRawHtml(element, staged))
+  }
   rawHtmlHosts.add(element)
+}
+
+function hasEqualHydrationRawChildren(container: Node, expected: DocumentFragment): boolean {
+  const start = container.firstChild
+  const end = container.lastChild
+  if (
+    !(start instanceof Comment) ||
+    start.data !== 'vidact:v1:h' ||
+    !(end instanceof Comment) ||
+    end.data !== '/vidact:v1:h'
+  ) {
+    return false
+  }
+  const actual: Node[] = []
+  for (let node = start.nextSibling; node !== null && node !== end; node = node.nextSibling) {
+    actual.push(node)
+  }
+  if (actual.length !== expected.childNodes.length) return false
+  for (let index = 0; index < actual.length; index += 1) {
+    if (!actual[index]?.isEqualNode(expected.childNodes[index] ?? null)) return false
+  }
+  return true
 }
 
 function prepareRawHtml(

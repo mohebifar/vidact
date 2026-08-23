@@ -195,12 +195,15 @@ function createServerElement(
     }
     const hasChildren = Object.hasOwn(props ?? {}, 'children')
     const children =
-      rawHtml ??
-      (hasChildren
-        ? multipleChildren
-          ? serializeChildren(props?.children as ServerChild, context, !isRawTextElement(type))
-          : serializeSlot(props?.children as ServerChild, context, !isRawTextElement(type))
-        : '')
+      rawHtml === undefined
+        ? hasChildren
+          ? multipleChildren
+            ? serializeChildren(props?.children as ServerChild, context, !isRawTextElement(type))
+            : serializeSlot(props?.children as ServerChild, context, !isRawTextElement(type))
+          : ''
+        : context.hydrationMarkers
+          ? hydrationRange('h', assertSafeHydrationRawHtml(rawHtml))
+          : rawHtml
     return `<${type}${attributes}>${children}</${type}>`
   }, 'intrinsic')
 }
@@ -476,8 +479,15 @@ function serializeSlot(value: ServerChild, context: RenderContext, markScalar = 
   return context.hydrationMarkers ? hydrationRange('b', content) : content
 }
 
-function hydrationRange(kind: 'a' | 'b' | 'c' | 'r' | 's' | 't', content: string): string {
+function hydrationRange(kind: 'a' | 'b' | 'c' | 'h' | 'r' | 's' | 't', content: string): string {
   return `<!--${HYDRATION_PREFIX}:${kind}-->${content}<!--/${HYDRATION_PREFIX}:${kind}-->`
+}
+
+function assertSafeHydrationRawHtml(value: string): string {
+  if (/<!--\/?vidact:v\d+:/i.test(value)) {
+    throw new Error('raw HTML cannot contain Vidact hydration marker syntax')
+  }
+  return value
 }
 
 function isRawTextElement(type: string): boolean {

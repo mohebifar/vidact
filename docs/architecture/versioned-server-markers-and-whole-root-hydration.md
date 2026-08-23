@@ -28,6 +28,9 @@ lazy synchronous server-render request.
 `renderToString` emits a versioned `vidact:v1` comment protocol. A root range
 contains nested component ranges. Every child position has an owned slot;
 intrinsic nodes, scalar text, and array collections carry nested typed ranges.
+Unsafe raw HTML carries an opaque range: its descendants are compared as user
+content but excluded from Vidact element claiming. Hydratable raw HTML rejects
+text that could forge a Vidact marker; static markup remains marker-free.
 The comments are ownership and claiming metadata, not a serialized React
 element tree. `renderToStaticMarkup` deliberately omits them and is therefore
 not hydratable.
@@ -65,6 +68,8 @@ rather than partially adopting its DOM.
   globals.
 - Server text and attribute values are escaped before entering trusted emitted
   markup; raw HTML remains gated by the `unsafe-html` compiler feature.
+- Raw HTML cannot inject hydration protocol comments, and a raw-subtree mismatch
+  recovers rather than replacing descendants during a partial claim.
 - Hydratable and static markup are distinct APIs.
 - Marker versions participate in compiler/runtime compatibility and cannot be
   accepted optimistically across unknown versions.
@@ -116,7 +121,8 @@ before the claimant is enabled.
 - `packages/runtime/test/lifecycle/root.browser.test.ts` proves matching element,
   text, branch, keyed-record, fragment, deferred, and direct-array identity;
   zero-mutation hydration envelopes; post-hydration surgical state/list/branch
-  updates; ID parity; mismatch recovery; version skew; and disposal using markup
-  from the server runtime.
+  updates; ID parity; event attachment; controlled-form restoration; ref-before-
+  layout ordering; opaque raw HTML and marker-injection rejection; mismatch
+  recovery; version skew; and disposal using markup from the server runtime.
 - `packages/vite-plugin/test/compiler-client.test.ts` covers isolated server and
   hydrate compiler targets and runtime imports.

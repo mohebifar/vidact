@@ -15,11 +15,13 @@ import {
   h,
   keyed,
   source,
+  useLayoutEffect,
 } from '../../src/index.ts'
 import {
   Fragment as ServerFragment,
   jsx as serverJsx,
   jsxs as serverJsxs,
+  renderToStaticMarkup,
   renderToString,
   useId as useServerId,
   useState as useServerState,
@@ -77,7 +79,11 @@ describe('compiled client roots', () => {
           const count = createCompiledState(scope, countSource, 0)
           setCount = count.set
           return compiledRoot(scope, () =>
-            h('button', null, binding(scope, countSource, count.get)),
+            h(
+              'button',
+              { onClick: () => setCount((value) => value + 1) },
+              binding(scope, countSource, count.get),
+            ),
           )
         },
         { onRecoverableError: (error) => recoveries.push(error) },
@@ -89,7 +95,7 @@ describe('compiled client roots', () => {
     expect(hydration.records).toHaveLength(0)
     expect(host.querySelector('button')).toBe(existingButton)
     expect([...existingButton.childNodes].find((node) => node instanceof Text)).toBe(existingText)
-    setCount(1)
+    existingButton.click()
     expect(existingText.data).toBe('1')
 
     root.unmount()
@@ -345,5 +351,112 @@ describe('compiled client roots', () => {
     expect(deferredHydration.records).toHaveLength(0)
     expect(deferredHost.querySelector('strong')).toBe(serverStrong)
     deferredHydration.result.unmount()
+  })
+
+  it('adopts matching raw HTML and commits refs before layout effects', async () => {
+    const host = document.createElement('div')
+    function ServerRawRoot(): ServerChild {
+      return serverJsx('section', {
+        dangerouslySetInnerHTML: { __html: '<em data-server="yes">trusted</em>' },
+      })
+    }
+    host.innerHTML = renderToString(() => serverJsx(ServerRawRoot, null))
+    document.body.append(host)
+    const serverSection = host.querySelector('section')!
+    const serverEmphasis = host.querySelector('em')!
+    const commits: string[] = []
+
+    const hydration = await captureMutations(host, () =>
+      hydrateRoot(host, () => {
+        const scope = createCompiledScope()
+        useLayoutEffect(() => {
+          commits.push(`layout:${String(host.querySelector('section') === serverSection)}`)
+        }, [])
+        return compiledRoot(scope, () =>
+          h('section', {
+            dangerouslySetInnerHTML: { __html: '<em data-server="yes">trusted</em>' },
+            ref: (element: Element | null) => {
+              commits.push(`ref:${String(element === serverSection)}`)
+            },
+          }),
+        )
+      }),
+    )
+
+    expect(hydration.records).toHaveLength(0)
+    expect(host.querySelector('section')).toBe(serverSection)
+    expect(host.querySelector('em')).toBe(serverEmphasis)
+    expect(commits).toEqual(['ref:true', 'layout:true'])
+    expect(() =>
+      renderToString(() =>
+        serverJsx('section', {
+          dangerouslySetInnerHTML: { __html: '<!--vidact:v1:c-->forged' },
+        }),
+      ),
+    ).toThrow('raw HTML cannot contain Vidact hydration marker syntax')
+    expect(
+      renderToStaticMarkup(() =>
+        serverJsx('section', {
+          dangerouslySetInnerHTML: { __html: '<!--vidact:v1:c-->static' },
+        }),
+      ),
+    ).toBe('<section><!--vidact:v1:c-->static</section>')
+    hydration.result.unmount()
+    expect(commits).toEqual(['ref:true', 'layout:true', 'ref:false'])
+  })
+
+  it('recovers the whole root when opaque server HTML differs', () => {
+    const host = document.createElement('div')
+    function ServerRawRoot(): ServerChild {
+      return serverJsx('section', {
+        dangerouslySetInnerHTML: { __html: '<em>server</em>' },
+      })
+    }
+    host.innerHTML = renderToString(() => serverJsx(ServerRawRoot, null))
+    document.body.append(host)
+    const serverSection = host.querySelector('section')
+    const recoveries: unknown[] = []
+
+    const root = hydrateRoot(
+      host,
+      () => {
+        const scope = createCompiledScope()
+        return compiledRoot(scope, () =>
+          h('section', { dangerouslySetInnerHTML: { __html: '<u>client</u>' } }),
+        )
+      },
+      { onRecoverableError: (error) => recoveries.push(error) },
+    )
+
+    expect(recoveries).toHaveLength(1)
+    expect(String(recoveries[0])).toContain('raw HTML')
+    expect(host.querySelector('section')).not.toBe(serverSection)
+    expect(host.innerHTML).toContain('<u>client</u>')
+    root.unmount()
+  })
+
+  it('adopts controlled form state and restores it after native input', async () => {
+    const host = document.createElement('div')
+    function ServerFormRoot(): ServerChild {
+      return serverJsx('input', { value: 'fixed' })
+    }
+    host.innerHTML = renderToString(() => serverJsx(ServerFormRoot, null))
+    document.body.append(host)
+    const serverInput = host.querySelector('input')!
+
+    const hydration = await captureMutations(host, () =>
+      hydrateRoot(host, () => {
+        const scope = createCompiledScope()
+        return compiledRoot(scope, () => h('input', { value: 'fixed' }))
+      }),
+    )
+
+    expect(hydration.records).toHaveLength(0)
+    expect(host.querySelector('input')).toBe(serverInput)
+    serverInput.value = 'user edit'
+    serverInput.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    await Promise.resolve()
+    expect(serverInput.value).toBe('fixed')
+    hydration.result.unmount()
   })
 })

@@ -366,9 +366,9 @@ function scanRanges(host: ParentNode): {
   const walker = document.createTreeWalker(host, NodeFilter.SHOW_COMMENT)
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
     const comment = node as Comment
-    const match = comment.data.match(/^\/?vidact:v1:([abcrst])$/)
+    const match = comment.data.match(/^\/?vidact:v1:([abchrst])$/)
     if (match === null) continue
-    const kind = match[1] as 'a' | 'b' | 'c' | 'r' | 's' | 't'
+    const kind = match[1] as 'a' | 'b' | 'c' | 'h' | 'r' | 's' | 't'
     if (!comment.data.startsWith('/')) {
       const stack = stacks.get(kind) ?? []
       stack.push(comment)
@@ -389,12 +389,37 @@ function scanRanges(host: ParentNode): {
 function collectPostorderElements(root: HydrationRange): Element[] {
   const elements: Element[] = []
   const visit = (element: Element): void => {
-    for (const child of element.children) visit(child)
+    visitChildren(element)
     elements.push(element)
   }
-  for (let node = root[0].nextSibling; node !== null && node !== root[1]; node = node.nextSibling) {
-    if (node instanceof Element) visit(node)
+  const visitChildren = (parent: Node): void => {
+    let opaqueDepth = 0
+    for (const child of parent.childNodes) {
+      if (isMarker(child, `${HYDRATION_PREFIX}:h`)) {
+        opaqueDepth += 1
+        continue
+      }
+      if (isMarker(child, `/${HYDRATION_PREFIX}:h`)) {
+        opaqueDepth -= 1
+        continue
+      }
+      if (opaqueDepth === 0 && child instanceof Element) visit(child)
+    }
+    if (opaqueDepth !== 0) throw mismatch('unbalanced vidact:v1 raw HTML marker range')
   }
+  let opaqueDepth = 0
+  for (let node = root[0].nextSibling; node !== null && node !== root[1]; node = node.nextSibling) {
+    if (isMarker(node, `${HYDRATION_PREFIX}:h`)) {
+      opaqueDepth += 1
+      continue
+    }
+    if (isMarker(node, `/${HYDRATION_PREFIX}:h`)) {
+      opaqueDepth -= 1
+      continue
+    }
+    if (opaqueDepth === 0 && node instanceof Element) visit(node)
+  }
+  if (opaqueDepth !== 0) throw mismatch('unbalanced vidact:v1 raw HTML marker range')
   return elements
 }
 
