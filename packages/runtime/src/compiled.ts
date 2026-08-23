@@ -307,16 +307,18 @@ export function createCompiledRestProp(
   scope: CompiledScope,
   sourceMask: SourceMask,
   input: Record<string, unknown>,
+  excludedNames: readonly string[],
 ): StateSlot<Record<string, unknown>> {
+  const excluded = new Set(excludedNames)
+  const entries = (): Array<[string, unknown]> =>
+    Object.entries(input).filter(([name]) => !excluded.has(name))
   const read = (): Record<string, unknown> =>
     Object.fromEntries(
-      Object.entries(input).map(([name, value]) => [
-        name,
-        isCompiledBinding(value) ? value[1]() : value,
-      ]),
+      entries().map(([name, value]) => [name, isCompiledBinding(value) ? value[1]() : value]),
     )
   const slot = createStateSlot(scope[1], sourceMask, read(), stateWriteGuard(scope))
-  const removers = Object.values(input)
+  const removers = entries()
+    .map(([, value]) => value)
     .filter(isCompiledBinding)
     .map((upstream) => subscribeBinding(upstream, () => slot.replace(read())))
   const owner = scopeOwners.get(scope)

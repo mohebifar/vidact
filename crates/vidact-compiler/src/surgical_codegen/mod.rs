@@ -62,6 +62,7 @@ const KEYED: &str = "__vidactKeyed";
 const ITEM_INDEX: &str = "__vidactItemIndex";
 const ITEM_SCOPE: &str = "__vidactItemScope";
 const NARROW_SOURCE_BITS: u32 = 32;
+const PROPS: &str = "__vidactProps";
 const SOURCE: &str = "__vidactSource";
 const WHEN: &str = "__vidactWhen";
 
@@ -180,6 +181,7 @@ fn transform_program<'a>(
         KEYED,
         ITEM_INDEX,
         ITEM_SCOPE,
+        PROPS,
         SOURCE,
         WHEN,
     ] {
@@ -325,6 +327,7 @@ fn transform_component<'a>(
     let (params, body) = component_function_parts_mut(program, &ir.name, ir.span)
         .ok_or_else(|| unsupported(format!("could not find component function {}", ir.name)))?;
     let prop_bindings = prop_binding_symbols(params, &source_ids, &prop_sources, allocator)?;
+    rewrite_component_props_parameter(&ast, params, &prop_bindings);
     let mut render_start = render_suffix_start(body)?;
     let mut source_symbols = BTreeMap::<SymbolId, SourceId>::new();
     let mut state_symbols = BTreeMap::<SymbolId, StateReference<'a>>::new();
@@ -436,11 +439,44 @@ fn transform_component<'a>(
             .all(|source| source.id.get() < NARROW_SOURCE_BITS),
     ));
     inserted.extend(prop_bindings.iter().map(|prop| {
-        let mut arguments = vec![
-            ident(&ast, SCOPE),
-            mask(&ast, &[prop.source]),
-            ident(&ast, &prop.name),
-        ];
+        let input = if prop.rest {
+            ident(&ast, PROPS)
+        } else {
+            Expression::from(MemberExpression::new_computed_member_expression(
+                SPAN,
+                ident(&ast, PROPS),
+                Expression::new_string_literal(
+                    SPAN,
+                    ast.allocator().alloc_str(
+                        prop.public_name
+                            .as_deref()
+                            .expect("direct prop bindings have a public name"),
+                    ),
+                    None,
+                    &ast,
+                ),
+                false,
+                &ast,
+            ))
+        };
+        let mut arguments = vec![ident(&ast, SCOPE), mask(&ast, &[prop.source]), input];
+        if prop.rest {
+            arguments.push(Expression::new_array_expression(
+                SPAN,
+                oxc_allocator::Vec::from_iter_in(
+                    prop.rest_exclusions.iter().map(|name| {
+                        ArrayExpressionElement::from(Expression::new_string_literal(
+                            SPAN,
+                            ast.allocator().alloc_str(name),
+                            None,
+                            &ast,
+                        ))
+                    }),
+                    &ast,
+                ),
+                &ast,
+            ));
+        }
         if let Some(default) = &prop.default {
             arguments.push(arrow_expression(
                 &ast,
@@ -448,8 +484,9 @@ fn transform_component<'a>(
                 default.clone_in_with_semantic_ids(allocator),
             ));
         }
-        assignment_statement(
+        variable_statement(
             &ast,
+            VariableDeclarationKind::Const,
             &prop.name,
             call_name(
                 &ast,
@@ -599,10 +636,12 @@ struct StateBinding<'a> {
 
 struct PropBinding<'a> {
     name: String,
+    public_name: Option<String>,
     symbol: SymbolId,
     source: SourceId,
     default: Option<Expression<'a>>,
     rest: bool,
+    rest_exclusions: Vec<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -1266,6 +1305,7 @@ fn prop_binding_symbols<'a>(
         let BindingPattern::ObjectPattern(pattern) = &parameter.pattern else {
             continue;
         };
+        let mut rest_exclusions = Vec::with_capacity(pattern.properties.len());
         for property in &pattern.properties {
             if property.computed {
                 return Err(unsupported("computed prop destructuring is unsupported")
@@ -1275,6 +1315,7 @@ fn prop_binding_symbols<'a>(
                 return Err(unsupported("dynamic prop destructuring is unsupported")
                     .with_span(SourceSpan::new(property.span.start, property.span.end)));
             };
+            rest_exclusions.push(prop_name.to_string());
             let (identifier, default) = match &property.value {
                 BindingPattern::BindingIdentifier(identifier) => (identifier.as_ref(), None),
                 BindingPattern::AssignmentPattern(assignment) => {
@@ -1308,10 +1349,12 @@ fn prop_binding_symbols<'a>(
             })?;
             bindings.push(PropBinding {
                 name: identifier.name.to_string(),
+                public_name: Some(prop_name.to_string()),
                 symbol,
                 source,
                 default,
                 rest: false,
+                rest_exclusions: Vec::new(),
             });
         }
         if let Some(rest) = &pattern.rest {
@@ -1337,10 +1380,12 @@ fn prop_binding_symbols<'a>(
                 })?;
                 bindings.push(PropBinding {
                     name: identifier.name.to_string(),
+                    public_name: None,
                     symbol,
                     source,
                     default: None,
                     rest: true,
+                    rest_exclusions,
                 });
             }
         }
@@ -1351,6 +1396,22 @@ fn prop_binding_symbols<'a>(
         ));
     }
     Ok(bindings)
+}
+
+fn rewrite_component_props_parameter<'a>(
+    ast: &AstBuilder<'a>,
+    params: &mut FormalParameters<'a>,
+    prop_bindings: &[PropBinding<'_>],
+) {
+    if prop_bindings.is_empty() {
+        return;
+    }
+    for parameter in &mut params.items {
+        if matches!(parameter.pattern, BindingPattern::ObjectPattern(_)) {
+            parameter.pattern = BindingPattern::new_binding_identifier(SPAN, atom(ast, PROPS), ast);
+            return;
+        }
+    }
 }
 
 fn render_suffix_start(body: &FunctionBody<'_>) -> Result<usize, Diagnostic> {

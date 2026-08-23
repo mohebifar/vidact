@@ -14,10 +14,12 @@ Those are silent React compatibility failures.
 
 ## Decision
 
-A rest binding becomes one child-local object state slot. Its initializer
-resolves each upstream compiled binding, and bridge subscriptions replace the
-object slot whenever any included value changes. Direct destructured props keep
-their existing independent slots and are absent from the native rest object.
+A rest binding becomes one child-local object state slot. Its initializer reads
+the compiler-owned full props object, excludes every directly destructured
+public key, and resolves each remaining upstream compiled binding. Bridge
+subscriptions replace the object slot whenever any included value changes.
+Direct destructured props keep their existing independent slots, addressed by
+public key even when their child-local binding is aliased.
 
 One reactive intrinsic JSX spread lowers to a capability-imported directive.
 The directive owns the currently visible property set, diffs names and values,
@@ -32,9 +34,10 @@ without reactive spreads omit the diff, event, cleanup, and rollback machinery.
 
 ## Compiler and runtime contract
 
-- `createCompiledRestProp` returns the same exact-replacement slot shape used by
-  ordinary compiled props, but resolves an object of static values and compiled
-  bindings on every upstream invalidation.
+- `createCompiledRestProp(scope, mask, props, excludedNames)` returns the same
+  exact-replacement slot shape used by ordinary compiled props, but derives the
+  rest view from the full input object and resolves its static values and
+  compiled bindings on every upstream invalidation.
 - `compiledSpread(binding, overriddenNames)` returns one private enumerable
   directive property. JSX object-spread ordering places it at the source spread
   position.

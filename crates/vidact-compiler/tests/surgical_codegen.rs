@@ -556,7 +556,11 @@ fn compiles_static_component_props_into_local_updater_slots() {
         output.contains("createCompiledProp as __vidactCreateProp"),
         "{output}"
     );
-    assert!(output.contains("name = __vidactCreateProp("), "{output}");
+    assert!(
+        output.contains("const name = __vidactCreateProp("),
+        "{output}"
+    );
+    assert!(output.contains("__vidactProps[\"name\"]"), "{output}");
     assert!(output.contains("() => \"world\""), "{output}");
     assert!(output.contains("() => name.get()"), "{output}");
     assert!(output.contains("__vidactCompiledRoot("), "{output}");
@@ -596,7 +600,7 @@ fn compiles_function_expressions_and_default_exports_by_span() {
                 };
                 export { FunctionExpression };
             "#,
-            "const FunctionExpression = function({ label })",
+            "const FunctionExpression = function(__vidactProps)",
         ),
         (
             "DefaultFunction.tsx",
@@ -605,7 +609,7 @@ fn compiles_function_expressions_and_default_exports_by_span() {
                     return <p>{label}</p>;
                 }
             "#,
-            "export default function DefaultFunction({ label })",
+            "export default function DefaultFunction(__vidactProps)",
         ),
         (
             "AnonymousDefaultFunction.tsx",
@@ -614,7 +618,7 @@ fn compiles_function_expressions_and_default_exports_by_span() {
                     return <p>{label}</p>;
                 }
             "#,
-            "export default function({ label })",
+            "export default function(__vidactProps)",
         ),
         (
             "DefaultArrow.tsx",
@@ -624,14 +628,14 @@ fn compiles_function_expressions_and_default_exports_by_span() {
                 };
                 export default DefaultArrow;
             "#,
-            "const DefaultArrow = ({ label }) =>",
+            "const DefaultArrow = (__vidactProps) =>",
         ),
         (
             "ExpressionArrow.tsx",
             r#"
                 export const ExpressionArrow = ({ label }) => <p>{label}</p>;
             "#,
-            "const ExpressionArrow = ({ label }) => {",
+            "const ExpressionArrow = (__vidactProps) => {",
         ),
     ] {
         let output = compile_surgical_module(ModuleInput { filename, source })
@@ -712,7 +716,9 @@ fn compiles_aliased_props_into_local_updater_slots() {
     .expect("the local alias has a semantic symbol and can own the compiled prop slot");
 
     assert!(
-        output.contains("label = __vidactCreateProp(__vidactScope, 1, label)"),
+        output.contains(
+            "const label = __vidactCreateProp(__vidactScope, 1, __vidactProps[\"name\"])"
+        ),
         "{output}"
     );
     assert!(output.contains("() => label.get()"), "{output}");
@@ -1063,9 +1069,10 @@ fn compiles_rest_props_into_a_resolved_object_slot() {
         "{output}"
     );
     assert!(
-        output.contains("rest = __vidactCreateRestProp("),
+        output.contains("const rest = __vidactCreateRestProp("),
         "{output}"
     );
+    assert!(output.contains("__vidactProps, [\"title\"]"), "{output}");
     assert!(output.contains("() => rest.get()"), "{output}");
 }
 

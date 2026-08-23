@@ -28,13 +28,15 @@ they belong to Vidact's lowering and runtime ABI.
 
 ## Decision
 
-Each direct destructured prop accepted by surgical lowering, including an
-aliased local binding, becomes a child-local state slot with a compiler-assigned
-source mask. A reactive value passed by the parent is a `CompiledBinding`
-descriptor: it contains an evaluator, static read masks, and its originating
-scopes. `createCompiledProp` evaluates that descriptor into the child slot and
-subscribes a generated bridge updater. A static value initializes the same slot
-without an upstream subscription.
+The generated component receives its public props through a compiler-owned
+`__vidactProps` parameter rather than retaining native object destructuring.
+Each accepted destructured prop, including an aliased local binding, becomes a
+child-local state slot initialized from its public key on that object and a
+compiler-assigned source mask. A reactive value passed by the parent is a
+`CompiledBinding` descriptor: it contains an evaluator, static read masks, and
+its originating scopes. `createCompiledProp` evaluates that descriptor into the
+child slot and subscribes a generated bridge updater. A static value initializes
+the same slot without an upstream subscription.
 
 The child owns removal of the bridge subscription. When `h` invokes a compiled
 child, it adopts the child's compiled scope into the currently active parent,
@@ -85,10 +87,18 @@ the accepted contract.
 
 ## Compiler and runtime contract
 
-For a direct object-destructured parameter, the compiler emits:
+For a direct object-destructured source parameter, the compiler rewrites the
+parameter and emits declarations equivalent to:
 
 ```ts
-prop = createCompiledProp(scope, sourceMask, prop, optionalDefaultFactory)
+function Component(__vidactProps) {
+  const local = createCompiledProp(
+    scope,
+    sourceMask,
+    __vidactProps["publicName"],
+    optionalDefaultFactory,
+  )
+}
 ```
 
 Every later semantic reference to that binding becomes `prop.get()`. Reads in
@@ -109,8 +119,10 @@ changed.
 
 The current compiler accepts direct object destructuring and binds each public
 property to its resolved local semantic symbol, so `{ value: displayed }`
-updates `displayed` without reinvoking the component. Rest props resolve through
-one reactive object slot and can feed the deletion-aware intrinsic spread path
+reads `__vidactProps["value"]` and updates `displayed` without reinvoking the
+component. Rest props resolve from the full props object through one reactive
+object slot with the compiler-recorded destructured public names excluded, and
+can feed the deletion-aware intrinsic spread path
 defined in [Deletion-aware reactive spreads and rest props](deletion-aware-reactive-spreads-and-rest-props.md).
 Computed or nested patterns, reactive component spreads, and reactive local
 derivations absent from data-flow facts remain fail-closed.
@@ -139,6 +151,8 @@ back.
 
 - A reactive parent prop invalidates a child-local slot without reinvoking the
   child component.
+- Public prop names and local destructuring aliases remain distinct in generated
+  code, and rest exclusion follows public names rather than local symbols.
 - A retained state setter fails before evaluating its update after the owning
   component has been disposed; the dead slot cannot mutate silently.
 - One parent batch that changes several props runs a dependent child updater
