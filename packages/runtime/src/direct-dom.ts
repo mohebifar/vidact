@@ -5,12 +5,27 @@ import {
   constructCompiledComponent,
   mountCompiledBinding,
   mountCompiledProp,
+  mountCompiledPropTransition,
   queueElementRef,
   registerCompiledCleanup,
   type CompiledBinding,
   type StructuralBinding,
 } from './compiled.ts'
-import { mountRawHtmlProp, validateRawHtmlRelatedProp } from './raw-html.ts'
+import { attachEventProp, isEventProp } from './dom/events.ts'
+import {
+  ensureControlledFormRestoration,
+  isControlledFormProp,
+  restoreControlledFormState,
+} from './dom/forms.ts'
+import {
+  INTERNAL_NAMESPACE_PROP,
+  createComponentProps,
+  createIntrinsicElement,
+  readIntrinsicNamespace,
+  withIntrinsicNamespace,
+} from './dom/namespace.ts'
+import { applyDomProp } from './dom/properties.ts'
+import { mountRawHtmlProp } from './raw-html.ts'
 
 export type DirectChild =
   | Node
@@ -59,27 +74,39 @@ export function h(
     return fragment
   }
   if (typeof type === 'function') {
-    const root = constructCompiledComponent(() => type({ ...props, children }))
+    const namespace = readIntrinsicNamespace(props)
+    const root = constructCompiledComponent(() =>
+      withIntrinsicNamespace(namespace, () => type(createComponentProps(props, children))),
+    )
     adoptCompiledRoot(root)
     return root
   }
 
-  const element = document.createElement(type)
-  applyProps(element, props, children)
+  const namespace = readIntrinsicNamespace(props)
+  const element = createIntrinsicElement(document, type, namespace)
+  const restoreAfterChildren = applyProps(element, props, children)
   appendChildren(element, children)
+  if (restoreAfterChildren) restoreControlledFormState(element)
   return element
 }
 
 function applyProps(
-  element: HTMLElement,
+  element: Element,
   props: DirectProps,
   children: readonly DirectChild[],
-): void {
-  if (props === null) return
+): boolean {
+  if (props === null) return false
   const rawHtml = props.dangerouslySetInnerHTML
+  let restoreAfterChildren = false
+  let hasControlledRestoration = false
   for (const [name, value] of Object.entries(props)) {
-    if (name === 'key' || value === null || value === undefined) continue
+    if (name === 'key' || name === INTERNAL_NAMESPACE_PROP) continue
     if (name === 'dangerouslySetInnerHTML') continue
+    if (!hasControlledRestoration && isControlledFormProp(element, name)) {
+      registerCompiledCleanup(ensureControlledFormRestoration(element))
+      hasControlledRestoration = true
+    }
+    if (name === 'value' && element instanceof HTMLSelectElement) restoreAfterChildren = true
     if (name === 'ref') {
       if (isCompiledBinding(value)) {
         throw new Error('reactive ref identities are not supported')
@@ -92,68 +119,34 @@ function applyProps(
         mountCompiledProp(value, (next) => attachEventProp(element, name, next))
         continue
       }
-      mountCompiledProp(value, (next) => applyProp(element, name, next))
+      if (element instanceof HTMLSelectElement && name === 'multiple') {
+        mountCompiledPropTransition(
+          value,
+          (initial) => applyDomProp(element, name, initial),
+          (next, previous) => ({
+            priority: -1,
+            commit: () => applyDomProp(element, name, next),
+            rollback: () => applyDomProp(element, name, previous),
+            finalize: () => restoreControlledFormState(element),
+          }),
+        )
+        continue
+      }
+      mountCompiledProp(value, (next) => applyDomProp(element, name, next))
       continue
     }
-    if (isEventProp(name) && typeof value === 'function') {
+    if (isEventProp(name)) {
       registerCompiledCleanup(attachEventProp(element, name, value))
       continue
     }
-    applyProp(element, name, value)
+    applyDomProp(element, name, value)
+  }
+  if (rawHtml === null || rawHtml === undefined) return restoreAfterChildren
+  if (!(element instanceof HTMLElement)) {
+    throw new Error('dangerouslySetInnerHTML on SVG and MathML elements is not supported')
   }
   mountRawHtmlProp(element, rawHtml, children)
-}
-
-function attachEventProp(element: HTMLElement, name: string, value: unknown): () => void {
-  if (value === null || value === undefined) return () => {}
-  if (typeof value !== 'function') {
-    throw new TypeError(`event prop ${name} must be a function, null, or undefined`)
-  }
-  const reactEventName = name.slice(2)
-  const capture = reactEventName.endsWith('Capture')
-  const eventNameWithoutPhase = capture
-    ? reactEventName.slice(0, -'Capture'.length)
-    : reactEventName
-  const eventName =
-    eventNameWithoutPhase === 'DoubleClick' ? 'dblclick' : eventNameWithoutPhase.toLowerCase()
-  const listener = value as EventListener
-  element.addEventListener(eventName, listener, capture)
-  return () => element.removeEventListener(eventName, listener, capture)
-}
-
-function applyProp(element: HTMLElement, name: string, value: unknown): void {
-  const property = name === 'className' ? 'className' : name === 'htmlFor' ? 'htmlFor' : name
-  if (value === null || value === undefined) {
-    if (property in element && !name.startsWith('data-') && !name.startsWith('aria-')) {
-      Reflect.set(element, property, property === 'value' ? '' : false)
-      validateRawHtmlRelatedProp(element, name)
-    } else {
-      element.removeAttribute(name)
-    }
-    return
-  }
-  if (name === 'dangerouslySetInnerHTML') {
-    throw new Error('dangerouslySetInnerHTML must be handled as an owned opaque subtree')
-  }
-  if (name === 'style' && typeof value === 'object') {
-    Object.assign(element.style, value)
-    return
-  }
-  if (property in element && !name.startsWith('data-') && !name.startsWith('aria-')) {
-    Reflect.set(element, property, value)
-    validateRawHtmlRelatedProp(element, name)
-  } else if (value === true) {
-    element.setAttribute(name, '')
-  } else if (value === false) {
-    element.removeAttribute(name)
-  } else {
-    element.setAttribute(name, String(value))
-  }
-}
-
-function isEventProp(name: string): boolean {
-  const firstEventCharacter = name.charCodeAt(2)
-  return name.startsWith('on') && firstEventCharacter >= 65 && firstEventCharacter <= 90
+  return restoreAfterChildren
 }
 
 function appendChildren(parent: Node, children: readonly DirectChild[]): void {

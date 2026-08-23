@@ -28,6 +28,9 @@ infrastructure coverage, but it is not an app-corpus entry.
   `continue`, `for`, `for...of`, `for...in`, `while`, and `do...while` preserved
   inside compiler-ordered updater closures, plus keyed `for...of` JSX factories,
   explicit unkeyed index identity, and focus-preserving record moves
+- `apps/dom-semantics`: HTML/SVG/MathML host context, namespaced attributes,
+  deletion-aware styles, ARIA/data booleans, capture listeners, property resets,
+  and controlled text, checkbox, and multiple-select behavior
 
 ## Supporting runtime coverage
 

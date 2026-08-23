@@ -66,6 +66,12 @@
       "spanContains": "dangerouslySetInnerHTML"
     },
     {
+      "path": "rejected/reserved-namespace-prop.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "__vidactNamespace"
+    },
+    {
       "path": "rejected/synchronous-finally.tsx",
       "expectation": "rejected",
       "code": "AnalysisFailed",
@@ -78,10 +84,9 @@
       "spanContains": "throw"
     },
     {
-      "path": "different/native-change-event.tsx",
-      "expectation": "different",
-      "components": ["NativeChangeEvent"],
-      "difference": "onChange currently follows the native change event instead of React input semantics"
+      "path": "accepted/react-change-event.tsx",
+      "expectation": "accepted",
+      "components": ["ReactChangeEvent"]
     }
   ]
 }

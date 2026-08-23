@@ -30,11 +30,31 @@ const captureHandler = (
   />
 )
 const rawHtml = <div dangerouslySetInnerHTML={{ __html: '<b>trusted source</b>' }} />
+const namespacedElements = (
+  <svg viewBox="0 0 10 10">
+    <circle
+      cx="5"
+      cy="5"
+      r="4"
+      onClick={(event) => event.currentTarget.setAttribute('data-clicked', 'yes')}
+    />
+    <foreignObject>
+      <div>HTML island</div>
+    </foreignObject>
+  </svg>
+)
+const mathElement = (
+  <math>
+    <mi>x</mi>
+  </math>
+)
 
 void nativeElements
 void customElement
 void captureHandler
 void rawHtml
+void namespacedElements
+void mathElement
 
 // @ts-expect-error `href` is not a button attribute.
 const invalidAttribute = <button href="/not-a-button-link" />
@@ -48,9 +68,6 @@ const unsupportedFormAction = <form action={() => undefined} />
 // @ts-expect-error Vidact does not hydrate server-rendered markup.
 const unsupportedHydrationFlag = <div suppressHydrationWarning />
 
-// @ts-expect-error SVG needs namespace-aware compiler lowering before it is supported.
-const unsupportedSvg = <svg viewBox="0 0 10 10" />
-
 // @ts-expect-error Vidact JSX produces an owned compiled range, not a React element descriptor.
 const reactElement: ReactElement = <div />
 
@@ -58,5 +75,4 @@ void invalidAttribute
 void invalidRawHtml
 void unsupportedFormAction
 void unsupportedHydrationFlag
-void unsupportedSvg
 void reactElement

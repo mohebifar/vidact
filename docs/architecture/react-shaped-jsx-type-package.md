@@ -2,6 +2,7 @@
 
 - Decision state: Accepted
 - Decided: 2026-08-22
+- Amended by: [Namespace-aware DOM semantics](namespace-aware-dom-semantics.md)
 
 ## Context
 
@@ -42,8 +43,10 @@ adaptations:
   type package does not claim sanitization.
 - React-only hydration warnings and function-valued form actions are omitted;
   the direct DOM runtime neither hydrates nor invokes React server actions.
-- SVG and MathML intrinsic names are omitted until compiler lowering carries
-  namespace context through nested element construction.
+- SVG intrinsic names reuse React's typed surface. MathML uses a bounded
+  Vidact-owned attribute interface because the pinned `@types/react` release
+  does not declare MathML intrinsics. Compiler lowering carries namespace
+  context through nested elements and compiled component boundaries.
 - Hyphenated custom elements retain an open attribute surface until Vidact has
   a custom-element attribute registry.
 
@@ -76,7 +79,8 @@ promise every React behavior associated with that type.
   `CompiledComponentResult`, never `ReactElement`.
 - Renderable component props use `VidactNode`, not `ReactNode`.
 - Event callbacks are typed as the native events the runtime dispatches.
-- Accepted intrinsic element names have native HTML namespace construction.
+- Accepted intrinsic element names have native HTML, SVG, or MathML namespace
+  construction according to their compiler-carried host context.
 - Type-only dependencies do not add React to the browser bundle.
 
 ## Alternatives considered
@@ -108,9 +112,9 @@ catch-all escape hatch.
 
 ## Verification
 
-- `packages/react-types/test/jsx-contract.tsx` covers typed HTML attributes,
-  native event inference, custom elements, invalid native attributes, rejected
-  React-only props and SVG, and compiled-element identity.
+- `packages/react-types/test/jsx-contract.tsx` covers typed HTML, SVG, and
+  MathML attributes, native event inference, custom elements, invalid native
+  attributes, rejected React-only props, and compiled-element identity.
 - `tests/browser/tsconfig.json` and `examples/todomvc/tsconfig.json` prove the
   shared package can type-check real React-shaped Vidact applications.
 - Run `pnpm --filter @vidact/react-types typecheck`,

@@ -88,6 +88,10 @@ diff a tree.
 - Source masks scale beyond one 32-bit word.
 - Batches execute each affected updater once per flush.
 - Compiler-wrapped DOM events batch their synchronous state writes.
+- Compiler-carried host context constructs HTML, SVG, and MathML directly,
+  including component boundaries and SVG `foreignObject` HTML islands.
+- Retained elements receive deletion-aware style, attribute, capture-listener,
+  and controlled-form updates without remounting.
 - Keyed arrays reuse, move, insert, remove, and dispose DOM records.
 - Multi-node array records remain contiguous.
 - Duplicate keys fail before mutating the current DOM ordering.

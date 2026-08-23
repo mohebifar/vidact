@@ -150,8 +150,13 @@ Exit criteria:
 Current bridge baseline: generic compiled bindings own marker-delimited ranges
 and normalize scalar, empty, DOM node, recursively nested array, binding, and
 owned-block values. Keyed/conditional/binding ranges derive their live parent
-from markers after fragment staging. Unkeyed reconciliation, foreign-value
-diagnostics, nested list forms, and the complete DOM surface remain.
+from markers after fragment staging. Compiler-carried host context now covers
+HTML, SVG, MathML, component boundaries, and SVG `foreignObject`; the runtime
+also covers deletion-aware object styles, ARIA/data booleans, capture handlers,
+property removal, React-shaped `onChange` timing, and core controlled text,
+checkbox, and multiple-select behavior in Chromium. Unkeyed reconciliation,
+foreign-value diagnostics, nested list forms, prop-spread deletion, reactive
+refs, cross-browser form edge cases, and the complete DOM surface remain.
 
 Build dynamic content:
 

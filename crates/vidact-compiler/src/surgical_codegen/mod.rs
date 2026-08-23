@@ -31,6 +31,7 @@ use crate::{
 mod ast;
 mod derived;
 mod iterative;
+mod namespace;
 mod raw_html;
 mod render;
 
@@ -505,6 +506,7 @@ fn transform_component<'a>(
     if let Some(diagnostic) = jsx_transformer.diagnostic {
         return Err(diagnostic);
     }
+    namespace::annotate(&ast, body)?;
     MultiStateReferenceRewriter {
         ast: &ast,
         scoping,

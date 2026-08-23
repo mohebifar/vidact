@@ -182,7 +182,7 @@ fn jsx_child_is_non_null(child: &JSXChild<'_>) -> bool {
     }
 }
 
-fn intrinsic_jsx_name<'a>(name: &'a JSXElementName<'a>) -> Option<&'a str> {
+pub(super) fn intrinsic_jsx_name<'a>(name: &'a JSXElementName<'a>) -> Option<&'a str> {
     let JSXElementName::Identifier(identifier) = name else {
         return None;
     };

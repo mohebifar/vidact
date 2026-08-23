@@ -1,4 +1,4 @@
-import type { JSX as ReactJSX, Key, Ref } from 'react'
+import type { CSSProperties, HTMLAttributes, JSX as ReactJSX, Key, Ref } from 'react'
 
 export type VidactNode = import('@vidact/runtime').CompiledRenderValue
 
@@ -28,31 +28,77 @@ type NativeEventAttribute<Property extends string, Target extends EventTarget, R
   | Extract<ReactAttribute, null | undefined>
 
 type HtmlIntrinsicName = Extract<keyof ReactIntrinsicElements, keyof HTMLElementTagNameMap>
+type SvgIntrinsicName = Exclude<
+  Extract<keyof ReactIntrinsicElements, keyof SVGElementTagNameMap>,
+  HtmlIntrinsicName
+>
+type MathIntrinsicName = keyof MathMLElementTagNameMap
+
+type VidactStyle = CSSProperties & {
+  [Name in `--${string}`]?: string | number | null | undefined
+}
 
 type NativeProperty<Property extends PropertyKey, ReactAttribute> = Property extends
   | 'action'
   | 'formAction'
   ? Extract<ReactAttribute, string | undefined>
-  : ReactAttribute
+  : Property extends 'style'
+    ? VidactStyle | Extract<ReactAttribute, null | undefined>
+    : ReactAttribute
 
-type WithVidactProps<Name extends HtmlIntrinsicName> = {
+type WithVidactProps<
+  Name extends keyof ReactIntrinsicElements,
+  Target extends EventTarget,
+> = WithVidactAttributes<ReactIntrinsicElements[Name], Target>
+
+type WithVidactAttributes<Attributes, Target extends EventTarget> = {
   [
-    Property in keyof ReactIntrinsicElements[Name] as Property extends
+    Property in keyof Attributes as Property extends
       | 'children'
       | 'suppressContentEditableWarning'
       | 'suppressHydrationWarning'
       ? never
-      : Property
+      : Property extends 'dangerouslySetInnerHTML'
+        ? Target extends HTMLElement
+          ? Property
+          : never
+        : Property
   ]: Property extends string
     ? Property extends `on${string}`
-      ? NativeEventAttribute<Property, ElementFor<Name>, ReactIntrinsicElements[Name][Property]>
-      : NativeProperty<Property, ReactIntrinsicElements[Name][Property]>
-    : NativeProperty<Property, ReactIntrinsicElements[Name][Property]>
+      ? NativeEventAttribute<Property, Target, Attributes[Property]>
+      : NativeProperty<Property, Attributes[Property]>
+    : NativeProperty<Property, Attributes[Property]>
 } & {
   children?: VidactNode
 }
 
-type ElementFor<Name extends HtmlIntrinsicName> = HTMLElementTagNameMap[Name]
+interface MathMLAttributes extends HTMLAttributes<MathMLElement> {
+  accent?: boolean | 'true' | 'false'
+  accentunder?: boolean | 'true' | 'false'
+  columnalign?: string
+  columnlines?: string
+  columnspacing?: string
+  display?: 'block' | 'inline'
+  displaystyle?: boolean | 'true' | 'false'
+  fence?: boolean | 'true' | 'false'
+  frame?: string
+  linethickness?: string | number
+  mathbackground?: string
+  mathcolor?: string
+  mathsize?: string | number
+  mathvariant?: string
+  maxsize?: string | number
+  minsize?: string | number
+  movablelimits?: boolean | 'true' | 'false'
+  notation?: string
+  rowalign?: string
+  rowlines?: string
+  rowspacing?: string
+  scriptlevel?: string | number
+  separator?: boolean | 'true' | 'false'
+  stretchy?: boolean | 'true' | 'false'
+  symmetric?: boolean | 'true' | 'false'
+}
 
 interface CustomElementAttributes extends Record<string, unknown> {
   children?: VidactNode
@@ -75,7 +121,14 @@ export namespace JSX {
   interface IntrinsicAttributes extends ReactJSX.IntrinsicAttributes {}
 
   type IntrinsicElements = {
-    [Name in HtmlIntrinsicName]: WithVidactProps<Name>
+    [Name in HtmlIntrinsicName]: WithVidactProps<Name, HTMLElementTagNameMap[Name]>
+  } & {
+    [Name in SvgIntrinsicName]: WithVidactProps<Name, SVGElementTagNameMap[Name]>
+  } & {
+    [Name in MathIntrinsicName]: WithVidactAttributes<
+      MathMLAttributes,
+      MathMLElementTagNameMap[Name]
+    >
   } & {
     [Name in `${string}-${string}`]: CustomElementAttributes
   }

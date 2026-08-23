@@ -1,4 +1,11 @@
-import { Fragment, h } from '@vidact/runtime'
+import {
+  binding,
+  createCompiledScope,
+  createCompiledState,
+  Fragment,
+  h,
+  source,
+} from '@vidact/runtime'
 import { jsxs } from '@vidact/runtime/jsx-runtime'
 import { describe, expect, it } from 'vitest'
 
@@ -66,6 +73,32 @@ describe('direct DOM construction', () => {
 
     expect(parent.contains(child)).toBe(true)
     expect(calls).toEqual(['parent', 'child'])
+  })
+
+  it('rejects invalid static event props at the event boundary', () => {
+    expect(() => h('button', { onClick: 'not a handler' })).toThrow(/event prop onClick/i)
+  })
+
+  it('rejects scalar controlled values for multiple selects', () => {
+    expect(() =>
+      h('select', { multiple: true, value: 'a' }, h('option', { value: 'a' }, 'A')),
+    ).toThrow(/select multiple.*array/i)
+  })
+
+  it('rolls back a reactive select mode when its controlled value is invalid', () => {
+    const scope = createCompiledScope()
+    const multipleSource = source(0)
+    const multiple = createCompiledState(scope, multipleSource, false)
+    const select = h(
+      'select',
+      { multiple: binding(scope, multipleSource, multiple.get), value: 'a' },
+      h('option', { value: 'a' }, 'A'),
+    )
+
+    expect(() => multiple.set(true)).toThrow(/select multiple.*array/i)
+    expect(select.multiple).toBe(false)
+    expect(select.value).toBe('a')
+    scope.dispose()
   })
 
   it('constructs root fragments without a compatibility mount', () => {

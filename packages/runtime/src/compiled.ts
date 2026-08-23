@@ -1,3 +1,8 @@
+import {
+  currentIntrinsicNamespace,
+  withIntrinsicNamespace,
+  type IntrinsicNamespace,
+} from './dom/namespace.ts'
 import { createIndexedList } from './indexed-list.ts'
 import { createKeyedList } from './keyed-list.ts'
 import {
@@ -113,10 +118,12 @@ let drainingFlushes = false
 let activePublication: PublicationOperation[] | null = null
 const scheduledFlushes = new Set<() => void>()
 const scopeOwners = new WeakMap<CompiledScope, Owner>()
+const scopeNamespaces = new WeakMap<CompiledScope, IntrinsicNamespace>()
 const componentRanges = new WeakMap<CompiledComponentResult, ComponentRange>()
 const pendingRefs = new WeakMap<Element, PendingRef>()
 
 export function createCompiledScope(): CompiledScope {
+  const namespace = currentIntrinsicNamespace()
   const owner: Owner = { disposed: false, cleanups: new Set() }
   const updaters: Array<CompiledUpdater | undefined> = []
   const freeUpdaterIndexes: number[] = []
@@ -164,7 +171,11 @@ export function createCompiledScope(): CompiledScope {
   const scope: CompiledScope = {
     add(updater) {
       if (owner.disposed) throw new Error('cannot add an updater to a disposed scope')
-      const entry: CompiledUpdater = { ...updater, active: true }
+      const entry: CompiledUpdater = {
+        ...updater,
+        run: (active) => withScopeNamespace(scope, () => updater.run(active)),
+        active: true,
+      }
       const reusableIndex = freeUpdaterIndexes.pop()
       const index = reusableIndex ?? updaters.length
       updaters[index] = entry
@@ -211,6 +222,7 @@ export function createCompiledScope(): CompiledScope {
     },
   }
   scopeOwners.set(scope, owner)
+  scopeNamespaces.set(scope, namespace)
   activeScopeCollector?.add(scope)
   return scope
 }
@@ -274,7 +286,7 @@ export function when(
   additionalScope?: CompiledScope,
   additionalReads?: SourceMask,
 ): StructuralBinding {
-  return structural((parent, before) => {
+  return structural(scope, (parent, before) => {
     const start = document.createComment('vidact:when')
     const end = document.createComment('/vidact:when')
     parent.insertBefore(start, before)
@@ -343,7 +355,7 @@ export function choose(
   additionalScope?: CompiledScope,
   additionalReads?: SourceMask,
 ): StructuralBinding {
-  return structural((parent, before) => {
+  return structural(scope, (parent, before) => {
     const start = document.createComment('vidact:choice')
     const end = document.createComment('/vidact:choice')
     parent.insertBefore(start, before)
@@ -414,7 +426,7 @@ export function dispatch(
   additionalScope?: CompiledScope,
   additionalReads?: SourceMask,
 ): StructuralBinding {
-  return structural((parent, before) => {
+  return structural(scope, (parent, before) => {
     const start = document.createComment('vidact:dispatch')
     const end = document.createComment('/vidact:dispatch')
     parent.insertBefore(start, before)
@@ -491,7 +503,7 @@ export function keyed<T, K>(
   key: (value: T, index: number) => K,
   render: (value: StateSlot<T>, index: StateSlot<number>, itemScope: CompiledScope) => RenderValue,
 ): StructuralBinding {
-  return structural((parent, before) => {
+  return structural(scope, (parent, before) => {
     const itemSource = source(0)
     const indexSource = source(1)
     const list = createKeyedList(
@@ -551,7 +563,7 @@ export function indexed<T>(
   values: () => readonly T[],
   render: (value: StateSlot<T>, index: StateSlot<number>, itemScope: CompiledScope) => RenderValue,
 ): StructuralBinding {
-  return structural((parent, before) => {
+  return structural(scope, (parent, before) => {
     const itemSource = source(0)
     const indexSource = source(1)
     const list = createIndexedList<T>(
@@ -624,7 +636,7 @@ export function compiledRoot(
   })
 
   try {
-    withOwner(owner, () => insertValue(fragment, render(), end))
+    withOwner(owner, () => withScopeNamespace(scope, () => insertValue(fragment, render(), end)))
   } catch (error) {
     try {
       scope.dispose()
@@ -819,14 +831,14 @@ export function mountCompiledPropTransition<T>(
   onCleanup(removeUpdater)
 }
 
-function structural(mount: StructuralBinding['mount']): StructuralBinding {
+function structural(scope: CompiledScope, mount: StructuralBinding['mount']): StructuralBinding {
   let mounted = false
   return {
     [STRUCTURAL]: true,
     mount(parent, before) {
       if (mounted) throw new Error('compiled block is already mounted')
       mounted = true
-      mount(parent, before)
+      withScopeNamespace(scope, () => mount(parent, before))
     },
   }
 }
@@ -835,12 +847,17 @@ function subscribe(
   dependency: CompiledDependency & { readonly additional: CompiledDependency | undefined },
   run: () => void,
 ): () => void {
+  const runInOwnerNamespace = (): void => withScopeNamespace(dependency.scope, run)
   const removers = [dependency, dependency.additional]
     .filter((item): item is CompiledDependency => item !== undefined && !isEmptySources(item.reads))
-    .map((item) => item.scope.add({ reads: item.reads, run }))
+    .map((item) => item.scope.add({ reads: item.reads, run: runInOwnerNamespace }))
   return () => {
     for (const remove of removers) remove()
   }
+}
+
+function withScopeNamespace<Result>(scope: CompiledScope, operation: () => Result): Result {
+  return withIntrinsicNamespace(scopeNamespaces.get(scope), operation)
 }
 
 function createOwner(): Owner {
@@ -1196,7 +1213,12 @@ function drainFlushes(): void {
 function stagePublication(operation: PublicationOperation): void {
   if (activePublication === null) {
     operation.commit()
-    operation.finalize?.()
+    try {
+      operation.finalize?.()
+    } catch (error) {
+      operation.rollback()
+      throw error
+    }
     return
   }
   activePublication.push(operation)
@@ -1229,7 +1251,18 @@ function commitPublication(operations: readonly PublicationOperation[]): void {
     }
     throw error
   }
-  for (const operation of ordered) operation.finalize?.()
+  try {
+    for (const operation of ordered) operation.finalize?.()
+  } catch (error) {
+    for (let index = applied.length - 1; index >= 0; index -= 1) {
+      try {
+        applied[index]?.rollback()
+      } catch {
+        // Preserve the finalization error while attempting every inverse.
+      }
+    }
+    throw error
+  }
 }
 
 function abortPublication(operations: readonly PublicationOperation[]): void {
