@@ -2,7 +2,8 @@ use std::{collections::BTreeSet, fs, path::Path};
 
 use serde_json::Value;
 use vidact_compiler::{
-    Diagnostic, SourceSpan, analysis::ModuleInput, compile_surgical_module_with_ir,
+    CompilationOptions, CompilerFeature, Diagnostic, SourceSpan, analysis::ModuleInput,
+    compile_surgical_module_with_ir_and_options,
 };
 
 #[test]
@@ -46,13 +47,23 @@ fn verify_fixture(root: &Path, fixture: &Value) {
         filename: relative,
         source: &source,
     };
+    let options = fixture["features"].as_array().into_iter().flatten().fold(
+        CompilationOptions::default(),
+        |options, feature| {
+            let feature = match feature.as_str().expect("feature name") {
+                "unsafe-html" => CompilerFeature::UnsafeHtml,
+                feature => panic!("unknown compatibility fixture feature {feature}"),
+            };
+            options.with_feature(feature)
+        },
+    );
 
     match fixture["expectation"]
         .as_str()
         .expect("fixture expectation")
     {
         "accepted" | "different" => {
-            let compilation = compile_surgical_module_with_ir(input)
+            let compilation = compile_surgical_module_with_ir_and_options(input, &options)
                 .unwrap_or_else(|diagnostics| panic!("{relative} must compile: {diagnostics:#?}"));
             let actual = compilation
                 .components
@@ -76,7 +87,7 @@ fn verify_fixture(root: &Path, fixture: &Value) {
             }
         }
         "rejected" => {
-            let diagnostics = compile_surgical_module_with_ir(input)
+            let diagnostics = compile_surgical_module_with_ir_and_options(input, &options)
                 .expect_err("rejected compatibility fixture must fail");
             verify_rejection(relative, &source, fixture, &diagnostics);
         }

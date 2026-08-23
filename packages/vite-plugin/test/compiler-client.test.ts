@@ -83,4 +83,24 @@ describe('vidact compiler client', () => {
       analyzeWithCompiler('export function Broken( {', 'broken.tsx', manifestPath),
     ).rejects.toThrow(/AnalysisFailed/)
   })
+
+  it('requires the unsafe-html feature at the exact JSX attribute', async () => {
+    const source = `
+      export function Raw() {
+        return <section dangerouslySetInnerHTML={{ __html: '<b>raw</b>' }} />
+      }
+    `
+
+    await expect(compileWithCompiler(source, 'raw.tsx', manifestPath)).rejects.toThrow(
+      /raw\.tsx:3:\d+.*unsafe-html/,
+    )
+    await expect(
+      compileWithCompiler(source, 'raw.tsx', manifestPath, {
+        target: 'client',
+        features: ['unsafe-html'],
+      }),
+    ).resolves.toMatchObject({
+      configuration: { target: 'client', features: ['unsafe-html'] },
+    })
+  })
 })

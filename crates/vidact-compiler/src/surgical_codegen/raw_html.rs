@@ -86,6 +86,15 @@ pub(super) fn validate(element: &JSXElement<'_>) -> Option<Diagnostic> {
     None
 }
 
+pub(super) fn attribute_span(element: &JSXElement<'_>) -> Option<SourceSpan> {
+    let EffectiveAttribute::Known(attribute) =
+        effective_attribute(&element.opening_element, "dangerouslySetInnerHTML")
+    else {
+        return None;
+    };
+    Some(SourceSpan::new(attribute.span.start, attribute.span.end))
+}
+
 fn raw_html_attribute_proof(attribute: &JSXAttribute<'_>) -> RawHtmlProof {
     let Some(value) = &attribute.value else {
         return RawHtmlProof::InvalidShape;

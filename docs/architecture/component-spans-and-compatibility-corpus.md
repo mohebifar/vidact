@@ -2,6 +2,7 @@
 
 - Decision state: Accepted
 - Decided: 2026-08-22
+- Amended by: [Versioned compiler targets and feature gates](versioned-compiler-targets-and-feature-gates.md)
 
 ## Context
 
@@ -93,9 +94,10 @@ Ordinary parent/child modules can now compile without splitting components into
 files, and diagnostics can point back to original TSX. The Oxc patch now
 includes an owned control-flow snapshot as well as the function span.
 Arrow/default component lowering, DOM-range lowering for multi-return control
-flow, precise spans for features other than returns, and composed original-TSX
-source maps remain follow-up work. Adding a compatibility fixture requires an
-explicit contract classification, which is intentional maintenance overhead.
+flow, and precise spans for features other than returns remain follow-up work.
+Original-TSX source maps were completed by the versioned compiler protocol.
+Adding a compatibility fixture requires an explicit contract classification,
+which is intentional maintenance overhead.
 
 ## Verification
 

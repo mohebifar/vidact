@@ -29,6 +29,7 @@
     {
       "path": "accepted/raw-html.tsx",
       "expectation": "accepted",
+      "features": ["unsafe-html"],
       "components": ["RawHtml"]
     },
     {
@@ -61,11 +62,19 @@
     {
       "path": "rejected/raw-html-children.tsx",
       "expectation": "rejected",
+      "features": ["unsafe-html"],
       "code": "UnsupportedSyntax",
       "spanContains": "dangerouslySetInnerHTML"
     },
     {
       "path": "rejected/raw-html-executable-script.tsx",
+      "expectation": "rejected",
+      "features": ["unsafe-html"],
+      "code": "UnsupportedSyntax",
+      "spanContains": "dangerouslySetInnerHTML"
+    },
+    {
+      "path": "rejected/raw-html-disabled.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",
       "spanContains": "dangerouslySetInnerHTML"

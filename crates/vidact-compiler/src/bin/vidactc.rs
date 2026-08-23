@@ -1,10 +1,11 @@
-use std::{env, io::Read, process::ExitCode};
+use std::{env, io::Read, process::ExitCode, str::FromStr};
 
 use serde_json::{Value, json};
 use vidact_compiler::{
-    ComponentIr, Diagnostic, OxcReactAnalysisAdapter,
+    CompilationOptions, CompilerFeature, CompilerTarget, ComponentIr, Diagnostic,
+    OxcReactAnalysisAdapter,
     analysis::{ModuleInput, ReactAnalysisAdapter, SourceKind, UpdaterKind},
-    compile_surgical_module_with_ir, lower_component,
+    compile_surgical_module_with_ir_and_options, lower_component,
 };
 
 fn main() -> ExitCode {
@@ -39,27 +40,13 @@ fn run() -> Result<Value, String> {
                 target = arguments
                     .next()
                     .ok_or_else(|| "missing value for --target".to_string())?;
-                if !matches!(target.as_str(), "client" | "hydrate" | "server") {
-                    return Err(format!("unsupported Vidact target {target}"));
-                }
+                CompilerTarget::from_str(&target)?;
             }
             "--feature" => {
                 let feature = arguments
                     .next()
                     .ok_or_else(|| "missing value for --feature".to_string())?;
-                if !matches!(
-                    feature.as_str(),
-                    "unsafe-html"
-                        | "async"
-                        | "concurrent"
-                        | "actions"
-                        | "css-insertion"
-                        | "retained-ui"
-                        | "profiling"
-                        | "framework"
-                ) {
-                    return Err(format!("unsupported Vidact feature {feature}"));
-                }
+                CompilerFeature::from_str(&feature)?;
                 if !features.contains(&feature) {
                     features.push(feature);
                 }
@@ -77,8 +64,14 @@ fn run() -> Result<Value, String> {
         filename: &filename,
         source: &source,
     };
+    let options = features.iter().try_fold(
+        CompilationOptions::new(CompilerTarget::from_str(&target)?),
+        |options, feature| {
+            Ok::<_, String>(options.with_feature(CompilerFeature::from_str(feature)?))
+        },
+    )?;
     if command.as_deref() == Some("compile") {
-        let compilation = compile_surgical_module_with_ir(input)
+        let compilation = compile_surgical_module_with_ir_and_options(input, &options)
             .map_err(|diagnostics| format_diagnostics(&filename, &source, &diagnostics))?;
         return Ok(json!({
             "protocol": "vidact-compile-v2",

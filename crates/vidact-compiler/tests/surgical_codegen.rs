@@ -1,4 +1,14 @@
-use vidact_compiler::{DiagnosticCode, analysis::ModuleInput, compile_surgical_module};
+use vidact_compiler::{
+    CompilationOptions, CompilerFeature, Diagnostic, DiagnosticCode, analysis::ModuleInput,
+    compile_surgical_module, compile_surgical_module_with_options,
+};
+
+fn compile_unsafe_html(input: ModuleInput<'_>) -> Result<String, Vec<Diagnostic>> {
+    compile_surgical_module_with_options(
+        input,
+        &CompilationOptions::default().with_feature(CompilerFeature::UnsafeHtml),
+    )
+}
 
 #[test]
 fn turns_todomvc_into_one_time_construction_and_static_bindings() {
@@ -251,7 +261,7 @@ fn rejects_reactive_structures_that_do_not_have_surgical_range_semantics() {
 
 #[test]
 fn compiles_static_and_reactive_raw_html_bindings() {
-    let output = compile_surgical_module(ModuleInput {
+    let output = compile_unsafe_html(ModuleInput {
         filename: "RawHtml.tsx",
         source: r#"
             import { useState } from 'react';
@@ -303,7 +313,7 @@ fn rejects_statically_provable_invalid_raw_html_contracts() {
             "executable <script>",
         ),
     ] {
-        let diagnostics = compile_surgical_module(ModuleInput {
+        let diagnostics = compile_unsafe_html(ModuleInput {
             filename: "InvalidRawHtml.tsx",
             source,
         })
@@ -322,7 +332,7 @@ fn rejects_statically_provable_invalid_raw_html_contracts() {
 
 #[test]
 fn defers_nullable_raw_html_contracts_to_runtime_without_false_positives() {
-    let output = compile_surgical_module(ModuleInput {
+    let output = compile_unsafe_html(ModuleInput {
         filename: "NullableRawHtml.tsx",
         source: r#"
             export function NullableRawHtml({ raw }): Node {
@@ -334,7 +344,7 @@ fn defers_nullable_raw_html_contracts_to_runtime_without_false_positives() {
 
     assert!(output.contains("dangerouslySetInnerHTML"), "{output}");
 
-    compile_surgical_module(ModuleInput {
+    compile_unsafe_html(ModuleInput {
         filename: "StaticNullRawHtml.tsx",
         source: r#"
             export function StaticNullRawHtml(): Node {
@@ -344,7 +354,7 @@ fn defers_nullable_raw_html_contracts_to_runtime_without_false_positives() {
     })
     .expect("React permits children when the statically known __html payload is nullish");
 
-    compile_surgical_module(ModuleInput {
+    compile_unsafe_html(ModuleInput {
         filename: "TypedRawHtml.tsx",
         source: r#"
             export function TypedRawHtml({ raw }): Node {
@@ -357,7 +367,7 @@ fn defers_nullable_raw_html_contracts_to_runtime_without_false_positives() {
     })
     .expect("TypeScript-only wrappers must not create raw HTML false positives");
 
-    compile_surgical_module(ModuleInput {
+    compile_unsafe_html(ModuleInput {
         filename: "ConservativeRawHtml.tsx",
         source: r#"
             function Wrapper({ dangerouslySetInnerHTML }): Node {

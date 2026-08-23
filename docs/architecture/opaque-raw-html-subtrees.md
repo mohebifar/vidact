@@ -2,6 +2,7 @@
 
 - Decision state: Accepted
 - Decided: 2026-08-22
+- Superseded in part by: [Versioned compiler targets and feature gates](versioned-compiler-targets-and-feature-gates.md)
 
 ## Context
 
@@ -17,6 +18,9 @@ is also an injection sink whose behavior changes under Trusted Types CSP.
 opaque-subtree boundary. Markup inside that boundary is browser-parsed DOM, not
 Vidact-owned JSX: the compiler creates no bindings, refs, component scopes, or
 list records inside it.
+
+This support now requires the `unsafe-html` compiler feature. The remainder of
+this decision defines the behavior after that feature is enabled.
 
 The source contract follows React where the browser runtime can preserve the
 same semantics:

@@ -24,6 +24,7 @@ use crate::{
     analysis::{ModuleInput, SourceId, SourceKind},
     ast_utils::{is_event_attribute, is_supported_react_event_attribute},
     ir::{ComponentIr, lower_component},
+    options::{CompilationOptions, CompilerFeature},
     oxc_react::analyze_program,
     react_bindings::ReactBindings,
 };
@@ -64,11 +65,25 @@ pub struct SurgicalCompilation {
 }
 
 pub fn compile_surgical_module(input: ModuleInput<'_>) -> Result<String, Vec<Diagnostic>> {
-    compile_surgical_module_with_ir(input).map(|compilation| compilation.code)
+    compile_surgical_module_with_options(input, &CompilationOptions::default())
+}
+
+pub fn compile_surgical_module_with_options(
+    input: ModuleInput<'_>,
+    options: &CompilationOptions,
+) -> Result<String, Vec<Diagnostic>> {
+    compile_surgical_module_with_ir_and_options(input, options).map(|compilation| compilation.code)
 }
 
 pub fn compile_surgical_module_with_ir(
     input: ModuleInput<'_>,
+) -> Result<SurgicalCompilation, Vec<Diagnostic>> {
+    compile_surgical_module_with_ir_and_options(input, &CompilationOptions::default())
+}
+
+pub fn compile_surgical_module_with_ir_and_options(
+    input: ModuleInput<'_>,
+    options: &CompilationOptions,
 ) -> Result<SurgicalCompilation, Vec<Diagnostic>> {
     let allocator = Allocator::default();
     let source_type =
@@ -100,8 +115,14 @@ pub fn compile_surgical_module_with_ir(
         return Err(vec![unsupported("surgical codegen found no component")]);
     }
     let scoping = semantic.semantic.into_scoping();
-    transform_program(&allocator, &scoping, &components, &mut parsed.program)
-        .map_err(|diagnostic| vec![diagnostic])?;
+    transform_program(
+        &allocator,
+        &scoping,
+        &components,
+        options,
+        &mut parsed.program,
+    )
+    .map_err(|diagnostic| vec![diagnostic])?;
     let generated = Codegen::new()
         .with_options(CodegenOptions {
             source_map_path: Some(Path::new(input.filename).to_path_buf()),
@@ -123,6 +144,7 @@ fn transform_program<'a>(
     allocator: &'a Allocator,
     scoping: &Scoping,
     components: &[ComponentIr],
+    options: &CompilationOptions,
     program: &mut Program<'a>,
 ) -> Result<(), Diagnostic> {
     let ast = AstBuilder::new(allocator);
@@ -155,7 +177,7 @@ fn transform_program<'a>(
         }
     }
     for component in components {
-        transform_component(allocator, scoping, component, program)
+        transform_component(allocator, scoping, component, options, program)
             .map_err(|diagnostic| diagnostic.with_fallback_span(component.span))?;
     }
     remove_lowered_react_state_imports(scoping, program)?;
@@ -267,6 +289,7 @@ fn transform_component<'a>(
     allocator: &'a Allocator,
     scoping: &Scoping,
     ir: &ComponentIr,
+    options: &CompilationOptions,
     program: &mut Program<'a>,
 ) -> Result<(), Diagnostic> {
     let ast = AstBuilder::new(allocator);
@@ -520,6 +543,7 @@ fn transform_component<'a>(
         scoping,
         source_symbols: &source_symbols,
         item_source_symbols: &item_source_symbols,
+        options,
         diagnostic: None,
     };
     jsx_transformer.visit_function_body(body);
@@ -672,11 +696,21 @@ struct JsxBindingTransformer<'a, 'b, 's> {
     scoping: &'s Scoping,
     source_symbols: &'s BTreeMap<SymbolId, SourceId>,
     item_source_symbols: &'s BTreeMap<SymbolId, SourceId>,
+    options: &'s CompilationOptions,
     diagnostic: Option<Diagnostic>,
 }
 
 impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
     fn visit_jsx_element(&mut self, element: &mut JSXElement<'a>) {
+        if !self.options.feature_enabled(CompilerFeature::UnsafeHtml)
+            && let Some(span) = raw_html::attribute_span(element)
+        {
+            self.diagnostic = Some(
+                unsupported("dangerouslySetInnerHTML requires the `unsafe-html` compiler feature")
+                    .with_span(span),
+            );
+            return;
+        }
         if let Some(diagnostic) = raw_html::validate(element) {
             self.diagnostic = Some(diagnostic);
             return;
