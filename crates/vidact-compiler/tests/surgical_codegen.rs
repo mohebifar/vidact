@@ -1053,6 +1053,34 @@ fn compiles_reactive_jsx_spreads_with_deletion_aware_property_ownership() {
 }
 
 #[test]
+fn compiles_reactive_component_spreads_into_mutable_prop_stores() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "ComponentSpread.tsx",
+        source: r#"
+            import { useState } from 'react';
+            function Child({ label = 'missing', ...rest }): Node {
+                return <output {...rest}>{label}</output>;
+            }
+            export function ComponentSpread(): Node {
+                const [props, setProps] = useState({ label: 'first', title: 'present' });
+                return <Child {...props} title="explicit" />;
+            }
+        "#,
+    })
+    .expect("reactive component spreads should lower to the mutable prop-store descriptor");
+
+    assert!(
+        output.contains("compiledComponentSpread as __vidactComponentSpread"),
+        "{output}"
+    );
+    assert!(
+        output.contains("__vidactComponentSpread(__vidactBinding("),
+        "{output}"
+    );
+    assert!(output.contains("[\"title\"]"), "{output}");
+}
+
+#[test]
 fn compiles_rest_props_into_a_resolved_object_slot() {
     let output = compile_surgical_module(ModuleInput {
         filename: "RestProps.tsx",

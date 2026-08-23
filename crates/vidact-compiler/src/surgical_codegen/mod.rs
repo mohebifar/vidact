@@ -45,6 +45,7 @@ const SCOPE: &str = "__vidactScope";
 const BINDING: &str = "__vidactBinding";
 const COMBINE_SOURCES: &str = "__vidactCombineSources";
 const COMPILED_EVENT: &str = "__vidactEvent";
+const COMPILED_COMPONENT_SPREAD: &str = "__vidactComponentSpread";
 const COMPILED_IMPERATIVE_HANDLE: &str = "__vidactImperativeHandle";
 const COMPILED_SPREAD: &str = "__vidactSpread";
 const COMPILED_ROOT: &str = "__vidactCompiledRoot";
@@ -165,6 +166,7 @@ fn transform_program<'a>(
         BINDING,
         COMBINE_SOURCES,
         COMPILED_EVENT,
+        COMPILED_COMPONENT_SPREAD,
         COMPILED_IMPERATIVE_HANDLE,
         COMPILED_SPREAD,
         COMPILED_ROOT,
@@ -803,8 +805,14 @@ struct JsxBindingTransformer<'a, 'b, 's> {
     item_source_symbols: &'s BTreeMap<SymbolId, SourceId>,
     options: &'s CompilationOptions,
     react: &'s ReactBindings<'s>,
-    reactive_spread_overrides: BTreeMap<u32, Vec<String>>,
+    reactive_spread_overrides: BTreeMap<u32, (ReactiveSpreadKind, Vec<String>)>,
     diagnostic: Option<Diagnostic>,
+}
+
+#[derive(Clone, Copy)]
+enum ReactiveSpreadKind {
+    Component,
+    Intrinsic,
 }
 
 impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
@@ -968,18 +976,9 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             })
             .collect::<Vec<_>>();
         if !reactive_spreads.is_empty() {
-            if !intrinsic {
-                self.diagnostic = Some(
-                    unsupported(
-                        "reactive component prop spreads require the mutable prop-store ABI",
-                    )
-                    .with_span(SourceSpan::new(element.span.start, element.span.end)),
-                );
-                return;
-            }
             if reactive_spreads.len() != 1 {
                 self.diagnostic = Some(
-                    unsupported("an intrinsic currently accepts one reactive JSX spread")
+                    unsupported("a JSX element currently accepts one reactive spread")
                         .with_span(SourceSpan::new(element.span.start, element.span.end)),
                 );
                 return;
@@ -997,7 +996,7 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             if has_preceding_prop || has_following_spread {
                 self.diagnostic = Some(
                     unsupported(
-                        "reactive JSX spreads must precede explicit intrinsic props and cannot be combined with another spread",
+                        "reactive JSX spreads must precede explicit props and cannot be combined with another spread",
                     )
                     .with_span(SourceSpan::new(element.span.start, element.span.end)),
                 );
@@ -1018,8 +1017,17 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             if !element.children.is_empty() {
                 overrides.push("children".to_string());
             }
-            self.reactive_spread_overrides
-                .insert(spread_start, overrides);
+            self.reactive_spread_overrides.insert(
+                spread_start,
+                (
+                    if intrinsic {
+                        ReactiveSpreadKind::Intrinsic
+                    } else {
+                        ReactiveSpreadKind::Component
+                    },
+                    overrides,
+                ),
+            );
         }
         walk_jsx_element(self, element);
     }
@@ -1078,7 +1086,7 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             walk_jsx_spread_attribute(self, attribute);
             return;
         }
-        let Some(overrides) = self
+        let Some((kind, overrides)) = self
             .reactive_spread_overrides
             .get(&attribute.span.start)
             .cloned()
@@ -1112,7 +1120,10 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
         );
         attribute.argument = call_name(
             self.ast,
-            COMPILED_SPREAD,
+            match kind {
+                ReactiveSpreadKind::Component => COMPILED_COMPONENT_SPREAD,
+                ReactiveSpreadKind::Intrinsic => COMPILED_SPREAD,
+            },
             [call_name(self.ast, BINDING, binding_arguments), overrides],
         );
     }
@@ -1903,6 +1914,7 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>, program: &Program<'a>) -> Statement<
     let names = [
         ("binding", BINDING),
         ("combineSources", COMBINE_SOURCES),
+        ("compiledComponentSpread", COMPILED_COMPONENT_SPREAD),
         ("compiledEvent", COMPILED_EVENT),
         ("compiledImperativeHandle", COMPILED_IMPERATIVE_HANDLE),
         ("compiledSpread", COMPILED_SPREAD),

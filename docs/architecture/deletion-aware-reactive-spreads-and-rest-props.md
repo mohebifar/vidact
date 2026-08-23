@@ -32,6 +32,14 @@ The substantial spread implementation lives in its own runtime module. Direct
 DOM construction retains only a small reserved-directive dispatch, so chunks
 without reactive spreads omit the diff, event, cleanup, and rollback machinery.
 
+A reactive component spread lowers to a separate capability-imported directive.
+Component construction consumes the directive and supplies the child with a
+proxy over explicit props plus stable per-key `CompiledBinding` descriptors.
+The proxy reports the spread's current enumerable keys, while
+`createCompiledRestProp` subscribes to the whole spread binding so newly added
+and deleted keys refresh the child-local rest object. Explicit properties after
+the spread remain ordinary own properties and take precedence.
+
 ## Compiler and runtime contract
 
 - `createCompiledRestProp(scope, mask, props, excludedNames)` returns the same
@@ -41,15 +49,20 @@ without reactive spreads omit the diff, event, cleanup, and rollback machinery.
 - `compiledSpread(binding, overriddenNames)` returns one private enumerable
   directive property. JSX object-spread ordering places it at the source spread
   position.
+- `compiledComponentSpread(binding, overriddenNames)` returns an internal symbol
+  directive consumed only by component construction. Its proxy synthesizes one
+  stable binding per requested public key and exposes the original whole-object
+  binding to rest-slot construction.
 - The compiler currently requires the reactive spread to precede explicit
-  intrinsic properties and rejects another spread on the same intrinsic. This
-  avoids silently incorrect fallback-layer behavior until the directive owns a
-  complete ordered prop-layer stack.
+  properties and rejects another spread on the same intrinsic or component.
+  This avoids silently incorrect fallback-layer behavior until the directive
+  owns a complete ordered prop-layer stack.
 - `children`, `key`, `ref`, `dangerouslySetInnerHTML`, and private namespace
   metadata require dedicated ownership paths and fail if supplied dynamically
   by the spread. Explicit children are recorded as an override.
-- Reactive component spreads remain fail-closed until the component prop store
-  can add and delete public keys after construction.
+- Component-spread `key` and spread-owned `children` still require dedicated
+  identity and child-ownership paths; those shapes are not part of the accepted
+  component-spread contract.
 
 ## Invariants
 
@@ -61,6 +74,8 @@ without reactive spreads omit the diff, event, cleanup, and rollback machinery.
   spread publication and leaves the previous spread object current.
 - A rest object exposes resolved values, not `CompiledBinding` descriptors, and
   its consumer component does not rerun.
+- A component spread can add or delete direct and rest keys without reinvoking
+  the child, and deleting a defaulted direct prop reactivates its default.
 - Applications that do not compile a reactive spread do not retain the spread
   capability module.
 
@@ -79,19 +94,22 @@ without reactive spreads omit the diff, event, cleanup, and rollback machinery.
 
 ## Consequences
 
-Common state-object intrinsic spreads and rest-forwarding components can update
-surgically, including property deletion and event replacement. The accepted
-surface is intentionally narrower than arbitrary React prop-layer composition;
-unsupported ordering and ownership shapes produce source diagnostics or stable
-runtime errors rather than snapshots.
+Common state-object intrinsic spreads, reactive component spreads, and
+rest-forwarding components can update surgically, including property deletion
+and event replacement. The accepted surface is intentionally narrower than
+arbitrary React prop-layer composition; unsupported ordering and ownership
+shapes produce source diagnostics or stable runtime errors rather than
+snapshots.
 
 ## Verification
 
 - `crates/vidact-compiler/tests/surgical_codegen.rs` proves rest-slot and spread
-  directive lowering.
-- The compatibility corpus accepts `reactive-spread.tsx` and `rest-props.tsx`.
+  directive lowering for intrinsic and component targets.
+- The compatibility corpus accepts `reactive-spread.tsx`,
+  `reactive-component-spread.tsx`, and `rest-props.tsx`.
 - `tests/browser/corpus/apps/dom-semantics/DomSemanticsApp.browser.test.ts`
   proves property add/update/delete, explicit override precedence, event
-  replacement, rest propagation, and retained node identity.
+  replacement, component direct/default/rest propagation, and retained node
+  identity.
 - `pnpm --filter @vidact/browser-corpus test`
 - `pnpm size`

@@ -124,7 +124,10 @@ component. Rest props resolve from the full props object through one reactive
 object slot with the compiler-recorded destructured public names excluded, and
 can feed the deletion-aware intrinsic spread path
 defined in [Deletion-aware reactive spreads and rest props](deletion-aware-reactive-spreads-and-rest-props.md).
-Computed or nested patterns, reactive component spreads, and reactive local
+One reactive component spread that precedes explicit props can feed a mutable
+component prop view. Direct prop slots receive stable per-key compiled bindings;
+the rest slot observes the spread's live enumerable key set. Computed or nested
+patterns, multiple or interleaved reactive component spreads, and reactive local
 derivations absent from data-flow facts remain fail-closed.
 
 Each dynamic value range owns the resources created by its current non-scalar
@@ -153,6 +156,8 @@ back.
   child component.
 - Public prop names and local destructuring aliases remain distinct in generated
   code, and rest exclusion follows public names rather than local symbols.
+- A reactive component spread can add, replace, or delete a direct or rest prop
+  without reinvoking the child; an explicit following prop remains authoritative.
 - A retained state setter fails before evaluating its update after the owning
   component has been disposed; the dead slot cannot mutate silently.
 - One parent batch that changes several props runs a dependent child updater

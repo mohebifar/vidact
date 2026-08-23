@@ -12,6 +12,7 @@ const MAX_FLUSH_PASSES = 100
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 const BINDING = Symbol(DEV ? 'Vidact.Binding' : undefined)
 const STRUCTURAL = Symbol(DEV ? 'Vidact.StructuralBinding' : undefined)
+export const COMPONENT_SPREAD_SOURCE = Symbol(DEV ? 'Vidact.ComponentSpreadSource' : undefined)
 
 type Owner = [disposed: boolean, cleanups: Set<() => void>]
 
@@ -317,10 +318,16 @@ export function createCompiledRestProp(
       entries().map(([name, value]) => [name, isCompiledBinding(value) ? value[1]() : value]),
     )
   const slot = createStateSlot(scope[1], sourceMask, read(), stateWriteGuard(scope))
-  const removers = entries()
-    .map(([, value]) => value)
-    .filter(isCompiledBinding)
-    .map((upstream) => subscribeBinding(upstream, () => slot.replace(read())))
+  const componentSpreadSource = (input as Record<PropertyKey, unknown>)[COMPONENT_SPREAD_SOURCE]
+  const upstreams = new Set(
+    entries()
+      .map(([, value]) => value)
+      .filter(isCompiledBinding),
+  )
+  if (isCompiledBinding(componentSpreadSource)) upstreams.add(componentSpreadSource)
+  const removers = [...upstreams].map((upstream) =>
+    subscribeBinding(upstream, () => slot.replace(read())),
+  )
   const owner = scopeOwners.get(scope)
   if (owner === undefined) {
     throw new Error(DEV ? 'createCompiledRestProp received an unknown scope' : 'V003')

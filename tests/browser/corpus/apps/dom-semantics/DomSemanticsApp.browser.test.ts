@@ -85,6 +85,7 @@ describe('compiled DOM semantics app', () => {
     const target = host.querySelector<HTMLButtonElement>('[data-spread-target]')!
     const clicks = host.querySelector<HTMLOutputElement>('[data-spread-clicks]')!
     const rest = host.querySelector<HTMLElement>('[data-rest]')!
+    const direct = host.querySelector<HTMLOutputElement>('[data-direct-spread]')!
     const toggle = host.querySelector<HTMLButtonElement>('[data-toggle-spread]')!
 
     expect(target.title).toBe('first spread')
@@ -94,7 +95,11 @@ describe('compiled DOM semantics app', () => {
     expect(clicks.textContent).toBe('1')
     expect(rest.title).toBe('first spread')
     expect(rest.dataset.rest).toBe('one')
+    expect(rest.dataset.fixed).toBe('dynamic')
+    expect(rest.dataset.spread).toBe('one')
+    expect(rest.hidden).toBe(false)
     expect(rest.textContent).toBe('rest one')
+    expect(direct.textContent).toBe('first spread')
 
     await captureMutations(host, () => toggle.click())
 
@@ -108,7 +113,14 @@ describe('compiled DOM semantics app', () => {
     expect(host.querySelector('[data-rest]')).toBe(rest)
     expect(rest.hasAttribute('title')).toBe(false)
     expect(rest.dataset.rest).toBe('two')
+    expect(rest.dataset.fixed).toBe('still dynamic')
+    expect(rest.dataset.spread).toBe('two')
+    expect(rest.hidden).toBe(true)
     expect(rest.textContent).toBe('rest two')
+    expect(host.querySelector('[data-direct-spread]')).toBe(direct)
+    expect(direct.textContent).toBe('missing')
+    rest.click()
+    expect(clicks.textContent).toBe('21')
   })
 
   it('updates attributes and styles without retaining stale values or remounting', async () => {

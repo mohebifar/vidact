@@ -25,6 +25,10 @@ function RestSpread({
   return <section {...rest}>{label}</section>
 }
 
+function DirectSpread({ title = 'missing' }: { title?: string }): JSX.Element {
+  return <output data-direct-spread>{title}</output>
+}
+
 function DeferredSvg({ visible }: { visible: boolean }): JSX.Element {
   return <>{visible && <circle data-deferred-svg cx="3" cy="3" r="2" tabIndex={0} />}</>
 }
@@ -95,10 +99,11 @@ export function DomSemanticsApp(): JSX.Element {
       </button>
       <output data-spread-clicks>{spreadClicks}</output>
       <RestSpread
+        {...spreadProps}
         label={spreadProps.hidden ? 'rest two' : 'rest one'}
-        title={spreadProps.title}
         data-rest={spreadProps['data-spread']}
       />
+      <DirectSpread {...spreadProps} />
 
       <section
         data-boolean={active}

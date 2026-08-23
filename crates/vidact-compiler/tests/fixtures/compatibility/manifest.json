@@ -84,6 +84,11 @@
       "components": ["ReactiveSpread"]
     },
     {
+      "path": "accepted/reactive-component-spread.tsx",
+      "expectation": "accepted",
+      "components": ["Child", "ReactiveComponentSpread"]
+    },
+    {
       "path": "accepted/aliased-prop.tsx",
       "expectation": "accepted",
       "components": ["AliasedProp"]

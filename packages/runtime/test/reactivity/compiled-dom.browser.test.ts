@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 import {
   binding,
   combineSources,
+  compiledComponentSpread,
   compiledEvent,
   compiledImperativeHandle,
   compiledRoot,
@@ -30,6 +31,33 @@ interface Item {
 }
 
 describe('compiled DOM corpus', () => {
+  it('rejects reserved values in reactive component spreads before child construction', () => {
+    const propsSource = source(0)
+    let childRuns = 0
+    const host = document.createElement('div')
+    const Child: DirectComponent = () => {
+      childRuns += 1
+      const scope = createCompiledScope()
+      return compiledRoot(scope, () => h('p', null, 'child'))
+    }
+
+    expect(() =>
+      mountCompiled(() => {
+        const scope = createCompiledScope()
+        const props = createCompiledState<Record<string, unknown>>(scope, propsSource, {
+          children: 'unsupported',
+        })
+        return compiledRoot(scope, () =>
+          h(Child, {
+            ...compiledComponentSpread(binding(scope, propsSource, props.get), []),
+          }),
+        )
+      }, host),
+    ).toThrow('reactive component spreads cannot supply key or children')
+    expect(childRuns).toBe(0)
+    expect(host.textContent).toBe('')
+  })
+
   it('updates scalar, branch, and keyed parts without rerunning the component', async () => {
     const countSource = source(0)
     const itemsSource = source(1)
