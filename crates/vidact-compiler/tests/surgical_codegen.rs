@@ -564,6 +564,28 @@ fn compiles_static_component_props_into_local_updater_slots() {
 }
 
 #[test]
+fn compiles_named_block_bodied_arrow_components() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "ArrowCounter.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export const ArrowCounter = () => {
+                const [count, setCount] = useState(0);
+                return <button onClick={() => setCount(count + 1)}>{count}</button>;
+            };
+        "#,
+    })
+    .expect("named block-bodied arrow components should preserve their binding identity");
+
+    assert!(output.contains("const ArrowCounter = () =>"), "{output}");
+    assert!(
+        output.contains("createCompiledState as __vidactCreateState"),
+        "{output}"
+    );
+    assert!(output.contains("return __vidactCompiledRoot"), "{output}");
+}
+
+#[test]
 fn rejects_aliased_props_instead_of_emitting_mount_snapshots() {
     let diagnostics = compile_surgical_module(ModuleInput {
         filename: "AliasedProp.tsx",

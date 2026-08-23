@@ -128,12 +128,12 @@ semantic scope graph:
   callbacks, plus source-text lookalikes, are absent from the outer component
   CFG and do not enter the graph.
 
-The accepted component form remains named function declarations, but a module
-may contain several of them. Each owned React Compiler snapshot carries its
-original function span, and Vidact joins it only to the declaration with that
-exact span. Named arrows are recognized by span and binding name but fail with a
-source-located `UnsupportedComponentForm` diagnostic until lowering supports
-their body and replacement semantics.
+The accepted component forms include named function declarations and named,
+block-bodied arrows assigned to top-level bindings; a module may contain several
+of either. Each owned React Compiler snapshot carries its original function
+span, and Vidact joins it only to the declaration or arrow binding with that
+exact span. Expression-bodied arrows and ambiguous anonymous/default forms fail
+closed until their body and export-identity semantics are modeled.
 
 ## Next integration step
 

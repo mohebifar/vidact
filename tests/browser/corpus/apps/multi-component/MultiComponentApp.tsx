@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-function CounterValue({ value }: { value: number }): JSX.Element {
+const CounterValue = ({ value }: { value: number }): JSX.Element => {
   return <output data-counter-value>{value}</output>
 }
 

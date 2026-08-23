@@ -59,14 +59,15 @@ app compiled through the Vite plugin.
 
 - Oxc supplies original byte spans; no arena-backed AST or HIR value crosses the
   analysis boundary.
-- Vidact joins a snapshot only to the function declaration with the exact same
-  span. It never falls back to name-only matching for a spanned analysis.
+- Vidact joins a snapshot only to the named declaration or variable-bound arrow
+  with the exact same span. It never falls back to name-only matching for a
+  spanned analysis.
 - Same-module components each receive independent source IDs and updater graphs.
 - Surgical codegen transforms all accepted components and emits the shared
   runtime import once.
-- Named arrow components are recognized by their span and source binding but
-  currently reject with `UnsupportedComponentForm`; they are not silently
-  mistaken for an anonymous or neighboring function.
+- Named block-bodied arrow components are lowered through the same parameter,
+  body, and semantic-symbol contract as function declarations. Their source
+  binding and exact arrow span define identity.
 - Parent-to-child compiled prop updates retain both component instances and
   mutate only the affected child binding.
 
@@ -102,11 +103,11 @@ app compiled through the Vite plugin.
 Ordinary parent/child modules can now compile without splitting components into
 files, and diagnostics can point back to original TSX. The Oxc patch now
 includes an owned control-flow snapshot as well as the function span.
-Arrow/default component lowering, DOM-range lowering for multi-return control
-flow, and precise spans for internal analysis failures without a single source
-construct remain follow-up work. Original-TSX source maps were completed by the
-versioned compiler protocol. Adding a compatibility fixture requires an
-explicit contract classification, which is intentional maintenance overhead.
+Expression-bodied arrow and default-export component lowering, plus precise
+spans for internal analysis failures without a single source construct, remain
+follow-up work. DOM-range lowering for multi-return control flow and
+original-TSX source maps are complete. Adding a compatibility fixture requires
+an explicit contract classification, which is intentional maintenance overhead.
 
 ## Verification
 

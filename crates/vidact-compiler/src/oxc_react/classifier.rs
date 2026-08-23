@@ -11,7 +11,7 @@ use crate::{
     analysis::{
         ControlFlowFacts, KeyPath, SourceId, SourceKind, UpdaterFact, UpdaterId, UpdaterKind,
     },
-    ast_utils::{component_function, is_event_attribute},
+    ast_utils::{component_function_parts, is_event_attribute},
     react_bindings::{ReactBindings, reference_symbol},
     render_flow::{RenderFlowGraph, lower_render_flow},
 };
@@ -39,24 +39,20 @@ pub(super) fn classify_component<'a>(
     component_span: SourceSpan,
     control_flow: &ControlFlowFacts,
 ) -> Result<ComponentSyntax<'a>, Diagnostic> {
-    let function =
-        component_function(program, component_name, Some(component_span)).ok_or_else(|| {
+    let (params, body) =
+        component_function_parts(program, component_name, Some(component_span)).ok_or_else(|| {
             Diagnostic::new(
                 DiagnosticCode::UnsupportedComponentForm,
-                format!("component {component_name} is not a supported named function declaration"),
+                format!(
+                    "component {component_name} is not a supported named function or block-bodied arrow"
+                ),
             )
             .with_span(component_span)
         })?;
-    let body = function.body.as_deref().ok_or_else(|| {
-        unsupported_at(
-            format!("component {component_name} has no body"),
-            function.span,
-        )
-    })?;
     let react = ReactBindings::new(program, scoping);
     let mut sources = BTreeMap::new();
 
-    for parameter in &function.params.items {
+    for parameter in &params.items {
         let BindingPattern::ObjectPattern(pattern) = &parameter.pattern else {
             return Err(unsupported_at(
                 "compiled props require direct object destructuring in the component parameter",

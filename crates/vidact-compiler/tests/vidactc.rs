@@ -49,14 +49,16 @@ fn exits_nonzero_and_reports_diagnostics_for_invalid_tsx() {
 }
 
 #[test]
-fn reports_original_source_location_for_unsupported_component_forms() {
+fn emits_analysis_for_named_block_bodied_arrow_components() {
     let output = analyze(include_str!(
-        "fixtures/compatibility/rejected/arrow-component.tsx"
+        "fixtures/compatibility/accepted/arrow-component.tsx"
     ));
 
-    assert!(!output.status.success());
-    let error = String::from_utf8(output.stderr).expect("diagnostic is UTF-8");
-    assert!(error.contains("fixture.tsx:3:29"), "{error}");
-    assert!(error.contains("UnsupportedComponentForm"), "{error}");
-    assert!(error.contains("ArrowCounter"), "{error}");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json = String::from_utf8(output.stdout).expect("analysis JSON is UTF-8");
+    assert!(json.contains(r#""name":"ArrowCounter""#), "{json}");
 }

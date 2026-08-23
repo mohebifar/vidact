@@ -22,7 +22,9 @@ use oxc_syntax::{operator::LogicalOperator, scope::ScopeFlags, symbol::SymbolId}
 use crate::{
     Diagnostic, DiagnosticCode, SourceSpan,
     analysis::{ModuleInput, SourceId, SourceKind},
-    ast_utils::{is_event_attribute, is_supported_react_event_attribute},
+    ast_utils::{
+        component_function_parts_mut, is_event_attribute, is_supported_react_event_attribute,
+    },
     ir::{ComponentIr, lower_component},
     options::{CompilationOptions, CompilerFeature},
     oxc_react::analyze_program,
@@ -305,13 +307,9 @@ fn transform_component<'a>(
         .map(|source| source.name.as_str())
         .collect::<BTreeSet<_>>();
     let react = ReactBindings::new(program, scoping);
-    let function = component_function_mut(program, &ir.name, ir.span)
+    let (params, body) = component_function_parts_mut(program, &ir.name, ir.span)
         .ok_or_else(|| unsupported(format!("could not find component function {}", ir.name)))?;
-    let prop_bindings = prop_binding_symbols(function, &source_ids, &prop_sources, allocator)?;
-    let body = function
-        .body
-        .as_deref_mut()
-        .ok_or_else(|| unsupported("compiled component has no body"))?;
+    let prop_bindings = prop_binding_symbols(params, &source_ids, &prop_sources, allocator)?;
     let mut render_start = render_suffix_start(body)?;
     let mut source_symbols = BTreeMap::<SymbolId, SourceId>::new();
     let mut state_symbols = BTreeMap::<SymbolId, StateReference<'a>>::new();
@@ -989,13 +987,13 @@ fn is_syntactically_boolean(expression: &Expression<'_>) -> bool {
 }
 
 fn prop_binding_symbols<'a>(
-    function: &Function<'a>,
+    params: &FormalParameters<'a>,
     sources: &BTreeMap<&str, SourceId>,
     prop_sources: &BTreeSet<&str>,
     allocator: &'a Allocator,
 ) -> Result<Vec<PropBinding<'a>>, Diagnostic> {
     let mut bindings = Vec::new();
-    for parameter in &function.params.items {
+    for parameter in &params.items {
         let BindingPattern::ObjectPattern(pattern) = &parameter.pattern else {
             continue;
         };
@@ -1605,38 +1603,6 @@ impl<'a> Visit<'a> for GeneratedReferenceFinder {
             self.names.insert(identifier.name.to_string());
         }
     }
-}
-
-fn component_function_mut<'p, 'a>(
-    program: &'p mut Program<'a>,
-    name: &str,
-    span: Option<SourceSpan>,
-) -> Option<&'p mut Function<'a>> {
-    program
-        .body
-        .iter_mut()
-        .find_map(|statement| match statement {
-            Statement::FunctionDeclaration(function)
-                if function.id.as_ref().is_some_and(|id| id.name == name)
-                    && span.is_none_or(|span| {
-                        function.span.start == span.start && function.span.end == span.end
-                    }) =>
-            {
-                Some(function.as_mut())
-            }
-            Statement::ExportDeclaration(export) => match &mut export.declaration {
-                Declaration::FunctionDeclaration(function)
-                    if function.id.as_ref().is_some_and(|id| id.name == name)
-                        && span.is_none_or(|span| {
-                            function.span.start == span.start && function.span.end == span.end
-                        }) =>
-                {
-                    Some(function.as_mut())
-                }
-                _ => None,
-            },
-            _ => None,
-        })
 }
 
 fn unsupported(message: impl Into<String>) -> Diagnostic {

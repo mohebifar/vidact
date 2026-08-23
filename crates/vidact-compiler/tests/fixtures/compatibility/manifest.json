@@ -34,10 +34,9 @@
       "components": ["RawHtml"]
     },
     {
-      "path": "rejected/arrow-component.tsx",
-      "expectation": "rejected",
-      "code": "UnsupportedComponentForm",
-      "spanContains": "() =>"
+      "path": "accepted/arrow-component.tsx",
+      "expectation": "accepted",
+      "components": ["ArrowCounter"]
     },
     {
       "path": "accepted/structural-control-flow.tsx",
