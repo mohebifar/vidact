@@ -10,6 +10,7 @@ export {
   type DirectProps,
 } from './direct-dom.ts'
 export { useRef, type MutableRef } from './ref.ts'
+export { createRoot, type CompiledRoot } from './root.ts'
 export { assertRuntimeProtocol, VIDACT_RUNTIME_PROTOCOL } from './protocol.ts'
 export { compiledSpread } from './spread.ts'
 export { compiledComponentSpread } from './component-spread.ts'

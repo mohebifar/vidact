@@ -26,9 +26,12 @@ made two code generators and two updater schedulers look equally supported.
 ## Decision
 
 The browser runtime has one component execution model: compiled components.
-`mountCompiled` is the only public root-mount operation. The replaying `mount`
-helper, its active-component singleton, hook cursor, stabilization loop, and
-runtime `useState` implementation are removed.
+`mountCompiled` is the low-level root-mount operation. `createRoot` is its
+application-facing owner: it mounts one compiled application factory and
+unmounts terminally. It deliberately does not accept React element descriptors
+or promise repeated `root.render(element)` reconciliation. The replaying
+`mount` helper, its active-component singleton, hook cursor, stabilization
+loop, and runtime `useState` implementation are removed.
 
 The Rust package likewise has one executable browser compiler path: surgical
 codegen. The spike emitter and standalone updater scheduler are removed. Their
@@ -59,7 +62,7 @@ not a public root renderer and never rerun a component to discover changes.
   modules. Type-only state imports remain available to TypeScript. Any residual
   runtime state call or value reference fails compilation.
 - A compiled component returns a single-mount `CompiledComponentResult` and is
-  mounted with `mountCompiled`.
+  mounted with `mountCompiled` or a `createRoot` application owner.
 - Vite and direct compiler consumers use surgical compilation; there is no
   exported spike emitter or standalone static-updater scheduler.
 - State writes invalidate the existing component scope. They cannot invoke the
@@ -83,6 +86,8 @@ not a public root renderer and never rerun a component to discover changes.
   rendering model.
 - Direct DOM construction and compiled component mounting do not create a
   Virtual DOM or general runtime reconciler.
+- A public compiled root mounts at most one application factory; unmount is
+  idempotent and terminal.
 
 ## Alternatives considered
 
@@ -116,6 +121,8 @@ than compatibility behavior.
   legacy exports are absent and compiled refs remain available.
 - `packages/runtime/test/reactivity/direct-dom.browser.test.ts` covers the
   retained direct DOM construction surface.
+- `packages/runtime/test/lifecycle/root.browser.test.ts` covers one-shot mount,
+  host replacement, terminal unmount, and owner disposal.
 - `crates/vidact-compiler/tests/surgical_codegen.rs` proves lowered state imports
   disappear, type-only imports survive, live `useRef` imports remain, namespace
   state imports disappear, and residual state calls or references fail closed.
