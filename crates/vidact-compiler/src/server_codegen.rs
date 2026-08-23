@@ -107,6 +107,7 @@ pub fn compile_server_module_with_options(
         concurrent_enabled: options.feature_enabled(CompilerFeature::Concurrent),
         actions_enabled: options.feature_enabled(CompilerFeature::Actions),
         suspense_spans: BTreeSet::new(),
+        activity_spans: BTreeSet::new(),
         diagnostic: None,
     };
     validator.visit_program(&parsed.program);
@@ -119,6 +120,7 @@ pub fn compile_server_module_with_options(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|diagnostic| vec![diagnostic])?;
     let suspense_spans = std::mem::take(&mut validator.suspense_spans);
+    let activity_spans = std::mem::take(&mut validator.activity_spans);
     drop(validator);
     drop(react);
     drop(semantic);
@@ -126,6 +128,7 @@ pub fn compile_server_module_with_options(
         ast: AstBuilder::new(&allocator),
         options,
         suspense_spans,
+        activity_spans,
         diagnostic: None,
     };
     async_transformer.visit_program(&mut parsed.program);
@@ -190,6 +193,7 @@ struct ServerAsyncTransformer<'a, 's> {
     ast: AstBuilder<'a>,
     options: &'s CompilationOptions,
     suspense_spans: BTreeSet<u32>,
+    activity_spans: BTreeSet<u32>,
     diagnostic: Option<Diagnostic>,
 }
 
@@ -212,6 +216,16 @@ impl<'a> VisitMut<'a> for ServerAsyncTransformer<'a, '_> {
             self.diagnostic = Some(diagnostic);
             return;
         }
+        if self.activity_spans.contains(&element.span.start)
+            && let Err(diagnostic) = crate::surgical_codegen::prepare_known_activity_element(
+                &self.ast,
+                self.options,
+                element,
+            )
+        {
+            self.diagnostic = Some(diagnostic);
+            return;
+        }
         walk_jsx_element_mut(self, element);
     }
 }
@@ -223,6 +237,7 @@ struct ServerSourceValidator<'r, 's> {
     concurrent_enabled: bool,
     actions_enabled: bool,
     suspense_spans: BTreeSet<u32>,
+    activity_spans: BTreeSet<u32>,
     diagnostic: Option<Diagnostic>,
 }
 
@@ -332,6 +347,12 @@ impl<'a> Visit<'a> for ServerSourceValidator<'_, '_> {
             .is_named_jsx_element(&element.opening_element.name, "Suspense")
         {
             self.suspense_spans.insert(element.span.start);
+        }
+        if self
+            .react
+            .is_named_jsx_element(&element.opening_element.name, "Activity")
+        {
+            self.activity_spans.insert(element.span.start);
         }
         if let JSXElementName::Identifier(tag) = &element.opening_element.name {
             for item in &element.opening_element.attributes {

@@ -25,7 +25,7 @@ const fixtures = [
     name: 'concurrent',
     entry: path.join(directory, 'fixtures/concurrent.tsx'),
     features: ['concurrent'],
-    gzipBudget: 9_734,
+    gzipBudget: 9_735,
   },
   {
     name: 'actions-unused',
@@ -37,7 +37,19 @@ const fixtures = [
     name: 'actions',
     entry: path.join(directory, 'fixtures/actions.tsx'),
     features: ['actions'],
-    gzipBudget: 11_446,
+    gzipBudget: 11_449,
+  },
+  {
+    name: 'retained-ui-unused',
+    entry: path.join(directory, 'fixtures/counter.tsx'),
+    features: ['retained-ui'],
+    gzipBudget: 8_069,
+  },
+  {
+    name: 'retained-ui',
+    entry: path.join(directory, 'fixtures/retained-ui.tsx'),
+    features: ['retained-ui'],
+    gzipBudget: 11_500,
   },
   {
     name: 'control-flow',
@@ -54,7 +66,7 @@ const fixtures = [
     entry: path.join(repository, 'examples/todomvc/src/TodoApp.tsx'),
     gzipBudget: 10_924,
   },
-  { name: 'effect', entry: path.join(directory, 'fixtures/effect.tsx'), gzipBudget: 8_356 },
+  { name: 'effect', entry: path.join(directory, 'fixtures/effect.tsx'), gzipBudget: 8_375 },
 ]
 
 const measurements = await Promise.all(fixtures.map(measureFixture))
@@ -73,20 +85,26 @@ const concurrentUnused = measurements.find(
   (measurement) => measurement.fixture === 'concurrent-unused',
 )
 const actionsUnused = measurements.find((measurement) => measurement.fixture === 'actions-unused')
+const retainedUiUnused = measurements.find(
+  (measurement) => measurement.fixture === 'retained-ui-unused',
+)
 if (
   counter === undefined ||
   asyncUnused === undefined ||
   concurrentUnused === undefined ||
   actionsUnused === undefined ||
+  retainedUiUnused === undefined ||
   counter.minified !== asyncUnused.minified ||
   counter.gzip !== asyncUnused.gzip ||
   counter.minified !== concurrentUnused.minified ||
   counter.gzip !== concurrentUnused.gzip ||
   counter.minified !== actionsUnused.minified ||
-  counter.gzip !== actionsUnused.gzip
+  counter.gzip !== actionsUnused.gzip ||
+  counter.minified !== retainedUiUnused.minified ||
+  counter.gzip !== retainedUiUnused.gzip
 ) {
   regressions.push(
-    'enabling an unused async, concurrent, or Actions family changed the counter artifact',
+    'enabling an unused async, concurrent, Actions, or retained UI family changed the counter artifact',
   )
 }
 if (regressions.length > 0) {

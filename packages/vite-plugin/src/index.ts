@@ -87,6 +87,9 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
           configuration.features.includes('unsafe-html'),
         )
       }
+      if (config.define?.__VIDACT_RETAINED_UI__ === undefined) {
+        define.__VIDACT_RETAINED_UI__ = 'false'
+      }
       if (Object.keys(define).length === 0) return
       return {
         define,
@@ -111,6 +114,7 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
         const asyncEnabled = configuration.features.includes('async')
         const concurrentEnabled = configuration.features.includes('concurrent')
         const actionsEnabled = configuration.features.includes('actions')
+        const retainedUiEnabled = configuration.features.includes('retained-ui')
         const clientRuntime = clientRuntimeEntry(
           asyncEnabled,
           concurrentEnabled,
@@ -122,9 +126,18 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
           ? 'startTransition, useDeferredValue, useTransition, '
           : ''
         const actionExports = actionsEnabled ? 'useActionState, useOptimistic, ' : ''
-        return configuration.target === 'server'
-          ? `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "${serverRuntime}"`
-          : `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "${clientRuntime}"`
+        const core =
+          configuration.target === 'server'
+            ? `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "${serverRuntime}"`
+            : `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "${clientRuntime}"`
+        if (!retainedUiEnabled) return core
+        const retainedRuntime =
+          configuration.target === 'server'
+            ? '@vidact/runtime/retained-ui/server'
+            : configuration.target === 'hydrate'
+              ? '@vidact/runtime/retained-ui/hydrate'
+              : '@vidact/runtime/retained-ui'
+        return `${core}\nexport { Activity } from "${retainedRuntime}"`
       }
       const actionsEnabled = configuration.features.includes('actions')
       const concurrentEnabled = configuration.features.includes('concurrent')

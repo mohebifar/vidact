@@ -353,6 +353,18 @@
       "components": ["Status", "Actions"]
     },
     {
+      "path": "accepted/retained-activity.tsx",
+      "expectation": "accepted",
+      "features": ["retained-ui"],
+      "components": ["RetainedActivity"]
+    },
+    {
+      "path": "rejected/activity-disabled.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "Activity"
+    },
+    {
       "path": "rejected/action-hook-disabled.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",

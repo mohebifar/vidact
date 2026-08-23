@@ -77,10 +77,15 @@ Compiler targets and features are now real build inputs rather than permissive
 metadata. Implementing another gated family requires a compiler-side semantic
 check and compatibility fixtures for both disabled and enabled behavior.
 
-`unsafe-html`, `css-insertion`, `async`, and `concurrent` now consume feature flags. Async
+`unsafe-html`, `css-insertion`, `async`, `concurrent`, `actions`, and
+`retained-ui` now consume feature flags. Async
 selects isolated client, hydrate, and server entries and enables compiler-owned
-Suspense factories, resource reads, and lazy module records. The other accepted
-names remain reserved configuration values whose syntax is unsupported;
+Suspense factories, resource reads, and lazy module records. Actions selects
+its form and state entries; retained UI selects the Activity facade, whose first
+call activates lifecycle, server-style, and deferred-hidden-work paths before
+its staged descendants are constructed. An enabled but unused retained feature
+therefore produces the exact default artifact. The other accepted names remain
+reserved configuration values whose syntax is unsupported;
 transporting them does not claim runtime parity. `hydrate` and `server` now
 select implemented hydration and SSR lowering targets.
 

@@ -22,6 +22,12 @@ import {
   useFormStatus,
   useOptimistic,
 } from '../../src/server-actions.ts'
+import {
+  Activity as ServerActivity,
+  jsx as retainedJsx,
+  renderToStaticMarkup as renderRetainedToStaticMarkup,
+  renderToString as renderRetainedToString,
+} from '../../src/server.ts'
 
 describe('server rendering', () => {
   it('serializes deterministic escaped HTML without browser globals', () => {
@@ -94,6 +100,30 @@ describe('server rendering', () => {
     ).toBe(
       '<!--vidact:v1:r--><!--vidact:v1:b--><!--vidact:v1:s--><ul><!--vidact:v1:b--><!--vidact:v1:a--><!--vidact:v1:s--><li><!--vidact:v1:b--><!--vidact:v1:t-->one<!--/vidact:v1:t--><!--/vidact:v1:b--></li><!--/vidact:v1:s--><!--vidact:v1:s--><li><!--vidact:v1:b--><!--vidact:v1:t-->two<!--/vidact:v1:t--><!--/vidact:v1:b--></li><!--/vidact:v1:s--><!--/vidact:v1:a--><!--/vidact:v1:b--></ul><!--/vidact:v1:s--><!--/vidact:v1:b--><!--/vidact:v1:r-->',
     )
+  })
+
+  it('emits deterministic hidden styles for retained Activity roots', () => {
+    const activity = () =>
+      ServerActivity({
+        mode: 'hidden',
+        children: () => [
+          retainedJsx('section', { children: 'one', style: { color: 'red', display: 'grid' } }),
+          retainedJsx('aside', { children: 'two' }),
+        ],
+      })
+
+    expect(renderRetainedToStaticMarkup(activity)).toBe(
+      '<section style="color:red;display:grid;display:none!important">one</section><aside style="display:none!important">two</aside>',
+    )
+    expect(renderRetainedToString(activity)).toContain('style="display:none!important"')
+  })
+
+  it('rejects initially hidden text-only Activity output on the server', () => {
+    expect(() =>
+      renderRetainedToString(
+        retainedJsx(ServerActivity, { mode: 'hidden', children: () => 'private text' }),
+      ),
+    ).toThrow('initially hidden Activity server children require a host element root')
   })
 
   it('diagnoses portals on the server target', () => {

@@ -30,12 +30,13 @@ import {
 } from './hydration-bridge.ts'
 import { createIndexedList } from './indexed-list.ts'
 import { createKeyedList } from './keyed-list.ts'
-import { scheduleTask } from './scheduler.ts'
+import { scheduleDeferredTask, scheduleTask, type CancelScheduledTask } from './scheduler.ts'
 import { intersectsSources, isEmptySources, unionSources, type SourceMask } from './source-mask.ts'
 import { createStateSlot, type StateSlot } from './state-slot.ts'
 
 const MAX_FLUSH_PASSES = 100
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
+let retainedUiEnabled = typeof __VIDACT_RETAINED_UI__ !== 'undefined' && __VIDACT_RETAINED_UI__
 const BINDING = Symbol(DEV ? 'Vidact.Binding' : undefined)
 const STRUCTURAL = Symbol(DEV ? 'Vidact.StructuralBinding' : undefined)
 const CONTEXT = Symbol(DEV ? 'Vidact.Context' : undefined)
@@ -73,7 +74,29 @@ type Owner = [
   context: ContextFrame | null,
   rootIdentity: RootIdentity,
   errorBoundary: ErrorBoundaryHandler | null,
+  retainedConnection?: RetainedConnection | null,
 ]
+
+type RetainedResource = {
+  readonly owner: Owner
+  readonly connect: () => void
+  readonly disconnect: () => void
+  active: boolean
+  connected: boolean
+  disposed: boolean
+  readonly phase: number
+}
+
+type RetainedConnection = {
+  readonly parent: RetainedConnection | null
+  readonly children: Set<RetainedConnection>
+  readonly resources: Set<RetainedResource>
+  readonly deferredFlushes: Map<() => void, CancelScheduledTask>
+  readonly afterFlush: Set<() => void>
+  visible: boolean
+  connected: boolean
+  disposed: boolean
+}
 
 type AsyncResourceState<Value> = {
   status: 'pending' | 'fulfilled' | 'rejected'
@@ -191,6 +214,160 @@ export function deferred(render: () => CompiledRenderValue): StructuralBinding {
     },
     'slot',
   ]
+}
+
+/** @internal */
+export function retainedActivity(
+  modeInput: 'visible' | 'hidden' | CompiledBinding<'visible' | 'hidden'>,
+  render: () => CompiledRenderValue,
+): StructuralBinding {
+  noteHydrationStructuralParent()
+  const context = activeContextFrame ?? activeOwner?.[2] ?? null
+  const rootIdentity = activeOwner?.[3] ?? activeRootIdentity
+  if (rootIdentity === null) {
+    throw new Error(DEV ? 'Activity must run during compiled root construction' : 'V033')
+  }
+  const parentErrorBoundary = activeOwner?.[4] ?? null
+  const parentConnection = activeOwner?.[5] ?? null
+  let mounted = false
+  return [
+    STRUCTURAL,
+    (parent, before) => {
+      if (mounted) throw new Error(DEV ? 'compiled Activity is already mounted' : 'V008')
+      mounted = true
+      const lifetimeOwner = activeOwner
+      if (lifetimeOwner === null) {
+        throw new Error(DEV ? 'Activity must mount inside an owned compiled root' : 'V033')
+      }
+      const readMode = (): 'visible' | 'hidden' =>
+        validateActivityMode(isCompiledBinding(modeInput) ? modeInput[1]() : modeInput)
+      let currentMode = readMode()
+      const connection = createRetainedConnection(parentConnection, currentMode === 'visible')
+      const childOwner = createOwner(context, rootIdentity, parentErrorBoundary, connection)
+      const hydratedRange = claimHydrationSlotRange(parent)
+      const start = hydratedRange?.[0] ?? document.createComment(DEV ? 'vidact:activity' : '')
+      const end = hydratedRange?.[1] ?? document.createComment(DEV ? '/vidact:activity' : '')
+      if (hydratedRange === undefined) {
+        parent.insertBefore(start, before)
+        parent.insertBefore(end, before)
+      }
+      const currentParent = rangeParent(start, end, 'Activity boundary')
+      const hiddenDisplays = new Map<Element, readonly [string, string]>()
+      const hiddenTexts = new Map<Text, Comment>()
+      const heldText = document.createDocumentFragment()
+      let restoreHydratedDisplays = hydratedRange !== undefined && currentMode === 'hidden'
+
+      const conceal = (): void => {
+        for (const node of nodesBetween(start, end)) {
+          if (node instanceof Element && 'style' in node) {
+            const styled = node as HTMLElement | SVGElement
+            const previous = hiddenDisplays.get(node)
+            const hydratedDisplay = restoreHydratedDisplays
+              ? readServerHiddenDisplay(node)
+              : undefined
+            if (previous === undefined && hydratedDisplay !== undefined) {
+              hiddenDisplays.set(node, hydratedDisplay)
+            } else if (
+              previous === undefined ||
+              styled.style.display !== 'none' ||
+              styled.style.getPropertyPriority('display') !== 'important'
+            ) {
+              hiddenDisplays.set(node, [
+                styled.style.display,
+                styled.style.getPropertyPriority('display'),
+              ])
+            }
+            styled.style.setProperty('display', 'none', 'important')
+          } else if (node instanceof Text && !hiddenTexts.has(node)) {
+            const placeholder = document.createComment(DEV ? 'vidact:activity-text' : '')
+            node.replaceWith(placeholder)
+            heldText.append(node)
+            hiddenTexts.set(node, placeholder)
+          }
+        }
+        restoreHydratedDisplays = false
+      }
+      const reveal = (): void => {
+        for (const [element, [display, priority]] of hiddenDisplays) {
+          const styled = element as HTMLElement | SVGElement
+          if (display === '') styled.style.removeProperty('display')
+          else styled.style.setProperty('display', display, priority)
+        }
+        hiddenDisplays.clear()
+        for (const [text, placeholder] of hiddenTexts) {
+          if (placeholder.parentNode !== null) placeholder.replaceWith(text)
+        }
+        hiddenTexts.clear()
+      }
+      const setMode = (nextMode: 'visible' | 'hidden'): void => {
+        if (nextMode === currentMode) return
+        currentMode = nextMode
+        if (nextMode === 'hidden') {
+          connection.visible = false
+          updateRetainedConnection(connection)
+          conceal()
+        } else {
+          reveal()
+          connection.visible = true
+          updateRetainedConnection(connection)
+          concealDisconnectedDescendants(connection)
+        }
+      }
+
+      connection.afterFlush.add(conceal)
+      let stagedNodes: readonly Node[] = []
+      try {
+        const [fragment, nodes] =
+          hydratedRange === undefined
+            ? stageRender(render, childOwner)
+            : withHydrationInsertion(currentParent, end, () => stageRender(render, childOwner))
+        stagedNodes = nodes
+        currentParent.insertBefore(fragment, end)
+        if (currentMode === 'hidden') conceal()
+        commitPublishedNodes(nodes)
+      } catch (error) {
+        disposePublished(childOwner, stagedNodes)
+        disposeRetainedConnection(connection)
+        throw error
+      }
+      const removeModeUpdater = isCompiledBinding(modeInput)
+        ? subscribeBinding(modeInput, () => setMode(readMode()))
+        : noop
+      onCleanup(() => {
+        removeModeUpdater()
+        reveal()
+        try {
+          disposeRange(childOwner, start, end)
+        } finally {
+          disposeRetainedConnection(connection)
+          start.remove()
+          end.remove()
+        }
+      })
+    },
+    'slot',
+  ]
+}
+
+/** @internal */
+export function enableRetainedUi(): void {
+  retainedUiEnabled = true
+}
+
+function validateActivityMode(mode: unknown): 'visible' | 'hidden' {
+  if (mode === 'visible' || mode === 'hidden') return mode
+  throw new TypeError(DEV ? 'Activity mode must be "visible" or "hidden"' : 'V034')
+}
+
+function readServerHiddenDisplay(element: Element): readonly [string, string] | undefined {
+  const cssText = element.getAttribute('style')
+  const hiddenDeclaration = 'display:none!important'
+  if (cssText === null || !cssText.endsWith(hiddenDeclaration)) return undefined
+  let authoredCssText = cssText.slice(0, -hiddenDeclaration.length)
+  if (authoredCssText.endsWith(';')) authoredCssText = authoredCssText.slice(0, -1)
+  const style = document.createElement('div').style
+  style.cssText = authoredCssText
+  return [style.display, style.getPropertyPriority('display')]
 }
 
 export function errorBoundary(
@@ -575,6 +752,7 @@ function createScope(operations: SourceOperations): CompiledScope {
       addedDuringFlush.clear()
       flushing = false
     }
+    if (retainedUiEnabled) notifyRetainedFlush(owner[5] ?? null)
   }
 
   const scope: CompiledScope = [
@@ -611,7 +789,10 @@ function createScope(operations: SourceOperations): CompiledScope {
     (sources) => {
       if (owner[0] || operations[0](sources)) return
       pending = operations[2](pending, sources)
-      if (batchDepth === 0) scheduleFlush(flush)
+      if (batchDepth === 0) {
+        if (retainedUiEnabled) scheduleOwnerFlush(owner, flush)
+        else scheduleFlush(flush)
+      }
     },
     <T>(operation: () => T): T => {
       batchDepth += 1
@@ -620,7 +801,10 @@ function createScope(operations: SourceOperations): CompiledScope {
         return operation()
       } finally {
         batchDepth -= 1
-        if (batchDepth === 0 && !operations[0](pending)) scheduleFlush(flush)
+        if (batchDepth === 0 && !operations[0](pending)) {
+          if (retainedUiEnabled) scheduleOwnerFlush(owner, flush)
+          else scheduleFlush(flush)
+        }
         transactionDepth -= 1
         if (transactionDepth === 0) drainFlushes()
       }
@@ -757,28 +941,73 @@ export function createCompiledExternalStore<T>(
     throw new Error(DEV ? 'createCompiledExternalStore received an unknown scope' : 'V003')
   }
   const slot = createStateSlot(scope[1], sourceMask, getSnapshot(), stateWriteGuard(scope))
-  let active = true
+  if (!retainedUiEnabled) {
+    let active = true
+    const checkSnapshot = (): void => {
+      if (!active) return
+      scope[2](() => slot.replace(getSnapshot()))
+    }
+    const unsubscribe = storeSubscribe(() => runOwnerTask(owner, checkSnapshot))
+    if (typeof unsubscribe !== 'function') {
+      active = false
+      throw new TypeError(
+        DEV ? 'external store subscribe must return an unsubscribe function' : 'V020',
+      )
+    }
+    try {
+      checkSnapshot()
+    } catch (error) {
+      active = false
+      unsubscribe()
+      throw error
+    }
+    owner[1].add(() => {
+      active = false
+      unsubscribe()
+    })
+    return slot
+  }
+  let active = false
+  let unsubscribe = noop
   const checkSnapshot = (): void => {
     if (!active) return
     scope[2](() => slot.replace(getSnapshot()))
   }
-  const unsubscribe = storeSubscribe(() => runOwnerTask(owner, checkSnapshot))
-  if (typeof unsubscribe !== 'function') {
-    active = false
-    throw new TypeError(
-      DEV ? 'external store subscribe must return an unsubscribe function' : 'V020',
-    )
-  }
+  const [activate, disposeResource] = createRetainedResource(
+    owner,
+    () => {
+      active = true
+      try {
+        const remove = storeSubscribe(() => runOwnerTask(owner, checkSnapshot))
+        if (typeof remove !== 'function') {
+          throw new TypeError(
+            DEV ? 'external store subscribe must return an unsubscribe function' : 'V020',
+          )
+        }
+        unsubscribe = remove
+        checkSnapshot()
+      } catch (error) {
+        active = false
+        unsubscribe()
+        unsubscribe = noop
+        throw error
+      }
+    },
+    () => {
+      active = false
+      unsubscribe()
+      unsubscribe = noop
+    },
+    0,
+  )
   try {
-    checkSnapshot()
+    activate()
   } catch (error) {
-    active = false
-    unsubscribe()
+    disposeResource()
     throw error
   }
   owner[1].add(() => {
-    active = false
-    unsubscribe()
+    disposeResource()
   })
   return slot
 }
@@ -1525,13 +1754,39 @@ export function useInsertionEffect(
     )
   }
   const lifetimeOwner = activeOwner ?? owner
+  if (!retainedUiEnabled) {
+    let cleanup = noop
+    queueInsertionCommit(owner, () => {
+      if (lifetimeOwner[0]) return
+      cleanup()
+      cleanup = readEffectCleanup(create())
+    })
+    lifetimeOwner[1].add(() => cleanup())
+    return
+  }
   let cleanup = noop
+  const [activate, disposeResource] = createRetainedResource(
+    lifetimeOwner,
+    () => {
+      stagePublication([
+        noop,
+        noop,
+        undefined,
+        () => {
+          cleanup = readEffectCleanup(create())
+        },
+        -20,
+      ])
+    },
+    () => {
+      cleanup()
+      cleanup = noop
+    },
+  )
   queueInsertionCommit(owner, () => {
-    if (lifetimeOwner[0]) return
-    cleanup()
-    cleanup = readEffectCleanup(create())
+    if (!lifetimeOwner[0]) activate()
   })
-  lifetimeOwner[1].add(() => cleanup())
+  lifetimeOwner[1].add(disposeResource)
 }
 
 export function useEffect(create: () => EffectResult, dependencies?: readonly unknown[]): void {
@@ -1551,28 +1806,70 @@ function registerEffect(
     throw new Error(DEV ? 'reactive effect dependencies require compiler lowering' : 'V017')
   }
   const lifetimeOwner = activeOwner ?? owner
+  if (!retainedUiEnabled) {
+    let cleanup = noop
+    let generation = 0
+    const run = (): void => {
+      cleanup()
+      cleanup = readEffectCleanup(create())
+    }
+    queueOwnerCommit(owner, () => {
+      if (lifetimeOwner[0]) return
+      if (passive) {
+        const scheduled = ++generation
+        ;(DEV ? scheduleTask : queueMicrotask)(() => {
+          if (!lifetimeOwner[0] && scheduled === generation) runOwnerTask(lifetimeOwner, run)
+        })
+      } else {
+        run()
+      }
+    })
+    lifetimeOwner[1].add(() => {
+      generation += 1
+      if (passive) (DEV ? scheduleTask : queueMicrotask)(() => runOwnerTask(lifetimeOwner, cleanup))
+      else cleanup()
+    })
+    return
+  }
   let cleanup = noop
   let generation = 0
-  const run = (): void => {
-    cleanup()
-    cleanup = readEffectCleanup(create())
-  }
+  const [activate, disposeResource] = createRetainedResource(
+    lifetimeOwner,
+    () => {
+      stagePublication([
+        noop,
+        noop,
+        undefined,
+        () => {
+          if (passive) {
+            const scheduled = ++generation
+            ;(DEV ? scheduleTask : queueMicrotask)(() => {
+              if (!lifetimeOwner[0] && scheduled === generation) {
+                runOwnerTask(lifetimeOwner, () => {
+                  cleanup = readEffectCleanup(create())
+                })
+              }
+            })
+          } else {
+            cleanup = readEffectCleanup(create())
+          }
+        },
+        passive ? 40 : 20,
+      ])
+    },
+    () => {
+      generation += 1
+      const previousCleanup = cleanup
+      cleanup = noop
+      if (passive)
+        (DEV ? scheduleTask : queueMicrotask)(() => runOwnerTask(lifetimeOwner, previousCleanup))
+      else previousCleanup()
+    },
+  )
   queueOwnerCommit(owner, () => {
-    if (lifetimeOwner[0]) return
-    if (passive) {
-      const scheduled = ++generation
-      ;(DEV ? scheduleTask : queueMicrotask)(() => {
-        if (!lifetimeOwner[0] && scheduled === generation) runOwnerTask(lifetimeOwner, run)
-      })
-    } else {
-      run()
-    }
+    if (!lifetimeOwner[0]) activate()
   })
-  lifetimeOwner[1].add(() => {
-    generation += 1
-    if (passive) (DEV ? scheduleTask : queueMicrotask)(() => runOwnerTask(lifetimeOwner, cleanup))
-    else cleanup()
-  })
+  lifetimeOwner[1].add(disposeResource)
 }
 
 export function compiledLayoutEffect(
@@ -1595,7 +1892,38 @@ export function compiledInsertionEffect(
     throw new Error(DEV ? 'compiled insertion effects must run in their component scope' : 'V016')
   }
   const lifetimeOwner = activeOwner ?? owner
+  if (!retainedUiEnabled) {
+    let mounted = false
+    let currentDependencies: readonly unknown[] | undefined
+    let cleanup = noop
+    const run = (): void => {
+      const nextDependencies = readDependencies?.()
+      if (
+        mounted &&
+        readDependencies !== undefined &&
+        equalDependencies(nextDependencies, currentDependencies)
+      ) {
+        return
+      }
+      cleanup()
+      cleanup = readEffectCleanup(readCreate()())
+      currentDependencies = nextDependencies
+      mounted = true
+    }
+    queueInsertionCommit(owner, () => {
+      if (!lifetimeOwner[0]) run()
+    })
+    const removeUpdater = subscribe(scope, reads, () =>
+      stagePublication([noop, noop, undefined, run, -20]),
+    )
+    lifetimeOwner[1].add(() => {
+      removeUpdater()
+      cleanup()
+    })
+    return
+  }
   let mounted = false
+  let connected = false
   let currentDependencies: readonly unknown[] | undefined
   let cleanup = noop
   const run = (): void => {
@@ -1612,15 +1940,36 @@ export function compiledInsertionEffect(
     currentDependencies = nextDependencies
     mounted = true
   }
-  queueInsertionCommit(owner, () => {
-    if (!lifetimeOwner[0]) run()
-  })
-  const removeUpdater = subscribe(scope, reads, () =>
-    stagePublication([noop, noop, undefined, run, -20]),
+  const [activate, disposeResource] = createRetainedResource(
+    lifetimeOwner,
+    () => {
+      stagePublication([
+        noop,
+        noop,
+        undefined,
+        () => {
+          connected = true
+          run()
+        },
+        -20,
+      ])
+    },
+    () => {
+      connected = false
+      cleanup()
+      cleanup = noop
+      mounted = false
+    },
   )
+  queueInsertionCommit(owner, () => {
+    if (!lifetimeOwner[0]) activate()
+  })
+  const removeUpdater = subscribe(scope, reads, () => {
+    if (connected) stagePublication([noop, noop, undefined, run, -20])
+  })
   lifetimeOwner[1].add(() => {
     removeUpdater()
-    cleanup()
+    disposeResource()
   })
 }
 
@@ -1636,7 +1985,52 @@ export function compiledEffect(
     throw new Error(DEV ? 'compiled effects must run in their component scope' : 'V016')
   }
   const lifetimeOwner = activeOwner ?? owner
+  if (!retainedUiEnabled) {
+    let mounted = false
+    let generation = 0
+    let currentDependencies: readonly unknown[] | undefined
+    let cleanup = noop
+    const run = (): void => {
+      const nextDependencies = readDependencies?.()
+      if (
+        mounted &&
+        readDependencies !== undefined &&
+        equalDependencies(nextDependencies, currentDependencies)
+      ) {
+        return
+      }
+      cleanup()
+      cleanup = readEffectCleanup(readCreate()())
+      currentDependencies = nextDependencies
+      mounted = true
+    }
+    const schedule = (): void => {
+      if (!passive) {
+        run()
+        return
+      }
+      const scheduled = ++generation
+      ;(DEV ? scheduleTask : queueMicrotask)(() => {
+        if (!lifetimeOwner[0] && scheduled === generation) runOwnerTask(lifetimeOwner, run)
+      })
+    }
+    queueOwnerCommit(owner, () => {
+      if (!lifetimeOwner[0]) schedule()
+    })
+    const removeUpdater = subscribe(scope, reads, () => {
+      if (passive) schedule()
+      else stagePublication([noop, noop, undefined, run, 20])
+    })
+    lifetimeOwner[1].add(() => {
+      generation += 1
+      removeUpdater()
+      if (passive) (DEV ? scheduleTask : queueMicrotask)(() => runOwnerTask(lifetimeOwner, cleanup))
+      else cleanup()
+    })
+    return
+  }
   let mounted = false
+  let connected = false
   let generation = 0
   let currentDependencies: readonly unknown[] | undefined
   let cleanup = noop
@@ -1655,6 +2049,7 @@ export function compiledEffect(
     mounted = true
   }
   const schedule = (): void => {
+    if (!connected) return
     if (!passive) {
       run()
       return
@@ -1664,18 +2059,42 @@ export function compiledEffect(
       if (!lifetimeOwner[0] && scheduled === generation) runOwnerTask(lifetimeOwner, run)
     })
   }
+  const [activate, disposeResource] = createRetainedResource(
+    lifetimeOwner,
+    () => {
+      stagePublication([
+        noop,
+        noop,
+        undefined,
+        () => {
+          connected = true
+          schedule()
+        },
+        passive ? 40 : 20,
+      ])
+    },
+    () => {
+      connected = false
+      generation += 1
+      const previousCleanup = cleanup
+      cleanup = noop
+      mounted = false
+      if (passive)
+        (DEV ? scheduleTask : queueMicrotask)(() => runOwnerTask(lifetimeOwner, previousCleanup))
+      else previousCleanup()
+    },
+  )
   queueOwnerCommit(owner, () => {
-    if (!lifetimeOwner[0]) schedule()
+    if (!lifetimeOwner[0]) activate()
   })
   const removeUpdater = subscribe(scope, reads, () => {
+    if (!connected) return
     if (passive) schedule()
     else stagePublication([noop, noop, undefined, run, 20])
   })
   lifetimeOwner[1].add(() => {
-    generation += 1
     removeUpdater()
-    if (passive) (DEV ? scheduleTask : queueMicrotask)(() => runOwnerTask(lifetimeOwner, cleanup))
-    else cleanup()
+    disposeResource()
   })
 }
 
@@ -2154,8 +2573,131 @@ function createOwner(
   context = activeContextFrame ?? activeOwner?.[2] ?? null,
   rootIdentity = activeOwner?.[3] ?? activeRootIdentity ?? createRootIdentity(),
   boundary = activeOwner?.[4] ?? null,
+  retainedConnection = activeOwner?.[5] ?? null,
 ): Owner {
-  return [false, new Set(), context, rootIdentity, boundary]
+  return retainedUiEnabled
+    ? [false, new Set(), context, rootIdentity, boundary, retainedConnection]
+    : [false, new Set(), context, rootIdentity, boundary]
+}
+
+function createRetainedConnection(
+  parent: RetainedConnection | null,
+  visible: boolean,
+): RetainedConnection {
+  const connection: RetainedConnection = {
+    parent,
+    children: new Set(),
+    resources: new Set(),
+    deferredFlushes: new Map(),
+    afterFlush: new Set(),
+    visible,
+    connected: visible && (parent?.connected ?? true),
+    disposed: false,
+  }
+  parent?.children.add(connection)
+  return connection
+}
+
+function createRetainedResource(
+  owner: Owner,
+  connect: () => void,
+  disconnect: () => void,
+  phase = 1,
+): readonly [activate: () => void, dispose: () => void] {
+  const connection = owner[5]
+  const resource: RetainedResource = {
+    owner,
+    connect,
+    disconnect,
+    active: false,
+    connected: false,
+    disposed: false,
+    phase,
+  }
+  connection?.resources.add(resource)
+  const activate = (): void => {
+    if (resource.disposed) return
+    resource.active = true
+    reconcileRetainedResource(resource, connection?.connected ?? true)
+  }
+  const dispose = (): void => {
+    if (resource.disposed) return
+    resource.disposed = true
+    resource.active = false
+    connection?.resources.delete(resource)
+    reconcileRetainedResource(resource, false)
+  }
+  return [activate, dispose]
+}
+
+function reconcileRetainedResource(resource: RetainedResource, connected: boolean): void {
+  const nextConnected = !resource.disposed && resource.active && connected
+  if (resource.connected === nextConnected) return
+  resource.connected = nextConnected
+  try {
+    runOwnerTask(resource.owner, nextConnected ? resource.connect : resource.disconnect)
+  } catch (error) {
+    resource.connected = false
+    throw error
+  }
+}
+
+function updateRetainedConnection(connection: RetainedConnection): void {
+  if (connection.disposed) return
+  const nextConnected = connection.visible && (connection.parent?.connected ?? true)
+  if (connection.connected === nextConnected) return
+  connection.connected = nextConnected
+  if (nextConnected) {
+    for (const [flush, cancel] of connection.deferredFlushes) {
+      cancel()
+      scheduleFlush(flush)
+    }
+    connection.deferredFlushes.clear()
+    for (const resource of [...connection.resources].toSorted(
+      (left, right) => left.phase - right.phase,
+    )) {
+      reconcileRetainedResource(resource, true)
+    }
+  } else {
+    for (const resource of [...connection.resources].toReversed()) {
+      reconcileRetainedResource(resource, false)
+    }
+  }
+  for (const child of connection.children) updateRetainedConnection(child)
+}
+
+function concealDisconnectedDescendants(connection: RetainedConnection): void {
+  for (const child of connection.children) {
+    if (!child.connected) {
+      for (const conceal of child.afterFlush) conceal()
+    }
+    concealDisconnectedDescendants(child)
+  }
+}
+
+function disposeRetainedConnection(connection: RetainedConnection): void {
+  if (connection.disposed) return
+  connection.disposed = true
+  connection.parent?.children.delete(connection)
+  for (const cancel of connection.deferredFlushes.values()) cancel()
+  connection.deferredFlushes.clear()
+  connection.afterFlush.clear()
+  for (const child of connection.children) disposeRetainedConnection(child)
+  connection.children.clear()
+  for (const resource of [...connection.resources].toReversed()) {
+    resource.disposed = true
+    resource.active = false
+    reconcileRetainedResource(resource, false)
+  }
+  connection.resources.clear()
+}
+
+function notifyRetainedFlush(connection: RetainedConnection | null): void {
+  for (let current = connection; current !== null; current = current.parent) {
+    if (!current.connected) {
+      for (const notify of current.afterFlush) notify()
+    }
+  }
 }
 
 function createRootIdentity(
@@ -2686,6 +3228,20 @@ function attachRef<T>(value: RefValue<T>, target: T): () => void {
 function scheduleFlush(flush: () => void): void {
   scheduledFlushes.add(flush)
   if (transactionDepth === 0) drainFlushes()
+}
+
+function scheduleOwnerFlush(owner: Owner, flush: () => void): void {
+  const connection = owner[5]
+  if (connection === null || connection === undefined || connection.connected) {
+    scheduleFlush(flush)
+    return
+  }
+  if (connection.deferredFlushes.has(flush)) return
+  const cancel = scheduleDeferredTask(() => {
+    connection.deferredFlushes.delete(flush)
+    scheduleFlush(flush)
+  })
+  connection.deferredFlushes.set(flush, cancel)
 }
 
 function drainFlushes(): void {

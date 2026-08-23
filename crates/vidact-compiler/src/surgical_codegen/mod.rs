@@ -2298,6 +2298,65 @@ pub(super) fn prepare_suspense_element<'a>(
     prepare_known_suspense_element(ast, options, element)
 }
 
+pub(super) fn prepare_activity_element<'a>(
+    ast: &AstBuilder<'a>,
+    react: &ReactBindings<'_>,
+    options: &CompilationOptions,
+    element: &mut JSXElement<'a>,
+) -> Result<(), Diagnostic> {
+    if !react.is_named_jsx_element(&element.opening_element.name, "Activity") {
+        return Ok(());
+    }
+    prepare_known_activity_element(ast, options, element)
+}
+
+pub(super) fn prepare_known_activity_element<'a>(
+    ast: &AstBuilder<'a>,
+    options: &CompilationOptions,
+    element: &mut JSXElement<'a>,
+) -> Result<(), Diagnostic> {
+    if !options.feature_enabled(CompilerFeature::RetainedUi) {
+        return Err(
+            unsupported("Activity requires the `retained-ui` compiler feature")
+                .with_span(SourceSpan::new(element.span.start, element.span.end)),
+        );
+    }
+    let has_mode = element.opening_element.attributes.iter().any(|item| {
+        matches!(
+            item,
+            JSXAttributeItem::Attribute(attribute)
+                if matches!(&attribute.name, JSXAttributeName::Identifier(name) if name.name == "mode")
+                    && attribute.value.is_some()
+        )
+    });
+    if !has_mode {
+        return Err(
+            unsupported("Activity requires a mode prop").with_span(SourceSpan::new(
+                element.opening_element.span.start,
+                element.opening_element.span.end,
+            )),
+        );
+    }
+
+    let children = element.children.clone_in_with_semantic_ids(ast.allocator());
+    let fragment = Expression::JSXFragment(JSXFragment::boxed(
+        SPAN,
+        JSXOpeningFragment::new(SPAN, ast),
+        children,
+        JSXClosingFragment::new(SPAN, ast),
+        ast,
+    ));
+    element.children.clear();
+    element.children.push(JSXChild::ExpressionContainer(
+        JSXExpressionContainer::boxed(
+            SPAN,
+            JSXExpression::from(arrow_expression(ast, [], fragment)),
+            ast,
+        ),
+    ));
+    Ok(())
+}
+
 pub(super) fn prepare_known_suspense_element<'a>(
     ast: &AstBuilder<'a>,
     options: &CompilationOptions,
@@ -2603,6 +2662,12 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
     }
 
     fn visit_jsx_element(&mut self, element: &mut JSXElement<'a>) {
+        if let Err(diagnostic) =
+            prepare_activity_element(self.ast, self.react, self.options, element)
+        {
+            self.diagnostic = Some(diagnostic);
+            return;
+        }
         if let Err(diagnostic) =
             prepare_suspense_element(self.ast, self.react, self.options, element)
         {

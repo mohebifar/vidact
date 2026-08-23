@@ -3,3 +3,4 @@
 
 declare const __VIDACT_DEV__: boolean
 declare const __VIDACT_UNSAFE_HTML__: boolean
+declare const __VIDACT_RETAINED_UI__: boolean

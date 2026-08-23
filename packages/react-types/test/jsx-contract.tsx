@@ -1,5 +1,6 @@
 import type { VidactNode } from '@vidact/react-types'
 import {
+  Activity,
   Suspense,
   createContext,
   lazy,
@@ -75,6 +76,11 @@ const asyncBoundary = (
     <LazyMessage />
   </Suspense>
 )
+const retainedBoundary = (
+  <Activity mode="hidden">
+    <strong>retained</strong>
+  </Activity>
+)
 const usedPromise: string = use(Promise.resolve('ready'))
 const [actionState, submitAction, actionPending] = useActionState(
   async (previous: string, data: FormData) => previous + String(data.get('value')),
@@ -98,6 +104,7 @@ void contextProvider
 void legacyContextProvider
 void portal
 void asyncBoundary
+void retainedBoundary
 void usedPromise
 void actionPending
 void optimisticState

@@ -75,7 +75,7 @@ impl<'a> VisitMut<'a> for NamespaceTransformer<'a, '_> {
         let tag = super::raw_html::intrinsic_jsx_name(&element.opening_element.name)
             .filter(|name| name.chars().next().is_some_and(char::is_lowercase));
         let is_component = tag.is_none();
-        if is_component && !is_compiler_suspense(element) {
+        if is_component && !is_compiler_staged_boundary(element) {
             for child in &mut element.children {
                 defer_child(self.ast, child);
             }
@@ -108,7 +108,13 @@ impl<'a> VisitMut<'a> for NamespaceTransformer<'a, '_> {
     }
 }
 
-fn is_compiler_suspense(element: &JSXElement<'_>) -> bool {
+fn is_compiler_staged_boundary(element: &JSXElement<'_>) -> bool {
+    let has_mode = element.opening_element.attributes.iter().any(|item| {
+        matches!(
+            item,
+            JSXAttributeItem::Attribute(attribute) if attribute.is_identifier("mode")
+        )
+    });
     let has_fallback_factory = element.opening_element.attributes.iter().any(|item| {
         let JSXAttributeItem::Attribute(attribute) = item else {
             return false;
@@ -123,7 +129,7 @@ fn is_compiler_suspense(element: &JSXElement<'_>) -> bool {
                     )
             )
     });
-    has_fallback_factory
+    (has_fallback_factory || has_mode)
         && matches!(
             element.children.as_slice(),
             [JSXChild::ExpressionContainer(container)]

@@ -31,6 +31,50 @@ fn compile_actions(input: ModuleInput<'_>) -> Result<String, Vec<Diagnostic>> {
     )
 }
 
+fn compile_retained_ui(input: ModuleInput<'_>) -> Result<String, Vec<Diagnostic>> {
+    compile_surgical_module_with_options(
+        input,
+        &CompilationOptions::default().with_feature(CompilerFeature::RetainedUi),
+    )
+}
+
+#[test]
+fn gates_activity_and_stages_its_children() {
+    let source = r#"
+        import { Activity, useState } from 'react';
+        function Panel() { return <p>retained</p>; }
+        export function App() {
+            const [mode, setMode] = useState<'visible' | 'hidden'>('visible');
+            return <><button onClick={() => setMode('hidden')}>hide</button><Activity mode={mode}><Panel /></Activity></>;
+        }
+    "#;
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "ActivityDisabled.tsx",
+        source,
+    })
+    .expect_err("Activity must remain opt-in");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.message.contains("`retained-ui`")
+            && diagnostic.span.is_some()
+    }));
+
+    let output = compile_retained_ui(ModuleInput {
+        filename: "Activity.tsx",
+        source,
+    })
+    .expect("retained-ui should stage Activity children and lower its reactive mode");
+    assert!(
+        output.contains("<Activity mode={__vidactBinding("),
+        "{output}"
+    );
+    assert!(
+        output.contains(">{() => <><Panel /></>}</Activity>"),
+        "{output}"
+    );
+    assert!(!output.contains("__vidactDeferred(() => () =>"), "{output}");
+}
+
 #[test]
 fn gates_and_lowers_actions_at_their_source_spans() {
     let source = r#"

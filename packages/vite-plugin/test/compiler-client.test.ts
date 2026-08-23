@@ -159,6 +159,19 @@ describe('vidact compiler client', () => {
     expect(virtualReactDomModule({})).not.toContain('flushSync')
   })
 
+  it('exposes Activity only through retained-ui target-specific facades', () => {
+    expect(virtualReactModule({ features: ['retained-ui'] })).toContain(
+      'export { Activity } from "@vidact/runtime/retained-ui"',
+    )
+    expect(virtualReactModule({ target: 'hydrate', features: ['retained-ui'] })).toContain(
+      '@vidact/runtime/retained-ui/hydrate',
+    )
+    expect(virtualReactModule({ target: 'server', features: ['retained-ui'] })).toContain(
+      '@vidact/runtime/retained-ui/server',
+    )
+    expect(virtualReactModule({})).not.toContain('Activity')
+  })
+
   it('selects isolated Actions facades and exposes form APIs only when enabled', () => {
     expect(virtualReactModule({ features: ['actions'] })).toContain('@vidact/runtime/actions"')
     expect(virtualReactModule({ target: 'hydrate', features: ['actions'] })).toContain(

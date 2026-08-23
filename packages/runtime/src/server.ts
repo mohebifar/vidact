@@ -34,6 +34,7 @@ interface RenderContext {
   hydrationMarkers: boolean
   identifierPrefix: string
   nextId: number
+  activityHidden: boolean
 }
 
 interface ContextState<Value> {
@@ -205,30 +206,40 @@ function createServerElement(
 
   if (!VALID_ATTRIBUTE_NAME.test(type)) throw new TypeError(`invalid server element name ${type}`)
   return serverNode((context) => {
-    const attributes = serializeAttributes(props)
-    if (VOID_ELEMENTS.has(type)) {
-      if (hasRenderableChild(props?.children as ServerChild) || readRawHtml(props) !== undefined) {
-        throw new TypeError(`${type} is a void element and cannot have children or raw HTML`)
+    const hiddenByActivity = context.activityHidden
+    const previousActivityHidden = context.activityHidden
+    context.activityHidden = false
+    try {
+      const attributes = serializeAttributes(props, hiddenByActivity)
+      if (VOID_ELEMENTS.has(type)) {
+        if (
+          hasRenderableChild(props?.children as ServerChild) ||
+          readRawHtml(props) !== undefined
+        ) {
+          throw new TypeError(`${type} is a void element and cannot have children or raw HTML`)
+        }
+        return `<${type}${attributes}>`
       }
-      return `<${type}${attributes}>`
-    }
 
-    const rawHtml = readRawHtml(props)
-    if (rawHtml !== undefined && hasRenderableChild(props?.children as ServerChild)) {
-      throw new TypeError('cannot set both children and dangerouslySetInnerHTML')
+      const rawHtml = readRawHtml(props)
+      if (rawHtml !== undefined && hasRenderableChild(props?.children as ServerChild)) {
+        throw new TypeError('cannot set both children and dangerouslySetInnerHTML')
+      }
+      const hasChildren = Object.hasOwn(props ?? {}, 'children')
+      const children =
+        rawHtml === undefined
+          ? hasChildren
+            ? multipleChildren
+              ? serializeChildren(props?.children as ServerChild, context, !isRawTextElement(type))
+              : serializeSlot(props?.children as ServerChild, context, !isRawTextElement(type))
+            : ''
+          : context.hydrationMarkers
+            ? hydrationRange('h', assertSafeHydrationRawHtml(rawHtml))
+            : rawHtml
+      return `<${type}${attributes}>${children}</${type}>`
+    } finally {
+      context.activityHidden = previousActivityHidden
     }
-    const hasChildren = Object.hasOwn(props ?? {}, 'children')
-    const children =
-      rawHtml === undefined
-        ? hasChildren
-          ? multipleChildren
-            ? serializeChildren(props?.children as ServerChild, context, !isRawTextElement(type))
-            : serializeSlot(props?.children as ServerChild, context, !isRawTextElement(type))
-          : ''
-        : context.hydrationMarkers
-          ? hydrationRange('h', assertSafeHydrationRawHtml(rawHtml))
-          : rawHtml
-    return `<${type}${attributes}>${children}</${type}>`
   }, 'intrinsic')
 }
 
@@ -241,6 +252,7 @@ export function renderToString(
     hydrationMarkers: true,
     identifierPrefix: options.identifierPrefix ?? '',
     nextId: 0,
+    activityHidden: false,
   }
   activeRender = context
   try {
@@ -262,6 +274,7 @@ export function renderToStaticMarkup(
     hydrationMarkers: false,
     identifierPrefix: options.identifierPrefix ?? '',
     nextId: 0,
+    activityHidden: false,
   }
   activeRender = context
   try {
@@ -378,6 +391,7 @@ export function useId(): string {
     hydrationMarkers: true,
     identifierPrefix: '',
     nextId: 0,
+    activityHidden: false,
   })
   const id = `:${context.identifierPrefix}r${context.nextId}:`
   context.nextId += 1
@@ -472,6 +486,27 @@ export function Suspense(props: Record<string, unknown>): ServerNode {
 
 serverBuiltins.add(Suspense)
 
+export function Activity(props: Record<string, unknown>): ServerNode {
+  const render = props.children
+  if (typeof render !== 'function') {
+    throw new TypeError('Activity children must be a compiler-generated render function')
+  }
+  if (props.mode !== 'visible' && props.mode !== 'hidden') {
+    throw new TypeError('Activity mode must be "visible" or "hidden"')
+  }
+  return serverNode((context) => {
+    const previousActivityHidden = context.activityHidden
+    context.activityHidden = props.mode === 'hidden' || previousActivityHidden
+    try {
+      return serializeChild((render as () => ServerChild)(), context)
+    } finally {
+      context.activityHidden = previousActivityHidden
+    }
+  }, 'transparent')
+}
+
+serverBuiltins.add(Activity)
+
 export function createPortal(_children: ServerChild, _container: unknown): never {
   throw new Error(
     'portals cannot be emitted by the server target; render portal content in the client root',
@@ -526,6 +561,9 @@ function serializeChild(value: ServerChild, context: RenderContext, markScalar =
     throw new TypeError('unsupported server child value')
   }
   const content = escapeText(String(value))
+  if (context.activityHidden && content !== '') {
+    throw new TypeError('initially hidden Activity server children require a host element root')
+  }
   return context.hydrationMarkers && markScalar ? hydrationRange('t', content) : content
 }
 
@@ -534,12 +572,19 @@ function hasRenderableChild(value: ServerChild): boolean {
   return !Array.isArray(value) || value.some(hasRenderableChild)
 }
 
-function serializeAttributes(props: ServerProps): string {
-  if (props === null) return ''
-  return Object.keys(props)
+function serializeAttributes(props: ServerProps, hiddenByActivity = false): string {
+  if (props === null) return ' style="display:none!important"'
+  const attributes = Object.keys(props)
     .toSorted()
-    .map((name) => serializeAttribute(name, props[name]))
+    .map((name) =>
+      name === 'style'
+        ? serializeStyleAttribute(props[name], hiddenByActivity)
+        : serializeAttribute(name, props[name]),
+    )
     .join('')
+  return hiddenByActivity && !Object.hasOwn(props, 'style')
+    ? `${attributes} style="display:none!important"`
+    : attributes
 }
 
 function serializeAttribute(name: string, value: unknown): string {
@@ -578,9 +623,15 @@ function attributeName(name: string): string {
   return ATTRIBUTE_ALIASES[name] ?? name
 }
 
-function serializeStyleAttribute(value: unknown): string {
-  if (typeof value === 'string') return ` style="${escapeAttribute(value)}"`
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return ''
+function serializeStyleAttribute(value: unknown, hiddenByActivity = false): string {
+  if (typeof value === 'string') {
+    const separator = value === '' || value.endsWith(';') ? '' : ';'
+    const style = hiddenByActivity ? `${value}${separator}display:none!important` : value
+    return style === '' ? '' : ` style="${escapeAttribute(style)}"`
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return hiddenByActivity ? ' style="display:none!important"' : ''
+  }
 
   const declarations = Object.entries(value)
     .toSorted(([left], [right]) => left.localeCompare(right))
@@ -591,6 +642,7 @@ function serializeStyleAttribute(value: unknown): string {
         typeof item === 'number' && item !== 0 && !UNITLESS_STYLES.has(name) ? `${item}px` : item
       return `${cssName}:${String(cssValue)}`
     })
+  if (hiddenByActivity) declarations.push('display:none!important')
   return declarations.length === 0 ? '' : ` style="${escapeAttribute(declarations.join(';'))}"`
 }
 

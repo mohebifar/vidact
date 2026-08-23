@@ -125,6 +125,7 @@ export namespace JSX {
     | keyof IntrinsicElements
     // Component props are checked from the component's own signature.
     | ((props: never) => VidactNode)
+    | typeof import('react').Activity
     | Context<never>
     | Provider<never>
 
@@ -145,8 +146,11 @@ export namespace JSX {
     [Name in `${string}-${string}`]: CustomElementAttributes
   }
 
-  type LibraryManagedAttributes<Component, Props> =
-    Component extends typeof import('react').Suspense
+  type LibraryManagedAttributes<Component, Props> = Props extends import('react').ActivityProps
+    ? Component extends typeof import('react').Activity
+      ? { children?: VidactNode; mode: 'visible' | 'hidden'; name?: string }
+      : ReactJSX.LibraryManagedAttributes<Component, Props>
+    : Component extends typeof import('react').Suspense
       ? Component extends { readonly _result: unknown }
         ? ReactJSX.LibraryManagedAttributes<Component, Props>
         : { children?: VidactNode; fallback: VidactNode }

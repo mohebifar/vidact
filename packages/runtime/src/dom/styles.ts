@@ -1,3 +1,5 @@
+import { isHydrating } from '../hydration-bridge.ts'
+
 const unitlessProperties = new Set([
   'animationIterationCount',
   'aspectRatio',
@@ -45,6 +47,12 @@ const unitlessProperties = new Set([
 ])
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
+let retainedUiEnabled = typeof __VIDACT_RETAINED_UI__ !== 'undefined' && __VIDACT_RETAINED_UI__
+
+/** @internal */
+export function enableRetainedUiStyles(): void {
+  retainedUiEnabled = true
+}
 
 const appliedStyleNames = new WeakMap<Element, Set<string>>()
 
@@ -69,7 +77,14 @@ export function applyStyleProp(element: Element, value: unknown): void {
     if (!nextNames.has(name)) setStyleValue(style, name, '')
   }
   for (const [name, next] of nextEntries) {
-    setStyleValue(style, name, serializeStyleValue(name, next))
+    const serialized = serializeStyleValue(name, next)
+    if (
+      !retainedUiEnabled ||
+      !isHydrating() ||
+      hydrationStyleValue(element, style, name) !== serialized
+    ) {
+      setStyleValue(style, name, serialized)
+    }
   }
 
   if (nextNames.size === 0) {
@@ -78,6 +93,24 @@ export function applyStyleProp(element: Element, value: unknown): void {
   } else {
     appliedStyleNames.set(element, nextNames)
   }
+}
+
+function hydrationStyleValue(element: Element, style: CSSStyleDeclaration, name: string): string {
+  if (
+    name === 'display' &&
+    style.display === 'none' &&
+    style.getPropertyPriority('display') === 'important'
+  ) {
+    const cssText = element.getAttribute('style')
+    const hiddenDeclaration = 'display:none!important'
+    if (cssText?.endsWith(hiddenDeclaration)) {
+      const authored = document.createElement('div').style
+      authored.cssText = cssText.slice(0, -hiddenDeclaration.length)
+      return authored.display
+    }
+  }
+  if (name.startsWith('--') || name.includes('-')) return style.getPropertyValue(name)
+  return String(Reflect.get(style, name === 'float' ? 'cssFloat' : name) ?? '')
 }
 
 function serializeStyleValue(name: string, value: unknown): string {

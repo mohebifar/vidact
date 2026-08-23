@@ -56,6 +56,18 @@
       "types": "./dist/hydrate.d.ts",
       "import": "./dist/hydrate.js"
     },
+    "./retained-ui": {
+      "types": "./dist/retained-ui.d.ts",
+      "import": "./dist/retained-ui.js"
+    },
+    "./retained-ui/hydrate": {
+      "types": "./dist/retained-ui-hydrate.d.ts",
+      "import": "./dist/retained-ui-hydrate.js"
+    },
+    "./retained-ui/server": {
+      "types": "./dist/retained-ui-server.d.ts",
+      "import": "./dist/retained-ui-server.js"
+    },
     "./hydrate/jsx-dev-runtime": {
       "types": "./dist/hydrate-jsx-dev-runtime.d.ts",
       "import": "./dist/hydrate-jsx-dev-runtime.js"
@@ -115,7 +127,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node ../../scripts/finalize-typescript-package.mjs dist src/env.d.ts",
-    "test": "vitest run && vitest run --config vitest.server.config.ts",
+    "test": "vitest run && vitest run --config vitest.retained-ui.config.ts && vitest run --config vitest.server.config.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {

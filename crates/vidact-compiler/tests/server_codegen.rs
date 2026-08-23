@@ -92,6 +92,39 @@ fn stages_async_server_boundaries_only_when_enabled() {
 }
 
 #[test]
+fn stages_server_activity_only_when_retained_ui_is_enabled() {
+    let input = ModuleInput {
+        filename: "ServerActivity.tsx",
+        source: r#"
+            import { Activity } from 'react';
+            export function ServerActivity() {
+                return <Activity mode="hidden"><p>retained</p></Activity>;
+            }
+        "#,
+    };
+    let diagnostics =
+        compile_server_module(input).expect_err("server Activity must remain feature-gated");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.message.contains("`retained-ui`")
+            && diagnostic.span.is_some()
+    }));
+
+    let compilation = compile_server_module_with_options(
+        input,
+        &CompilationOptions::new(CompilerTarget::Server).with_feature(CompilerFeature::RetainedUi),
+    )
+    .expect("the retained-ui server target should preserve a staged child factory");
+    assert!(compilation.code.contains("<Activity mode=\"hidden\">"));
+    assert!(
+        compilation.code.contains("function _temp()")
+            && compilation.code.contains("return <><p>retained</p></>;"),
+        "{}",
+        compilation.code
+    );
+}
+
+#[test]
 fn gates_concurrent_server_hooks_at_their_calls() {
     let input = ModuleInput {
         filename: "ServerConcurrent.tsx",

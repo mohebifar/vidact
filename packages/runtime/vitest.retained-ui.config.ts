@@ -4,11 +4,11 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   define: {
     __VIDACT_DEV__: 'true',
-    __VIDACT_UNSAFE_HTML__: 'true',
+    __VIDACT_RETAINED_UI__: 'false',
+    __VIDACT_UNSAFE_HTML__: 'false',
   },
   test: {
-    include: ['test/**/*.browser.test.ts', '../test-support/src/tests/**/*.browser.test.ts'],
-    exclude: ['test/lifecycle/activity.browser.test.ts'],
+    include: ['test/lifecycle/activity.browser.test.ts'],
     browser: {
       enabled: true,
       headless: true,
