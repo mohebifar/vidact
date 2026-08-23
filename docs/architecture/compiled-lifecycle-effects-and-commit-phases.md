@@ -102,8 +102,10 @@ rollback; passive failures enter it from their owned microtask.
 
 Common subscription, measurement, and imperative-library effects now compose
 with Vidact ownership without component reruns. The runtime pays scheduling
-bytes only in chunks that import an effect capability. Custom hooks and a
-public `act` drain API remain follow-up work on this phase model.
+bytes only in chunks that import an effect capability. Custom hooks remain
+follow-up work on this phase model. The test-support `act` API drains the
+development passive queue deterministically; production uses native
+`queueMicrotask` directly.
 
 ## Verification
 
@@ -122,6 +124,8 @@ public `act` drain API remain follow-up work on this phase model.
   stable subscription identity, live state reads, and post-disposal failure.
 - `tests/browser/corpus/apps/insertion-effect/InsertionEffectApp.browser.test.ts`
   proves initial and reactive insertion → ref → layout ordering.
+- `packages/test-support/src/tests/act.browser.test.ts` proves deterministic
+  passive run, cleanup, cascading state, disposal, and error draining.
 - `cargo test -p vidact-compiler`
 - `pnpm --filter @vidact/browser-corpus test`
 - `pnpm size`

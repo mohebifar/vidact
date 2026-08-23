@@ -5,6 +5,7 @@ import {
 } from './dom/namespace.ts'
 import { createIndexedList } from './indexed-list.ts'
 import { createKeyedList } from './keyed-list.ts'
+import { scheduleTask } from './scheduler.ts'
 import { intersectsSources, isEmptySources, unionSources, type SourceMask } from './source-mask.ts'
 import { createStateSlot, type StateSlot } from './state-slot.ts'
 
@@ -1224,7 +1225,7 @@ function registerEffect(
     if (lifetimeOwner[0]) return
     if (passive) {
       const scheduled = ++generation
-      queueMicrotask(() => {
+      ;(DEV ? scheduleTask : queueMicrotask)(() => {
         if (!lifetimeOwner[0] && scheduled === generation) runOwnerTask(lifetimeOwner, run)
       })
     } else {
@@ -1233,7 +1234,7 @@ function registerEffect(
   })
   lifetimeOwner[1].add(() => {
     generation += 1
-    if (passive) queueMicrotask(() => runOwnerTask(lifetimeOwner, cleanup))
+    if (passive) (DEV ? scheduleTask : queueMicrotask)(() => runOwnerTask(lifetimeOwner, cleanup))
     else cleanup()
   })
 }
@@ -1323,7 +1324,7 @@ export function compiledEffect(
       return
     }
     const scheduled = ++generation
-    queueMicrotask(() => {
+    ;(DEV ? scheduleTask : queueMicrotask)(() => {
       if (!lifetimeOwner[0] && scheduled === generation) runOwnerTask(lifetimeOwner, run)
     })
   }
@@ -1337,7 +1338,7 @@ export function compiledEffect(
   lifetimeOwner[1].add(() => {
     generation += 1
     removeUpdater()
-    if (passive) queueMicrotask(() => runOwnerTask(lifetimeOwner, cleanup))
+    if (passive) (DEV ? scheduleTask : queueMicrotask)(() => runOwnerTask(lifetimeOwner, cleanup))
     else cleanup()
   })
 }

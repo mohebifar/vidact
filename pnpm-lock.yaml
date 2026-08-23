@@ -81,6 +81,10 @@ importers:
         version: 4.1.11(@types/node@24.13.3)(@vitest/browser-playwright@4.1.11)(vite@8.2.2(@types/node@24.13.3))
 
   packages/test-support:
+    dependencies:
+      '@vidact/runtime':
+        specifier: workspace:*
+        version: link:../runtime
     devDependencies:
       typescript:
         specifier: 7.0.2

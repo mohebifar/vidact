@@ -1,4 +1,5 @@
 import { mountCompiled } from '@vidact/runtime'
+import { act } from '@vidact/test-support'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import ErrorBoundaryApp, { readCaughtErrors, resetCaughtErrors } from './ErrorBoundaryApp.tsx'
@@ -16,7 +17,9 @@ describe('compiled function error boundaries', () => {
   it('recovers render, event, and passive effect failures without partial publication', async () => {
     const host = document.createElement('div')
     document.body.append(host)
-    dispose = mountCompiled(ErrorBoundaryApp, host).dispose
+    await act(() => {
+      dispose = mountCompiled(ErrorBoundaryApp, host).dispose
+    })
 
     host.querySelector<HTMLButtonElement>('[data-render]')!.click()
     expect(host.querySelector('[data-fallback] output')?.textContent).toBe('render failed')
@@ -28,8 +31,7 @@ describe('compiled function error boundaries', () => {
     expect(host.querySelector('[data-fallback] output')?.textContent).toBe('event failed')
     host.querySelector<HTMLButtonElement>('[data-reset]')!.click()
 
-    host.querySelector<HTMLButtonElement>('[data-effect]')!.click()
-    await Promise.resolve()
+    await act(() => host.querySelector<HTMLButtonElement>('[data-effect]')!.click())
     expect(host.querySelector('[data-fallback] output')?.textContent).toBe('effect failed')
     expect(readCaughtErrors()).toEqual(['render failed', 'event failed', 'effect failed'])
   })

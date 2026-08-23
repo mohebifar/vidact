@@ -24,6 +24,7 @@ const fixtures = [
     entry: path.join(repository, 'examples/todomvc/src/TodoApp.tsx'),
     gzipBudget: 10_526,
   },
+  { name: 'effect', entry: path.join(directory, 'fixtures/effect.tsx'), gzipBudget: 8_100 },
 ]
 
 const measurements = await Promise.all(fixtures.map(measureFixture))
