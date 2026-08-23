@@ -13,7 +13,8 @@
     },
     {
       "path": "accepted/event-policy.tsx",
-      "expectation": "accepted",
+      "expectation": "different",
+      "difference": "Event handlers receive native DOM Event objects rather than React SyntheticEvent wrappers.",
       "components": ["EventPolicy"]
     },
     {
@@ -100,6 +101,41 @@
       "expectation": "rejected",
       "code": "UnsupportedSyntax",
       "spanContains": "Type"
+    },
+    {
+      "path": "rejected/prop-object-mutation.tsx",
+      "expectation": "rejected",
+      "code": "DestructiveRenderMutation",
+      "spanContains": "user"
+    },
+    {
+      "path": "rejected/prop-assignment.tsx",
+      "expectation": "rejected",
+      "code": "DestructiveRenderMutation",
+      "spanContains": "label"
+    },
+    {
+      "path": "rejected/global-update.tsx",
+      "expectation": "rejected",
+      "code": "DestructiveRenderMutation",
+      "spanContains": "shared"
+    },
+    {
+      "path": "rejected/residual-state-call.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "useState(0)"
+    },
+    {
+      "path": "rejected/untracked-default-prop.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "name.toUpperCase()"
+    },
+    {
+      "path": "accepted/local-render-mutation.tsx",
+      "expectation": "accepted",
+      "components": ["LocalRenderMutation"]
     },
     {
       "path": "rejected/raw-html-children.tsx",
