@@ -129,6 +129,11 @@
       "components": ["NamedConsumer", "UseConsumer", "ContextApp"]
     },
     {
+      "path": "accepted/sync-external-store.tsx",
+      "expectation": "accepted",
+      "components": ["ExternalStore"]
+    },
+    {
       "path": "rejected/foreign-array-call.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",

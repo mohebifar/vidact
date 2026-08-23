@@ -147,6 +147,10 @@ impl<'s> ReactBindings<'s> {
         }
     }
 
+    pub(crate) fn is_sync_external_store_call(&self, call: &CallExpression<'_>) -> bool {
+        self.is_named_call(call, "useSyncExternalStore")
+    }
+
     fn is_named_call(&self, call: &CallExpression<'_>, name: &str) -> bool {
         match call.callee.without_parentheses() {
             Expression::Identifier(identifier) => reference_symbol(identifier, self.scoping)

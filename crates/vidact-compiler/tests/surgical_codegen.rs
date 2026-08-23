@@ -921,6 +921,39 @@ fn compiles_context_reads_into_owner_scoped_slots() {
 }
 
 #[test]
+fn compiles_external_store_snapshots_into_owned_slots() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "StoreStatus.tsx",
+        source: r#"
+            import { useSyncExternalStore as useStore } from 'react';
+            const listeners = new Set();
+            let value = 0;
+            const subscribe = (listener) => {
+                listeners.add(listener);
+                return () => listeners.delete(listener);
+            };
+            const getSnapshot = () => value;
+            export function StoreStatus(): Node {
+                const snapshot = useStore(subscribe, getSnapshot, () => -1);
+                return <output>{snapshot}</output>;
+            }
+        "#,
+    })
+    .expect("external stores should lower through semantic React imports");
+
+    assert!(
+        output.contains("createCompiledExternalStore as __vidactCreateExternalStore"),
+        "{output}"
+    );
+    assert!(
+        output.contains("const snapshot = __vidactCreateExternalStore("),
+        "{output}"
+    );
+    assert!(output.contains("() => snapshot.get()"), "{output}");
+    assert!(!output.contains("useStore("), "{output}");
+}
+
+#[test]
 fn compiles_aliased_props_into_local_updater_slots() {
     let output = compile_surgical_module(ModuleInput {
         filename: "AliasedProp.tsx",

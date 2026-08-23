@@ -344,6 +344,44 @@ export function createCompiledContext<T>(
   return createCompiledProp(scope, sourceMask, input)
 }
 
+export function createCompiledExternalStore<T>(
+  scope: CompiledScope,
+  sourceMask: SourceMask,
+  storeSubscribe: (onStoreChange: () => void) => () => void,
+  getSnapshot: () => T,
+  _getServerSnapshot?: () => T,
+): StateSlot<T> {
+  const owner = scopeOwners.get(scope)
+  if (owner === undefined) {
+    throw new Error(DEV ? 'createCompiledExternalStore received an unknown scope' : 'V003')
+  }
+  const slot = createStateSlot(scope[1], sourceMask, getSnapshot(), stateWriteGuard(scope))
+  let active = true
+  const checkSnapshot = (): void => {
+    if (!active) return
+    scope[2](() => slot.replace(getSnapshot()))
+  }
+  const unsubscribe = storeSubscribe(checkSnapshot)
+  if (typeof unsubscribe !== 'function') {
+    active = false
+    throw new TypeError(
+      DEV ? 'external store subscribe must return an unsubscribe function' : 'V020',
+    )
+  }
+  try {
+    checkSnapshot()
+  } catch (error) {
+    active = false
+    unsubscribe()
+    throw error
+  }
+  owner[1].add(() => {
+    active = false
+    unsubscribe()
+  })
+  return slot
+}
+
 export function useContext<T>(context: CompiledContext<T>): T {
   if (activeConstructionOwner === null) {
     throw new Error(DEV ? 'useContext must run during compiled component construction' : 'V019')
@@ -354,6 +392,14 @@ export function useContext<T>(context: CompiledContext<T>): T {
 
 export function use<T>(context: CompiledContext<T>): T {
   return useContext(context)
+}
+
+export function useSyncExternalStore<T>(
+  _subscribe: (onStoreChange: () => void) => () => void,
+  _getSnapshot: () => T,
+  _getServerSnapshot?: () => T,
+): T {
+  throw new Error(DEV ? 'useSyncExternalStore requires compiler lowering' : 'V021')
 }
 
 export function useMemo<T>(factory: () => T, _dependencies: readonly unknown[]): T {

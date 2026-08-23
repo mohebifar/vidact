@@ -53,6 +53,7 @@ const COMPILED_SPREAD: &str = "__vidactSpread";
 const COMPILED_ROOT: &str = "__vidactCompiledRoot";
 const CHOOSE: &str = "__vidactChoose";
 const CREATE_CONTEXT: &str = "__vidactCreateContext";
+const CREATE_EXTERNAL_STORE: &str = "__vidactCreateExternalStore";
 const CREATE_PROP: &str = "__vidactCreateProp";
 const CREATE_REST_PROP: &str = "__vidactCreateRestProp";
 const CREATE_REDUCER: &str = "__vidactCreateReducer";
@@ -180,6 +181,7 @@ fn transform_program<'a>(
         COMPILED_ROOT,
         CHOOSE,
         CREATE_CONTEXT,
+        CREATE_EXTERNAL_STORE,
         CREATE_PROP,
         CREATE_REST_PROP,
         CREATE_REDUCER,
@@ -326,6 +328,11 @@ impl<'a> Visit<'a> for PostTransformReactUsage<'_, '_> {
                 .get_or_insert((hook.name(), call.span));
             return;
         }
+        if self.react.is_sync_external_store_call(call) {
+            self.remaining_compiled_hook_call
+                .get_or_insert(("useSyncExternalStore", call.span));
+            return;
+        }
         walk_call_expression(self, call);
     }
 
@@ -375,7 +382,7 @@ fn transform_component<'a>(
             let Some(Expression::CallExpression(call)) = &declarator.init else {
                 continue;
             };
-            if react.context_hook_call(call).is_some()
+            if (react.context_hook_call(call).is_some() || react.is_sync_external_store_call(call))
                 && !source_ids.contains_key(identifier.name.as_str())
             {
                 source_ids.insert(
@@ -392,6 +399,7 @@ fn transform_component<'a>(
     let mut source_symbols = BTreeMap::<SymbolId, SourceId>::new();
     let mut state_symbols = BTreeMap::<SymbolId, StateReference<'a>>::new();
     let mut context_sources = BTreeSet::<SourceId>::new();
+    let mut external_sources = BTreeSet::<SourceId>::new();
     let mut memo_sources = BTreeSet::<SourceId>::new();
     let iterative_plans = iterative::collect(&ast, body, scoping)?;
     let (mut item_source_symbols, mut item_state_symbols) = item_parameters(body, &ast);
@@ -463,6 +471,19 @@ fn transform_component<'a>(
                         path: Vec::new(),
                     },
                 );
+            } else if let Some(value) =
+                external_store_binding_symbol(declarator, &source_ids, &react)?
+            {
+                external_sources.insert(value.source);
+                source_symbols.insert(value.symbol, value.source);
+                state_symbols.insert(
+                    value.symbol,
+                    StateReference {
+                        state_name: ast.allocator().alloc_str(value.name),
+                        setter: false,
+                        path: Vec::new(),
+                    },
+                );
             } else if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
                 && let Some(source) = source_ids.get(identifier.name.as_str())
                 && let Some(symbol) = identifier.symbol_id.get()
@@ -516,12 +537,22 @@ fn transform_component<'a>(
                 &item_source_symbols,
             )?;
             transform_context_declarator(&ast, declarator, &source_ids, &react)?;
+            transform_external_store_declarator(
+                &ast,
+                declarator,
+                &source_ids,
+                &react,
+                scoping,
+                &source_symbols,
+                &item_source_symbols,
+            )?;
             if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
                 && ir.sources.iter().any(|source| {
                     source.kind == SourceKind::Derived
                         && source.name == identifier.name.as_str()
                         && !memo_sources.contains(&source.id)
                         && !context_sources.contains(&source.id)
+                        && !external_sources.contains(&source.id)
                 })
             {
                 declarator.kind = VariableDeclarationKind::Let;
@@ -649,7 +680,10 @@ fn transform_component<'a>(
         let [write] = updater.writes.as_slice() else {
             return Err(unsupported("derived updater must write exactly one source"));
         };
-        if memo_sources.contains(write) || context_sources.contains(write) {
+        if memo_sources.contains(write)
+            || context_sources.contains(write)
+            || external_sources.contains(write)
+        {
             continue;
         }
         let source = ir
@@ -923,6 +957,43 @@ fn context_binding_symbol<'a>(
     )))
 }
 
+fn external_store_binding_symbol<'a>(
+    declarator: &'a VariableDeclarator<'a>,
+    sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
+) -> Result<Option<StateBinding<'a>>, Diagnostic> {
+    let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+        return Ok(None);
+    };
+    let Some(Expression::CallExpression(call)) = &declarator.init else {
+        return Ok(None);
+    };
+    if !react.is_sync_external_store_call(call) {
+        return Ok(None);
+    }
+    let source = sources
+        .get(identifier.name.as_str())
+        .copied()
+        .ok_or_else(|| {
+            unsupported(format!(
+                "external store {} is absent from analysis",
+                identifier.name
+            ))
+            .with_span(SourceSpan::new(identifier.span.start, identifier.span.end))
+        })?;
+    let symbol = identifier.symbol_id.get().ok_or_else(|| {
+        analysis_error(format!(
+            "external store {} has no semantic symbol",
+            identifier.name
+        ))
+    })?;
+    Ok(Some(StateBinding {
+        name: identifier.name.as_str(),
+        symbol,
+        source,
+    }))
+}
+
 fn transform_state_declarator<'a>(
     ast: &AstBuilder<'a>,
     declarator: &mut VariableDeclarator<'a>,
@@ -1088,6 +1159,53 @@ fn transform_context_declarator<'a>(
         CREATE_CONTEXT,
         [ident(ast, SCOPE), mask(ast, &[value.source]), context],
     ));
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn transform_external_store_declarator<'a>(
+    ast: &AstBuilder<'a>,
+    declarator: &mut VariableDeclarator<'a>,
+    sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
+    scoping: &Scoping,
+    source_symbols: &BTreeMap<SymbolId, SourceId>,
+    item_source_symbols: &BTreeMap<SymbolId, SourceId>,
+) -> Result<(), Diagnostic> {
+    let Some(value) = external_store_binding_symbol(declarator, sources, react)? else {
+        return Ok(());
+    };
+    let Some(Expression::CallExpression(hook_call)) = &declarator.init else {
+        unreachable!();
+    };
+    if !matches!(hook_call.arguments.len(), 2 | 3)
+        || hook_call.arguments.iter().any(Argument::is_spread)
+    {
+        return Err(unsupported(
+            "useSyncExternalStore requires subscribe, getSnapshot, and an optional getServerSnapshot",
+        )
+        .with_span(SourceSpan::new(hook_call.span.start, hook_call.span.end)));
+    }
+    for argument in &hook_call.arguments {
+        let expression = argument
+            .as_expression()
+            .expect("spread arguments were rejected");
+        let reads = dependencies(expression, scoping, source_symbols, item_source_symbols);
+        if !reads.parent.is_empty() || !reads.item.is_empty() {
+            return Err(unsupported(
+                "reactive useSyncExternalStore arguments require resubscription lowering",
+            )
+            .with_span(SourceSpan::from_oxc(expression.span())));
+        }
+    }
+    let mut arguments = vec![ident(ast, SCOPE), mask(ast, &[value.source])];
+    arguments.extend(hook_call.arguments.iter().map(|argument| {
+        argument
+            .as_expression()
+            .expect("spread arguments were rejected")
+            .clone_in_with_semantic_ids(ast.allocator())
+    }));
+    declarator.init = Some(call_name(ast, CREATE_EXTERNAL_STORE, arguments));
     Ok(())
 }
 
@@ -2704,6 +2822,7 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>, program: &Program<'a>) -> Statement<
         ("compiledRoot", COMPILED_ROOT),
         ("choose", CHOOSE),
         ("createCompiledContext", CREATE_CONTEXT),
+        ("createCompiledExternalStore", CREATE_EXTERNAL_STORE),
         ("createCompiledMemo", CREATE_MEMO),
         ("createCompiledProp", CREATE_PROP),
         ("createCompiledRestProp", CREATE_REST_PROP),
