@@ -155,14 +155,15 @@ export function TodoApp(): JSX.Element {
           <ul className="filters">
             {FILTERS.map((name) => (
               <li key={name}>
-                <button
+                <a
+                  href={`#/${name}`}
                   className={filter === name ? 'selected' : ''}
                   data-filter={name}
                   onClick={() => setFilter(name)}
                 >
                   {name[0]?.toUpperCase()}
                   {name.slice(1)}
-                </button>
+                </a>
               </li>
             ))}
           </ul>
