@@ -60,8 +60,19 @@ Against the baseline captured before these passes:
 | Keyed list | 10,304 B | 8,708 B | -1,596 B (-15.5%) |
 | TodoMVC | 12,011 B | 10,302 B | -1,709 B (-14.2%) |
 
-The accepted path keeps forms, events, refs, raw HTML, SVG/MathML, controlled
-inputs, transactional rollback, and array reconciliation available.
+The accepted runtime keeps forms, events, refs, SVG/MathML, controlled inputs,
+transactional rollback, and array reconciliation available. Raw HTML remains
+available under its explicit compiler feature.
+
+The first chunk-level capability pass removes raw HTML when `unsafe-html` is
+disabled while retaining recursive child validation before staging:
+
+| Fixture | Prior accepted gzip | Feature-specialized gzip | Change |
+| --- | ---: | ---: | ---: |
+| Counter | 7,579 B | 6,922 B | -657 B |
+| Control flow | 7,905 B | 7,239 B | -666 B |
+| Keyed list | 8,708 B | 8,046 B | -662 B |
+| TodoMVC | 10,302 B | 9,628 B | -674 B |
 
 ## Consequences
 
@@ -95,9 +106,9 @@ inputs, transactional rollback, and array reconciliation available.
 
 ## Follow-up
 
-The next material size project is chunk-level DOM capability reachability. It
-should let a chunk omit forms, raw HTML, styles, namespaces, or ref machinery
-only when the compiler proves the entire chunk does not need them, without
-shipping parallel JSX runtimes. Fully specialized intrinsic DOM code generation
-is a second option, provided it preserves the existing production semantics and
-beats the gzip baseline.
+The next material size project extends chunk-level DOM capability reachability
+beyond raw HTML. It should let a chunk omit forms, styles, namespaces, or ref
+machinery only when the compiler proves the entire chunk does not need them,
+without shipping parallel JSX runtimes. Fully specialized intrinsic DOM code
+generation is a second option, provided it preserves the existing production
+semantics and beats the gzip baseline.

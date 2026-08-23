@@ -74,6 +74,25 @@ export type CompiledRenderValue =
 
 type RenderValue = CompiledRenderValue
 
+export function hasInvalidChild(children: readonly unknown[]): boolean {
+  for (const child of children) {
+    if (isStructuralBinding(child) || isCompiledBinding(child)) continue
+    if (Array.isArray(child)) {
+      if (hasInvalidChild(child)) return true
+      continue
+    }
+    const type = typeof child
+    if (
+      type === 'function' ||
+      type === 'symbol' ||
+      (type === 'object' && child !== null && !(child instanceof Node))
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 type RefValue = ((value: Element | null) => void | (() => void)) | { current: unknown }
 
 type PendingRef = [owner: Owner | null, value: RefValue]
@@ -1011,6 +1030,11 @@ function insertValue(
     return
   }
   if (Array.isArray(value)) {
+    if (hasInvalidChild(value)) {
+      throw new TypeError(
+        DEV ? 'unsupported compiled child value; expected a DOM node or owned block' : 'V009',
+      )
+    }
     for (const item of value) insertValue(parent, item, before, moves)
     return
   }

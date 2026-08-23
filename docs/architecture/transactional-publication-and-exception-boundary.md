@@ -44,19 +44,23 @@ The publication queue currently covers scalar binding and host prop/event
 writes plus opaque raw-HTML subtree replacement. Raw HTML parses in an inert
 document during computation, upgrades custom elements only during its final
 publication phase, and retains the previous node objects as its rollback
-inverse. Existing range staging still protects construction failures,
-duplicate keys, and new keyed records. Full U10 closure additionally requires
-publication operations and inverses for retained-list item writes, list
-moves/removals, branch/dispatcher replacement, ref attachment, and owner
-finalization. Those operations must commit only after all reached computations
-succeed.
+inverse. Render-value arrays are recursively validated before staging begins,
+so a later foreign object, function, symbol, or promise cannot temporarily move
+an earlier live DOM node into a detached fragment. Existing range staging still
+protects construction failures, duplicate keys, and new keyed records. Full U10
+closure additionally requires publication operations and inverses for
+retained-list item writes, list moves/removals, branch/dispatcher replacement,
+ref attachment, and owner finalization. Those operations must commit only after
+all reached computations succeed.
 
 ## Evidence
 
 - `packages/runtime/test/lifecycle/failure-atomicity.browser.test.ts`
+- `packages/runtime/test/reactivity/compiled-dom.browser.test.ts`
 - `crates/vidact-compiler/tests/surgical_codegen.rs`
 - `crates/vidact-compiler/tests/react_compiler_control_flow.rs`
 - `crates/vidact-compiler/tests/fixtures/compatibility/accepted/synchronous-try.tsx`
 - `crates/vidact-compiler/tests/fixtures/compatibility/rejected/synchronous-finally.tsx`
 - `crates/vidact-compiler/tests/fixtures/compatibility/rejected/try-explicit-throw.tsx`
 - `tests/browser/corpus/apps/synchronous-flow/SynchronousFlowApp.browser.test.ts`
+- `tests/browser/corpus/apps/runtime-values/RuntimeValuesApp.browser.test.ts`

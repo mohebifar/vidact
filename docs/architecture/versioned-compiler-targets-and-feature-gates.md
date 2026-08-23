@@ -52,6 +52,13 @@ target, sorted features, compiler protocol, runtime protocol, and compiler
 manifest. A cached result therefore cannot cross a semantic configuration or
 known ABI boundary.
 
+The Vite configuration also publishes compile-time runtime feature constants.
+When `unsafe-html` is absent, raw-HTML branches and their imported implementation
+are unreachable and disappear from the final chunk. Standalone runtime tests
+and non-Vite consumers default the constant to enabled so direct runtime usage
+does not silently change; compiled applications receive the explicit plugin
+configuration.
+
 ## Invariants
 
 - Unknown target or feature names never compile under default behavior.
@@ -76,9 +83,10 @@ transporting them does not claim runtime parity. Likewise, `hydrate` and
 `server` are distinct cache/protocol inputs but do not yet provide hydration or
 SSR lowering.
 
-The `unsafe-html` flag itself adds no output when unused. Its runtime helper is
-still part of the shared DOM runtime, so chunk-level capability reachability is
-a separate size project under the compact ABI decision.
+The `unsafe-html` implementation is absent from chunks built without the
+feature. Forms, styles, namespaces, events, and refs still share the default DOM
+runtime, so extending capability reachability to those families remains a
+separate size project under the compact ABI decision.
 
 Protocol constants are intentionally explicit rather than inferred from
 package versions. Any incompatible payload or runtime ABI change must bump the

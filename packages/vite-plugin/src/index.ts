@@ -1,3 +1,5 @@
+/* oxlint-disable no-underscore-dangle -- Runtime build constants intentionally use reserved global names. */
+
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -61,12 +63,18 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
     name: 'vidact',
     enforce: 'pre',
     config(config, environment) {
-      // oxlint-disable-next-line no-underscore-dangle -- Compiler/runtime production define.
-      if (config.define?.__VIDACT_DEV__ !== undefined) return
+      const define: Record<string, string> = {}
+      if (config.define?.__VIDACT_DEV__ === undefined) {
+        define.__VIDACT_DEV__ = JSON.stringify(environment.mode !== 'production')
+      }
+      if (config.define?.__VIDACT_UNSAFE_HTML__ === undefined) {
+        define.__VIDACT_UNSAFE_HTML__ = JSON.stringify(
+          configuration.features.includes('unsafe-html'),
+        )
+      }
+      if (Object.keys(define).length === 0) return
       return {
-        define: {
-          __VIDACT_DEV__: JSON.stringify(environment.mode !== 'production'),
-        },
+        define,
       }
     },
     configResolved(config) {

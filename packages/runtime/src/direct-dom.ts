@@ -1,6 +1,7 @@
 import {
   isCompiledBinding,
   isStructuralBinding,
+  hasInvalidChild,
   adoptCompiledRoot,
   constructCompiledComponent,
   mountCompiledBinding,
@@ -28,6 +29,7 @@ import { applyDomProp } from './dom/properties.ts'
 import { mountRawHtmlProp } from './raw-html.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
+const UNSAFE_HTML = typeof __VIDACT_UNSAFE_HTML__ === 'undefined' || __VIDACT_UNSAFE_HTML__
 
 export type DirectChild =
   | Node
@@ -162,11 +164,21 @@ function applyProps(
       DEV ? 'dangerouslySetInnerHTML on SVG and MathML elements is not supported' : 'V102',
     )
   }
+  if (!UNSAFE_HTML) {
+    throw new Error(
+      DEV ? 'dangerouslySetInnerHTML requires the unsafe-html compiler feature' : 'V104',
+    )
+  }
   mountRawHtmlProp(element, rawHtml, children)
   return restoreAfterChildren
 }
 
 function appendChildren(parent: Node, children: readonly DirectChild[]): void {
+  if (hasInvalidChild(children)) {
+    throw new TypeError(
+      DEV ? 'unsupported direct child value; expected a DOM node or owned block' : 'V103',
+    )
+  }
   for (const child of children) appendChild(parent, child)
 }
 
@@ -181,7 +193,7 @@ function appendChild(parent: Node, child: DirectChild): void {
     return
   }
   if (Array.isArray(child)) {
-    appendChildren(parent, child)
+    for (const item of child) appendChild(parent, item)
     return
   }
   if (child instanceof Node) {

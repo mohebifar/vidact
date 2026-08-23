@@ -71,8 +71,24 @@ const unsupportedHydrationFlag = <div suppressHydrationWarning />
 // @ts-expect-error Vidact JSX produces an owned compiled range, not a React element descriptor.
 const reactElement: ReactElement = <div />
 
+// @ts-expect-error Plain objects are not renderable Vidact children.
+const objectChild = <div>{{ type: 'foreign-element' }}</div>
+
+// @ts-expect-error Functions are not renderable Vidact children.
+const functionChild = <div>{() => 'invalid'}</div>
+
+// @ts-expect-error Symbols are not renderable Vidact children.
+const symbolChild = <div>{Symbol('invalid')}</div>
+
+// @ts-expect-error Promises require the unavailable `async` feature.
+const promiseChild = <div>{Promise.resolve('invalid')}</div>
+
 void invalidAttribute
 void invalidRawHtml
 void unsupportedFormAction
 void unsupportedHydrationFlag
 void reactElement
+void objectChild
+void functionChild
+void symbolChild
+void promiseChild

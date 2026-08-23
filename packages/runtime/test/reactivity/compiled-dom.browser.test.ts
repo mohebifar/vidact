@@ -722,11 +722,18 @@ describe('compiled DOM corpus', () => {
     expect(host.querySelector('em')).toBe(node)
     expect(host.textContent).toBe('beforenodeafter')
 
-    expect(() => setValue([node, { type: 'foreign-element' }])).toThrow(
-      /unsupported compiled child/i,
-    )
-    expect(host.querySelector('em')).toBe(node)
-    expect(host.textContent).toBe('beforenodeafter')
+    for (const invalid of [
+      { type: 'foreign-element' },
+      () => 'invalid',
+      Symbol('invalid'),
+      Promise.resolve('invalid'),
+    ]) {
+      const mutations = startMutationCapture(host)
+      expect(() => setValue([node, invalid])).toThrow(/unsupported compiled child/i)
+      expect(mutations.stop()).toEqual([])
+      expect(host.querySelector('em')).toBe(node)
+      expect(host.textContent).toBe('beforenodeafter')
+    }
 
     setValue(null)
     expect(host.textContent).toBe('beforeafter')

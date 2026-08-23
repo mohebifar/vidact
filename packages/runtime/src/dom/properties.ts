@@ -4,6 +4,7 @@ import { MATHML_NAMESPACE, SVG_NAMESPACE } from './namespace.ts'
 import { applyStyleProp } from './styles.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
+const UNSAFE_HTML = typeof __VIDACT_UNSAFE_HTML__ === 'undefined' || __VIDACT_UNSAFE_HTML__
 
 const XLINK_NAMESPACE = 'http://www.w3.org/1999/xlink'
 const XML_NAMESPACE = 'http://www.w3.org/XML/1998/namespace'
@@ -248,7 +249,7 @@ function isCustomElement(element: Element): element is HTMLElement {
 }
 
 function validateRawHtmlProp(element: Element, name: string): void {
-  if (element instanceof HTMLElement) validateRawHtmlRelatedProp(element, name)
+  if (UNSAFE_HTML && element instanceof HTMLElement) validateRawHtmlRelatedProp(element, name)
 }
 
 function lowerInitial(value: string): string {

@@ -4,6 +4,7 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   define: {
     __VIDACT_DEV__: 'true',
+    __VIDACT_UNSAFE_HTML__: 'true',
   },
   test: {
     include: ['test/**/*.browser.test.ts', '../test-support/src/tests/**/*.browser.test.ts'],
