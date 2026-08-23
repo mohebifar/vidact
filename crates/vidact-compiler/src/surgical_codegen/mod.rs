@@ -26,6 +26,7 @@ use crate::{
         component_function_parts_mut, is_event_attribute, is_supported_react_event_attribute,
         normalize_expression_bodied_component_arrows, restore_anonymous_default_component_names,
     },
+    custom_hooks::plan_local_custom_hooks,
     ir::{ComponentIr, lower_component},
     options::{CompilationOptions, CompilerFeature},
     oxc_react::analyze_program,
@@ -124,6 +125,26 @@ pub fn compile_surgical_module_with_ir_and_options(
     if !semantic.diagnostics.is_empty() {
         return Err(vec![analysis_error(format!(
             "OXC semantic analysis failed for {} during surgical codegen: {:?}",
+            input.filename, semantic.diagnostics
+        ))]);
+    }
+
+    let custom_hooks =
+        plan_local_custom_hooks(&allocator, &parsed.program, semantic.semantic.scoping())
+            .map_err(|diagnostic| vec![diagnostic])?;
+    drop(semantic);
+    if let Some(custom_hooks) = custom_hooks {
+        custom_hooks
+            .apply(&mut parsed.program)
+            .map_err(|diagnostic| vec![diagnostic])?;
+    }
+    let semantic = SemanticBuilder::new()
+        .with_build_nodes(true)
+        .with_check_syntax_error(true)
+        .build(&parsed.program);
+    if !semantic.diagnostics.is_empty() {
+        return Err(vec![analysis_error(format!(
+            "OXC semantic analysis failed for {} after custom-hook expansion: {:?}",
             input.filename, semantic.diagnostics
         ))]);
     }
@@ -404,7 +425,7 @@ fn transform_component<'a>(
     let mut source_ids = ir
         .sources
         .iter()
-        .map(|source| (&*allocator.alloc_str(&source.name), source.id))
+        .map(|source| (allocator.alloc_str(&source.name), source.id))
         .collect::<BTreeMap<_, _>>();
     let prop_sources = ir
         .sources
@@ -436,7 +457,7 @@ fn transform_component<'a>(
                 && !source_ids.contains_key(identifier.name.as_str())
             {
                 source_ids.insert(
-                    &*allocator.alloc_str(identifier.name.as_str()),
+                    allocator.alloc_str(identifier.name.as_str()),
                     SourceId::new(next_source),
                 );
                 next_source += 1;

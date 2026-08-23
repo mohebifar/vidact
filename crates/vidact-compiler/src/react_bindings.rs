@@ -102,7 +102,6 @@ impl<'s> ReactBindings<'s> {
                             bindings.namespaces.insert(symbol);
                         }
                     }
-                    _ => {}
                 }
             }
         }

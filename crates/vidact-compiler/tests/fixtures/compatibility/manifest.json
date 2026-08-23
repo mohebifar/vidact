@@ -124,6 +124,11 @@
       "components": ["MemoCallback"]
     },
     {
+      "path": "accepted/custom-hooks.tsx",
+      "expectation": "accepted",
+      "components": ["CustomHooks"]
+    },
+    {
       "path": "accepted/context.tsx",
       "expectation": "accepted",
       "components": ["NamedConsumer", "UseConsumer", "ContextApp"]

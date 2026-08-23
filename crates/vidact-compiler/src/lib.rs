@@ -6,6 +6,7 @@
 
 pub mod analysis;
 mod ast_utils;
+mod custom_hooks;
 mod diagnostic;
 pub mod ir;
 mod options;

@@ -853,6 +853,74 @@ fn compiles_layout_and_passive_effect_dependencies_into_owner_resources() {
 }
 
 #[test]
+fn compiles_module_local_custom_hooks_under_the_callers_scope() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "CustomHookCounter.tsx",
+        source: r#"
+            import { useEffect, useState } from 'react';
+
+            function useCounter(initial, label) {
+                const [count, setCount] = useState(initial);
+                useEffect(() => () => console.log(label, count), [label, count]);
+                return { count, setCount };
+            }
+
+            export function CustomHookCounter({ initial, label }): Node {
+                const { count, setCount } = useCounter(initial, label);
+                return <button onClick={() => setCount(count + 1)}>{count}</button>;
+            }
+        "#,
+    })
+    .expect("module-local custom hooks should expand into the caller's compiled scope");
+
+    assert!(!output.contains("function useCounter"), "{output}");
+    assert!(!output.contains("useCounter("), "{output}");
+    assert!(!output.contains("useState("), "{output}");
+    assert!(output.contains("__vidactCreateState"), "{output}");
+    assert!(output.contains("__vidactEffect"), "{output}");
+}
+
+#[test]
+fn compiles_nested_and_repeated_custom_hook_invocations_hygienically() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "NestedCustomHooks.tsx",
+        source: r#"
+            import { useMemo, useState } from 'react';
+
+            function useValue(initial) {
+                const [value, setValue] = useState(initial);
+                return [value, setValue];
+            }
+
+            const useDoubled = (initial) => {
+                const [value, setValue] = useValue(initial);
+                const doubled = useMemo(() => value * 2, [value]);
+                return { doubled, setValue };
+            };
+
+            export function NestedCustomHooks(): Node {
+                const first = useDoubled(1);
+                const second = useDoubled(10);
+                return <>
+                    <button onClick={() => first.setValue(first.doubled + 1)}>{first.doubled}</button>
+                    <button onClick={() => second.setValue(second.doubled + 1)}>{second.doubled}</button>
+                </>;
+            }
+        "#,
+    })
+    .expect("nested and repeated custom hooks should receive distinct compiled bindings");
+
+    assert!(!output.contains("useValue("), "{output}");
+    assert!(!output.contains("useDoubled("), "{output}");
+    assert_eq!(
+        output.matches("__vidactCreateState(").count(),
+        2,
+        "{output}"
+    );
+    assert_eq!(output.matches("__vidactCreateMemo(").count(), 2, "{output}");
+}
+
+#[test]
 fn gates_and_compiles_insertion_effects() {
     let source = r#"
         import { useInsertionEffect, useState } from 'react';

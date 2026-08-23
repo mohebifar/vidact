@@ -33,6 +33,7 @@ mod classifier;
 mod def_use;
 
 use crate::ast_utils::{component_name_for_span, normalize_expression_bodied_component_arrows};
+use crate::custom_hooks::plan_local_custom_hooks;
 use classifier::{classify_component, render_updaters};
 use def_use::CompilerDefUse;
 
@@ -65,6 +66,25 @@ impl ReactAnalysisAdapter for OxcReactAnalysisAdapter {
         if !semantic.diagnostics.is_empty() {
             return Err(vec![analysis_error(format!(
                 "OXC semantic analysis failed for {}: {:?}",
+                input.filename, semantic.diagnostics
+            ))]);
+        }
+        let custom_hooks =
+            plan_local_custom_hooks(&allocator, &parsed.program, semantic.semantic.scoping())
+                .map_err(|diagnostic| vec![diagnostic])?;
+        drop(semantic);
+        if let Some(custom_hooks) = custom_hooks {
+            custom_hooks
+                .apply(&mut parsed.program)
+                .map_err(|diagnostic| vec![diagnostic])?;
+        }
+        let semantic = SemanticBuilder::new()
+            .with_build_nodes(true)
+            .with_check_syntax_error(true)
+            .build(&parsed.program);
+        if !semantic.diagnostics.is_empty() {
+            return Err(vec![analysis_error(format!(
+                "OXC semantic analysis failed for {} after custom-hook expansion: {:?}",
                 input.filename, semantic.diagnostics
             ))]);
         }

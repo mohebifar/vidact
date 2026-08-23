@@ -101,11 +101,11 @@ rollback; passive failures enter it from their owned microtask.
 ## Consequences
 
 Common subscription, measurement, and imperative-library effects now compose
-with Vidact ownership without component reruns. The runtime pays scheduling
-bytes only in chunks that import an effect capability. Custom hooks remain
-follow-up work on this phase model. The test-support `act` API drains the
-development passive queue deterministically; production uses native
-`queueMicrotask` directly.
+with Vidact ownership without component reruns. Module-local custom hooks reuse
+this phase model through hygienic pre-analysis expansion under the caller's
+owner. The runtime pays scheduling bytes only in chunks that import an effect
+capability. The test-support `act` API drains the development passive queue
+deterministically; production uses native `queueMicrotask` directly.
 
 ## Verification
 
