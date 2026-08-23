@@ -4,7 +4,7 @@ The app corpus contains small React-shaped applications that pass through the
 same production-facing pipeline as user code:
 
 ```text
-app.tsx -> @vidact/vite -> Rust compiler -> @vidact/runtime -> Chromium
+app.tsx -> @vidact/vite -> Rust compiler -> @vidact/runtime -> Chromium / Firefox / WebKit
 ```
 
 Tests import the application's `.tsx` entry point, mount the compiled component,
@@ -31,6 +31,13 @@ infrastructure coverage, but it is not an app-corpus entry.
 - `apps/dom-semantics`: HTML/SVG/MathML host context, namespaced attributes,
   deletion-aware styles, ARIA/data booleans, capture listeners, property resets,
   and controlled text, checkbox, and multiple-select behavior
+
+## Compiled hydration app
+
+- `hydration/HydrationApp`: deterministic server-runtime markup passed to the
+  hydrate compiler target, with zero-churn claiming, deterministic IDs, event
+  setup, retained keyed row identity, and a mutation-bounded reorder in all
+  three browser engines
 
 ## Supporting runtime coverage
 
