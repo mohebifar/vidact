@@ -1,9 +1,68 @@
-use oxc_ast::ast::{
-    ArrowFunctionExpression, BindingPattern, Declaration, ExportDefaultDeclarationKind, Expression,
-    FormalParameters, Function, FunctionBody, Program, Statement, VariableDeclaration,
+use oxc_allocator::{Allocator, CloneIn, GetAllocator};
+use oxc_ast::{
+    ast::{
+        ArrowFunctionExpression, BindingPattern, Declaration, ExportDefaultDeclarationKind,
+        Expression, FormalParameters, Function, FunctionBody, Program, Statement,
+        VariableDeclaration,
+    },
+    builder::AstBuilder,
 };
+use oxc_span::GetSpan;
 
 use crate::SourceSpan;
+
+pub(crate) fn normalize_expression_bodied_component_arrows<'a>(
+    allocator: &'a Allocator,
+    program: &mut Program<'a>,
+) {
+    let ast = AstBuilder::new(allocator);
+    for statement in &mut program.body {
+        match statement {
+            Statement::VariableDeclaration(declaration) => {
+                normalize_variable_arrows(&ast, declaration)
+            }
+            Statement::ExportDeclaration(export) => {
+                if let Declaration::VariableDeclaration(declaration) = &mut export.declaration {
+                    normalize_variable_arrows(&ast, declaration);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn normalize_variable_arrows<'a>(ast: &AstBuilder<'a>, declaration: &mut VariableDeclaration<'a>) {
+    for declarator in &mut declaration.declarations {
+        let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+            continue;
+        };
+        if !identifier
+            .name
+            .chars()
+            .next()
+            .is_some_and(char::is_uppercase)
+        {
+            continue;
+        }
+        let Some(Expression::ArrowFunctionExpression(function)) = &mut declarator.init else {
+            continue;
+        };
+        let Some(expression) = function.body.as_expression() else {
+            continue;
+        };
+        let span = expression.span();
+        let expression = expression.clone_in_with_semantic_ids(ast.allocator());
+        function.body = oxc_ast::ast::ArrowFunctionBody::new_function_body(
+            span,
+            [],
+            oxc_allocator::Vec::from_iter_in(
+                [Statement::new_return_statement(span, Some(expression), ast)],
+                ast,
+            ),
+            ast,
+        );
+    }
+}
 
 pub(crate) fn component_function_parts<'a>(
     program: &'a Program<'a>,

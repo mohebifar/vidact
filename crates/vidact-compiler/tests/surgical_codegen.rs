@@ -617,6 +617,13 @@ fn compiles_function_expressions_and_default_exports_by_span() {
             "#,
             "const DefaultArrow = ({ label }) =>",
         ),
+        (
+            "ExpressionArrow.tsx",
+            r#"
+                export const ExpressionArrow = ({ label }) => <p>{label}</p>;
+            "#,
+            "const ExpressionArrow = ({ label }) => {",
+        ),
     ] {
         let output = compile_surgical_module(ModuleInput { filename, source })
             .unwrap_or_else(|diagnostics| panic!("{filename} must compile: {diagnostics:#?}"));

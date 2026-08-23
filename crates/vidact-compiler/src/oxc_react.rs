@@ -32,7 +32,7 @@ use crate::{
 mod classifier;
 mod def_use;
 
-use crate::ast_utils::component_name_for_span;
+use crate::ast_utils::{component_name_for_span, normalize_expression_bodied_component_arrows};
 use classifier::{classify_component, render_updaters};
 use def_use::CompilerDefUse;
 
@@ -49,13 +49,14 @@ impl ReactAnalysisAdapter for OxcReactAnalysisAdapter {
         let allocator = Allocator::default();
         let source_type =
             SourceType::from_path(Path::new(input.filename)).unwrap_or_else(|_| SourceType::tsx());
-        let parsed = Parser::new(&allocator, input.source, source_type).parse();
+        let mut parsed = Parser::new(&allocator, input.source, source_type).parse();
         if !parsed.diagnostics.is_empty() {
             return Err(vec![analysis_error(format!(
                 "OXC could not parse {}: {:?}",
                 input.filename, parsed.diagnostics
             ))]);
         }
+        normalize_expression_bodied_component_arrows(&allocator, &mut parsed.program);
 
         let semantic = SemanticBuilder::new()
             .with_build_nodes(true)

@@ -66,9 +66,10 @@ app compiled through the Vite plugin.
 - Same-module components each receive independent source IDs and updater graphs.
 - Surgical codegen transforms all accepted components and emits the shared
   runtime import once.
-- Named block-bodied arrow and function-expression components are lowered
-  through the same parameter, body, and semantic-symbol contract as function
-  declarations. Their source binding and exact function span define identity.
+- Named block- and expression-bodied arrows plus function-expression components
+  are lowered through the same parameter, body, and semantic-symbol contract as
+  function declarations. Expression arrows normalize to an equivalent return
+  body before semantic analysis while retaining their exact function span.
 - Named default function declarations and default exports of a named component
   retain their source identity; the export spelling is not used as a join key.
 - Parent-to-child compiled prop updates retain both component instances and
@@ -106,9 +107,9 @@ app compiled through the Vite plugin.
 Ordinary parent/child modules can now compile without splitting components into
 files, and diagnostics can point back to original TSX. The Oxc patch now
 includes an owned control-flow snapshot as well as the function span.
-Expression-bodied arrows and anonymous default component declarations, plus
-precise spans for internal analysis failures without a single source construct,
-remain follow-up work. Named default exports, DOM-range lowering for multi-return
+Anonymous default component declarations and precise spans for internal analysis
+failures without a single source construct remain follow-up work. Named default
+exports, both ordinary arrow body forms, DOM-range lowering for multi-return
 control flow, and original-TSX source maps are complete. Adding a compatibility
 fixture requires an explicit contract classification, which is intentional
 maintenance overhead.

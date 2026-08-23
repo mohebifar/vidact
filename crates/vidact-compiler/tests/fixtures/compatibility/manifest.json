@@ -49,6 +49,11 @@
       "components": ["FunctionExpression"]
     },
     {
+      "path": "accepted/expression-arrow-component.tsx",
+      "expectation": "accepted",
+      "components": ["ExpressionArrow"]
+    },
+    {
       "path": "accepted/ref-as-prop.tsx",
       "expectation": "accepted",
       "components": ["Input", "RefAsProp"]

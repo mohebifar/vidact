@@ -128,13 +128,14 @@ semantic scope graph:
   callbacks, plus source-text lookalikes, are absent from the outer component
   CFG and do not enter the graph.
 
-The accepted component forms include named function declarations, named
-block-bodied arrows and function expressions assigned to top-level bindings,
-and named default function declarations; a module may contain several of these.
-Each owned React Compiler snapshot carries its original function span, and
-Vidact joins it only to the declaration or source binding with that exact span.
-Expression-bodied arrows and anonymous default forms fail closed until their
-body and upstream analysis semantics are modeled.
+The accepted component forms include named function declarations, named arrows
+and function expressions assigned to top-level bindings, and named default
+function declarations; a module may contain several of these. Expression-bodied
+component arrows normalize to a return body before semantic analysis. Each owned
+React Compiler snapshot still carries the original function span, and Vidact
+joins it only to the declaration or source binding with that exact span.
+Anonymous default forms fail closed until their upstream analysis semantics are
+modeled.
 
 ## Next integration step
 

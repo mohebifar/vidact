@@ -12,13 +12,11 @@ const CounterValue = ({
 }: {
   value: number
   ref: (node: HTMLOutputElement | null) => void
-}): JSX.Element => {
-  return (
-    <output ref={ref} data-counter-value>
-      {displayed}
-    </output>
-  )
-}
+}): JSX.Element => (
+  <output ref={ref} data-counter-value>
+    {displayed}
+  </output>
+)
 
 export function MultiComponentApp(): JSX.Element {
   const [count, setCount] = useState(0)
