@@ -183,6 +183,11 @@
       "path": "accepted/react-change-event.tsx",
       "expectation": "accepted",
       "components": ["ReactChangeEvent"]
+    },
+    {
+      "path": "accepted/use-reducer.tsx",
+      "expectation": "accepted",
+      "components": ["ReducerCounter"]
     }
   ]
 }

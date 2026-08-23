@@ -74,6 +74,18 @@ disabled while retaining recursive child validation before staging:
 | Keyed list | 8,708 B | 8,046 B | -662 B |
 | TodoMVC | 10,302 B | 9,628 B | -674 B |
 
+The default-core disposed-write guard intentionally spends a small part of that
+margin to make retained setters and reducer dispatch fail before evaluating user
+code. Reducer construction itself remains capability-imported and tree-shakes
+from fixtures that use only `useState`:
+
+| Fixture | Feature-specialized gzip | Disposed-write guard gzip | Change |
+| --- | ---: | ---: | ---: |
+| Counter | 6,922 B | 6,954 B | +32 B |
+| Control flow | 7,239 B | 7,283 B | +44 B |
+| Keyed list | 8,046 B | 8,070 B | +24 B |
+| TodoMVC | 9,628 B | 9,671 B | +43 B |
+
 ## Consequences
 
 - Compiler and runtime changes that touch tuple positions must land together.

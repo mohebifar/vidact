@@ -263,15 +263,15 @@ fn state_source(
     let Some(Expression::CallExpression(call)) = &declarator.init else {
         return Ok(None);
     };
-    if !react.is_use_state_call(call) {
+    let Some(hook) = react.state_hook_call(call) else {
         return Err(unsupported_at(
-            "array-destructured calls are unsupported unless the callee resolves to React useState",
+            "array-destructured calls are unsupported unless the callee resolves to React useState or useReducer",
             call.span,
         ));
-    }
+    };
     let Some(Some(BindingPattern::BindingIdentifier(identifier))) = pattern.elements.first() else {
         return Err(unsupported_at(
-            "useState must bind a value identifier",
+            format!("{} must bind a value identifier", hook.name()),
             pattern.span,
         ));
     };

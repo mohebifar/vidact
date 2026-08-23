@@ -248,6 +248,25 @@ export function createCompiledState<T>(
   return createStateSlot(scope[1], sourceMask, value, assertWritable)
 }
 
+export function createCompiledReducer<State, Action, Initial>(
+  scope: CompiledScope,
+  sourceMask: SourceMask,
+  reducer: (state: State, action: Action) => State,
+  initialArg: Initial,
+  initialize?: (initialArg: Initial) => State,
+): { readonly get: () => State; readonly set: (action: Action) => void } {
+  const state = createStateSlot<State>(
+    scope[1],
+    sourceMask,
+    initialize === undefined ? (initialArg as unknown as State) : initialize(initialArg),
+    stateWriteGuard(scope),
+  )
+  return {
+    get: state.get,
+    set: (action) => state.set((previous) => reducer(previous, action)),
+  }
+}
+
 export function createCompiledProp<T>(
   scope: CompiledScope,
   sourceMask: SourceMask,

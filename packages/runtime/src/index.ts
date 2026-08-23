@@ -17,6 +17,7 @@ export {
   compiledEvent,
   compiledRoot,
   createCompiledProp,
+  createCompiledReducer,
   createCompiledScope,
   createNarrowCompiledScope,
   createCompiledState,

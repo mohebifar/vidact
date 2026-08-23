@@ -28,7 +28,7 @@ use crate::{
     ir::{ComponentIr, lower_component},
     options::{CompilationOptions, CompilerFeature},
     oxc_react::analyze_program,
-    react_bindings::ReactBindings,
+    react_bindings::{ReactBindings, StateHook},
 };
 
 mod ast;
@@ -47,6 +47,7 @@ const COMPILED_EVENT: &str = "__vidactEvent";
 const COMPILED_ROOT: &str = "__vidactCompiledRoot";
 const CHOOSE: &str = "__vidactChoose";
 const CREATE_PROP: &str = "__vidactCreateProp";
+const CREATE_REDUCER: &str = "__vidactCreateReducer";
 const CREATE_SCOPE: &str = "__vidactCreateScope";
 const CREATE_NARROW_SCOPE: &str = "__vidactCreateNarrowScope";
 const CREATE_STATE: &str = "__vidactCreateState";
@@ -158,6 +159,7 @@ fn transform_program<'a>(
         COMPILED_ROOT,
         CHOOSE,
         CREATE_PROP,
+        CREATE_REDUCER,
         CREATE_SCOPE,
         CREATE_NARROW_SCOPE,
         CREATE_STATE,
@@ -227,11 +229,12 @@ fn remove_lowered_react_state_imports(
                 if specifier.import_kind == ImportOrExportKind::Type {
                     return true;
                 }
-                let is_use_state = matches!(
+                let is_state_hook = matches!(
                     &specifier.imported,
-                    ModuleExportName::IdentifierName(name) if name.name == "useState"
+                    ModuleExportName::IdentifierName(name)
+                        if matches!(name.name.as_str(), "useState" | "useReducer")
                 );
-                if !is_use_state {
+                if !is_state_hook {
                     return true;
                 }
                 let symbol = specifier.local.symbol_id.get();
@@ -250,7 +253,7 @@ fn remove_lowered_react_state_imports(
         });
         if let Some((name, span)) = live_state_import {
             return Err(unsupported(format!(
-                "React state import {name} remains after component lowering; useState is only supported in compiled component state declarations"
+                "React state import {name} remains after component lowering; useState and useReducer are only supported in compiled component state declarations"
             ))
             .with_span(SourceSpan::new(span.start, span.end)));
         }
@@ -273,7 +276,7 @@ struct PostTransformReactUsage<'r, 's> {
 
 impl<'a> Visit<'a> for PostTransformReactUsage<'_, '_> {
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
-        if self.react.is_use_state_call(call) {
+        if self.react.state_hook_call(call).is_some() {
             self.remaining_state_call.get_or_insert(call.span);
             return;
         }
@@ -338,7 +341,9 @@ fn transform_component<'a>(
             continue;
         };
         for declarator in &declaration.declarations {
-            if let Some((value, setter)) = state_binding_symbols(declarator, &source_ids, &react)? {
+            if let Some((_, value, setter)) =
+                state_binding_symbols(declarator, &source_ids, &react)?
+            {
                 source_symbols.insert(value.symbol, value.source);
                 state_symbols.insert(
                     value.symbol,
@@ -583,23 +588,31 @@ fn state_binding_symbols<'a>(
     declarator: &'a VariableDeclarator<'a>,
     sources: &BTreeMap<&str, SourceId>,
     react: &ReactBindings<'_>,
-) -> Result<Option<(StateBinding<'a>, StateBinding<'a>)>, Diagnostic> {
+) -> Result<Option<(StateHook, StateBinding<'a>, StateBinding<'a>)>, Diagnostic> {
     let BindingPattern::ArrayPattern(pattern) = &declarator.id else {
         return Ok(None);
     };
     let Some(Expression::CallExpression(call)) = &declarator.init else {
         return Ok(None);
     };
-    if !react.is_use_state_call(call) {
+    let Some(hook) = react.state_hook_call(call) else {
         return Ok(None);
-    }
+    };
     let [
         Some(BindingPattern::BindingIdentifier(value)),
         Some(BindingPattern::BindingIdentifier(setter)),
     ] = pattern.elements.as_slice()
     else {
-        return Err(unsupported("useState must bind [value, setter]")
-            .with_span(SourceSpan::new(pattern.span.start, pattern.span.end)));
+        return Err(unsupported(format!(
+            "{} must bind [value, {}]",
+            hook.name(),
+            if hook == StateHook::State {
+                "setter"
+            } else {
+                "dispatch"
+            }
+        ))
+        .with_span(SourceSpan::new(pattern.span.start, pattern.span.end)));
     };
     let source = sources.get(value.name.as_str()).copied().ok_or_else(|| {
         unsupported(format!("state {} is absent from analysis", value.name))
@@ -614,6 +627,7 @@ fn state_binding_symbols<'a>(
         .get()
         .ok_or_else(|| analysis_error(format!("setter {} has no semantic symbol", setter.name)))?;
     Ok(Some((
+        hook,
         StateBinding {
             name: value.name.as_str(),
             symbol: value_symbol,
@@ -633,7 +647,7 @@ fn transform_state_declarator<'a>(
     sources: &BTreeMap<&str, SourceId>,
     react: &ReactBindings<'_>,
 ) -> Result<(), Diagnostic> {
-    let Some((value, _)) = state_binding_symbols(declarator, sources, react)? else {
+    let Some((hook, value, _)) = state_binding_symbols(declarator, sources, react)? else {
         return Ok(());
     };
     let value_name = atom(ast, value.name);
@@ -641,23 +655,44 @@ fn transform_state_declarator<'a>(
     let Some(Expression::CallExpression(call)) = &declarator.init else {
         unreachable!();
     };
-    let [initial] = call.arguments.as_slice() else {
-        return Err(unsupported("useState requires exactly one initializer")
+    let arguments = call
+        .arguments
+        .iter()
+        .map(|argument| {
+            argument
+                .as_expression()
+                .ok_or_else(|| {
+                    let span = argument.span();
+                    unsupported("spread state hook arguments are unsupported")
+                        .with_span(SourceSpan::new(span.start, span.end))
+                })
+                .map(|expression| expression.clone_in_with_semantic_ids(ast.allocator()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    match (hook, arguments.len()) {
+        (StateHook::State, 1) | (StateHook::Reducer, 2 | 3) => {}
+        (StateHook::State, _) => {
+            return Err(unsupported("useState requires exactly one initializer")
+                .with_span(SourceSpan::new(call.span.start, call.span.end)));
+        }
+        (StateHook::Reducer, _) => {
+            return Err(unsupported(
+                "useReducer requires a reducer, initial argument, and optional initializer",
+            )
             .with_span(SourceSpan::new(call.span.start, call.span.end)));
-    };
-    let initial = initial
-        .as_expression()
-        .ok_or_else(|| {
-            let span = initial.span();
-            unsupported("spread state initializers are unsupported")
-                .with_span(SourceSpan::new(span.start, span.end))
-        })?
-        .clone_in_with_semantic_ids(ast.allocator());
+        }
+    }
     declarator.id = BindingPattern::new_binding_identifier(SPAN, value_name, ast);
+    let mut runtime_arguments = vec![ident(ast, SCOPE), mask(ast, &[value_source])];
+    runtime_arguments.extend(arguments);
     declarator.init = Some(call_name(
         ast,
-        CREATE_STATE,
-        [ident(ast, SCOPE), mask(ast, &[value_source]), initial],
+        if hook == StateHook::State {
+            CREATE_STATE
+        } else {
+            CREATE_REDUCER
+        },
+        runtime_arguments,
     ));
     Ok(())
 }
@@ -1552,6 +1587,7 @@ fn runtime_import<'a>(ast: &AstBuilder<'a>, program: &Program<'a>) -> Statement<
         ("compiledRoot", COMPILED_ROOT),
         ("choose", CHOOSE),
         ("createCompiledProp", CREATE_PROP),
+        ("createCompiledReducer", CREATE_REDUCER),
         ("createCompiledScope", CREATE_SCOPE),
         ("createNarrowCompiledScope", CREATE_NARROW_SCOPE),
         ("createCompiledState", CREATE_STATE),

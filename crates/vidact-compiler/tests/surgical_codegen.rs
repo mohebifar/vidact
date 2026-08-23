@@ -586,6 +586,36 @@ fn compiles_named_block_bodied_arrow_components() {
 }
 
 #[test]
+fn compiles_use_reducer_into_the_state_slot_abi() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "ReducerCounter.tsx",
+        source: r#"
+            import { useReducer as useCounterReducer } from 'react';
+            export function ReducerCounter(): Node {
+                const [count, dispatch] = useCounterReducer(
+                    (value, action) => value + action,
+                    '1',
+                    Number,
+                );
+                return <button onClick={() => dispatch(2)}>{count}</button>;
+            }
+        "#,
+    })
+    .expect("useReducer should lower through semantic import identity");
+
+    assert!(
+        output.contains("createCompiledReducer as __vidactCreateReducer"),
+        "{output}"
+    );
+    assert!(
+        output.contains("const count = __vidactCreateReducer("),
+        "{output}"
+    );
+    assert!(output.contains("count.set(2)"), "{output}");
+    assert!(!output.contains("useCounterReducer"), "{output}");
+}
+
+#[test]
 fn compiles_aliased_props_into_local_updater_slots() {
     let output = compile_surgical_module(ModuleInput {
         filename: "AliasedProp.tsx",

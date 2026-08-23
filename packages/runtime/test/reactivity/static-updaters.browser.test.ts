@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   combineSources,
+  createCompiledReducer,
   createCompiledScope,
   createCompiledState,
   source,
@@ -56,6 +57,37 @@ describe('compiled updater corpus', () => {
 
     expect(fullName).toBe('Grace Hopper')
     expect(runs).toBe(1)
+  })
+
+  it('reduces actions through the shared state-slot primitive', () => {
+    type Action = number | (() => number)
+    const valueSource = source(0)
+    const scope = createCompiledScope()
+    let initializations = 0
+    const value = createCompiledReducer(
+      scope,
+      valueSource,
+      (current: number, action: Action) =>
+        current + (typeof action === 'number' ? action : action()),
+      '2',
+      (initial) => {
+        initializations += 1
+        return Number(initial)
+      },
+    )
+    let observed = value.get()
+    scope[0](valueSource, () => {
+      observed = value.get()
+    })
+
+    const functionAction = () => 3
+    value.set(functionAction)
+
+    expect(initializations).toBe(1)
+    expect(observed).toBe(5)
+    expect(value.set).toBe(value.set)
+    scope[3]()
+    expect(() => value.set(1)).toThrow('cannot update state after disposal')
   })
 
   it('supports components with more than 32 reactive sources', () => {
