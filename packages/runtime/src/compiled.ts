@@ -168,6 +168,7 @@ export function errorBoundary(
   fallback: (error: unknown, reset: () => void) => CompiledRenderValue,
   onError?: CompiledErrorHandler,
 ): StructuralBinding {
+  noteHydrationStructuralParent()
   const context = activeContextFrame ?? activeOwner?.[2] ?? null
   const rootIdentity = activeOwner?.[3] ?? activeRootIdentity
   if (rootIdentity === null) {
@@ -180,10 +181,13 @@ export function errorBoundary(
     (parent, before) => {
       if (mounted) throw new Error(DEV ? 'compiled error boundary is already mounted' : 'V008')
       mounted = true
-      const start = document.createComment(DEV ? 'vidact:error' : '')
-      const end = document.createComment(DEV ? '/vidact:error' : '')
-      parent.insertBefore(start, before)
-      parent.insertBefore(end, before)
+      const hydratedRange = claimHydrationSlotRange(parent)
+      const start = hydratedRange?.[0] ?? document.createComment(DEV ? 'vidact:error' : '')
+      const end = hydratedRange?.[1] ?? document.createComment(DEV ? '/vidact:error' : '')
+      if (hydratedRange === undefined) {
+        parent.insertBefore(start, before)
+        parent.insertBefore(end, before)
+      }
       let currentOwner: Owner | null = null
       let currentNodes: readonly Node[] = []
       let failed = false
@@ -194,7 +198,10 @@ export function errorBoundary(
       ): void => {
         const currentParent = rangeParent(start, end, 'error boundary')
         const nextOwner = createOwner(context, rootIdentity, boundary)
-        const [fragment, nodes] = stageRender(read, nextOwner)
+        const [fragment, nodes] =
+          hydratedRange === undefined
+            ? stageRender(read, nextOwner)
+            : withHydrationInsertion(currentParent, end, () => stageRender(read, nextOwner))
         try {
           currentParent.insertBefore(fragment, end)
           commitPublishedNodes(nodes)
@@ -240,6 +247,7 @@ export function errorBoundary(
         }
       })
     },
+    'slot',
   ]
 }
 

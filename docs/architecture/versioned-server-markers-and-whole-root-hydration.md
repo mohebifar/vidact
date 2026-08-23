@@ -41,6 +41,9 @@ protocol, constructs the ordinary compiled scopes once, and claims existing
 elements, component ranges, child slots, scalar text, selected branches, and
 keyed or indexed collection records. Transparent fragments, nested child slots,
 deferred values, and direct arrays are claimed without introducing wrapper DOM.
+Function error boundaries adopt a server child slot as their live recovery range;
+post-hydration failures replace only that owned range. Portals remain an explicit
+server-target diagnostic because their destination is a client DOM container.
 Matching content preserves node identity
 and performs no initial DOM insert, removal, attribute write, or text
 replacement. After claiming, the same static source-mask updaters used by a
@@ -123,6 +126,7 @@ before the claimant is enabled.
   zero-mutation hydration envelopes; post-hydration surgical state/list/branch
   updates; ID parity; event attachment; controlled-form restoration; ref-before-
   layout ordering; opaque raw HTML and marker-injection rejection; mismatch
-  recovery; version skew; and disposal using markup from the server runtime.
+  recovery; hydrated error-boundary recovery; version skew; and disposal using
+  markup from the server runtime.
 - `packages/vite-plugin/test/compiler-client.test.ts` covers isolated server and
   hydrate compiler targets and runtime imports.

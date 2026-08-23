@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  createPortal,
   createContext,
   renderToStaticMarkup,
   renderToString,
@@ -82,6 +83,12 @@ describe('server rendering', () => {
       )),
     ).toBe(
       '<!--vidact:v1:r--><!--vidact:v1:b--><!--vidact:v1:s--><ul><!--vidact:v1:b--><!--vidact:v1:a--><!--vidact:v1:s--><li><!--vidact:v1:b--><!--vidact:v1:t-->one<!--/vidact:v1:t--><!--/vidact:v1:b--></li><!--/vidact:v1:s--><!--vidact:v1:s--><li><!--vidact:v1:b--><!--vidact:v1:t-->two<!--/vidact:v1:t--><!--/vidact:v1:b--></li><!--/vidact:v1:s--><!--/vidact:v1:a--><!--/vidact:v1:b--></ul><!--/vidact:v1:s--><!--/vidact:v1:b--><!--/vidact:v1:r-->',
+    )
+  })
+
+  it('diagnoses portals on the server target', () => {
+    expect(() => renderToString(() => createPortal('content', {}))).toThrow(
+      'portals cannot be emitted by the server target',
     )
   })
 })

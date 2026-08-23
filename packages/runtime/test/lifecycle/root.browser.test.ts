@@ -11,6 +11,7 @@ import {
   createCompiledState,
   createRoot,
   deferred,
+  errorBoundary,
   Fragment,
   h,
   keyed,
@@ -457,6 +458,47 @@ describe('compiled client roots', () => {
     serverInput.dispatchEvent(new InputEvent('input', { bubbles: true }))
     await Promise.resolve()
     expect(serverInput.value).toBe('fixed')
+    hydration.result.unmount()
+  })
+
+  it('claims the primary error-boundary range without remounting it', async () => {
+    const host = document.createElement('div')
+    function ServerBoundaryRoot(): ServerChild {
+      return serverJsx('p', { children: 'primary' })
+    }
+    host.innerHTML = renderToString(() => serverJsx(ServerBoundaryRoot, null))
+    document.body.append(host)
+    const serverParagraph = host.querySelector('p')
+    const failureSource = source(0)
+    let setFailure!: ReturnType<typeof createCompiledState<number>>['set']
+
+    const hydration = await captureMutations(host, () =>
+      hydrateRoot(host, () => {
+        const scope = createCompiledScope()
+        const failure = createCompiledState(scope, failureSource, 0)
+        setFailure = failure.set
+        return compiledRoot(scope, () =>
+          errorBoundary(
+            () =>
+              h(
+                'p',
+                null,
+                binding(scope, failureSource, () => {
+                  if (failure.get() === 1) throw new Error('hydrated failure')
+                  return 'primary'
+                }),
+              ),
+            (error) => h('p', null, (error as Error).message),
+          ),
+        )
+      }),
+    )
+
+    expect(hydration.records).toHaveLength(0)
+    expect(host.querySelector('p')).toBe(serverParagraph)
+    expect(() => setFailure(1)).not.toThrow()
+    expect(serverParagraph?.isConnected).toBe(false)
+    expect(host.textContent).toBe('hydrated failure')
     hydration.result.unmount()
   })
 })
