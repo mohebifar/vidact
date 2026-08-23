@@ -30,7 +30,9 @@ use crate::{
     ir::{ComponentIr, lower_component},
     options::{CompilationOptions, CompilerFeature},
     oxc_react::analyze_program,
-    react_bindings::{ConcurrentHook, ContextHook, EffectHook, MemoHook, ReactBindings, StateHook},
+    react_bindings::{
+        ActionHook, ConcurrentHook, ContextHook, EffectHook, MemoHook, ReactBindings, StateHook,
+    },
 };
 
 mod ast;
@@ -43,6 +45,7 @@ mod render;
 use ast::*;
 
 const SCOPE: &str = "__vidactScope";
+const ACTION_FORM: &str = "__vidactActionForm";
 const BINDING: &str = "__vidactBinding";
 const COMBINE_SOURCES: &str = "__vidactCombineSources";
 const COMPILED_EVENT: &str = "__vidactEvent";
@@ -51,13 +54,16 @@ const COMPILED_EFFECT: &str = "__vidactEffect";
 const COMPILED_IMPERATIVE_HANDLE: &str = "__vidactImperativeHandle";
 const COMPILED_INSERTION_EFFECT: &str = "__vidactInsertionEffect";
 const COMPILED_LAYOUT_EFFECT: &str = "__vidactLayoutEffect";
+const COMPILED_FORM_ACTION: &str = "__vidactFormAction";
 const COMPILED_SPREAD: &str = "__vidactSpread";
 const COMPILED_ROOT: &str = "__vidactCompiledRoot";
 const CHOOSE: &str = "__vidactChoose";
 const CREATE_ASYNC: &str = "__vidactCreateAsync";
+const CREATE_ACTION_STATE: &str = "__vidactCreateActionState";
 const CREATE_CONTEXT: &str = "__vidactCreateContext";
 const CREATE_DEFERRED: &str = "__vidactCreateDeferred";
 const CREATE_EXTERNAL_STORE: &str = "__vidactCreateExternalStore";
+const CREATE_FORM_STATUS: &str = "__vidactCreateFormStatus";
 const CREATE_EFFECT_EVENT: &str = "__vidactCreateEffectEvent";
 const CREATE_ID: &str = "__vidactCreateId";
 const CREATE_PROP: &str = "__vidactCreateProp";
@@ -68,6 +74,7 @@ const CREATE_NARROW_SCOPE: &str = "__vidactCreateNarrowScope";
 const CREATE_STATE: &str = "__vidactCreateState";
 const CREATE_TRANSITION: &str = "__vidactCreateTransition";
 const CREATE_MEMO: &str = "__vidactCreateMemo";
+const CREATE_OPTIMISTIC: &str = "__vidactCreateOptimistic";
 const DEFERRED: &str = "__vidactDeferred";
 const DISPATCH: &str = "__vidactDispatch";
 const INDEXED: &str = "__vidactIndexed";
@@ -231,6 +238,7 @@ fn transform_program<'a>(
     let ast = AstBuilder::new(allocator);
     for name in [
         SCOPE,
+        ACTION_FORM,
         BINDING,
         COMBINE_SOURCES,
         COMPILED_EVENT,
@@ -239,13 +247,16 @@ fn transform_program<'a>(
         COMPILED_IMPERATIVE_HANDLE,
         COMPILED_INSERTION_EFFECT,
         COMPILED_LAYOUT_EFFECT,
+        COMPILED_FORM_ACTION,
         COMPILED_SPREAD,
         COMPILED_ROOT,
         CHOOSE,
         CREATE_ASYNC,
+        CREATE_ACTION_STATE,
         CREATE_CONTEXT,
         CREATE_DEFERRED,
         CREATE_EXTERNAL_STORE,
+        CREATE_FORM_STATUS,
         CREATE_EFFECT_EVENT,
         CREATE_ID,
         CREATE_PROP,
@@ -256,6 +267,7 @@ fn transform_program<'a>(
         CREATE_STATE,
         CREATE_TRANSITION,
         CREATE_MEMO,
+        CREATE_OPTIMISTIC,
         DEFERRED,
         DISPATCH,
         INDEXED,
@@ -302,6 +314,8 @@ fn remove_lowered_react_state_imports(
         async_enabled: options.feature_enabled(CompilerFeature::Async),
         concurrent_enabled: options.feature_enabled(CompilerFeature::Concurrent),
         remaining_concurrent_call: None,
+        actions_enabled: options.feature_enabled(CompilerFeature::Actions),
+        remaining_action_call: None,
         remaining_lazy_call: None,
     };
     usage.visit_program(program);
@@ -324,6 +338,12 @@ fn remove_lowered_react_state_imports(
     if let Some((name, span)) = usage.remaining_concurrent_call {
         return Err(
             unsupported(format!("{name} requires the `concurrent` compiler feature"))
+                .with_span(SourceSpan::new(span.start, span.end)),
+        );
+    }
+    if let Some((name, span)) = usage.remaining_action_call {
+        return Err(
+            unsupported(format!("{name} requires the `actions` compiler feature"))
                 .with_span(SourceSpan::new(span.start, span.end)),
         );
     }
@@ -395,6 +415,8 @@ struct PostTransformReactUsage<'r, 's> {
     async_enabled: bool,
     concurrent_enabled: bool,
     remaining_concurrent_call: Option<(&'static str, Span)>,
+    actions_enabled: bool,
+    remaining_action_call: Option<(&'static str, Span)>,
     remaining_lazy_call: Option<Span>,
 }
 
@@ -402,6 +424,24 @@ impl<'a> Visit<'a> for PostTransformReactUsage<'_, '_> {
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
         if self.react.is_lazy_call(call) && !self.async_enabled {
             self.remaining_lazy_call.get_or_insert(call.span);
+            return;
+        }
+        let action_hook = self
+            .react
+            .action_hook_call(call)
+            .map(ActionHook::name)
+            .or_else(|| {
+                self.react
+                    .is_form_status_call(call)
+                    .then_some("useFormStatus")
+            });
+        if let Some(name) = action_hook {
+            if self.actions_enabled {
+                self.remaining_compiled_hook_call
+                    .get_or_insert((name, call.span));
+            } else {
+                self.remaining_action_call.get_or_insert((name, call.span));
+            }
             return;
         }
         if let Some(hook) = self.react.concurrent_hook_call(call) {
@@ -510,17 +550,34 @@ fn transform_component<'a>(
         for declarator in &declaration.declarations {
             if let BindingPattern::ArrayPattern(pattern) = &declarator.id
                 && let Some(Expression::CallExpression(call)) = &declarator.init
-                && react.concurrent_hook_call(call) == Some(ConcurrentHook::Transition)
-                && let Some(Some(BindingPattern::BindingIdentifier(pending))) =
-                    pattern.elements.first()
-                && !source_ids.contains_key(pending.name.as_str())
             {
-                source_ids.insert(
-                    allocator.alloc_str(pending.name.as_str()),
-                    SourceId::new(next_source),
-                );
-                next_source += 1;
-                continue;
+                let bindings: &[usize] = match (
+                    react.concurrent_hook_call(call),
+                    react.action_hook_call(call),
+                ) {
+                    (Some(ConcurrentHook::Transition), _) => &[0],
+                    (_, Some(ActionHook::ActionState)) => &[0, 2],
+                    (_, Some(ActionHook::Optimistic)) => &[0],
+                    _ => &[],
+                };
+                for index in bindings {
+                    let Some(Some(BindingPattern::BindingIdentifier(identifier))) =
+                        pattern.elements.get(*index)
+                    else {
+                        continue;
+                    };
+                    if source_ids.contains_key(identifier.name.as_str()) {
+                        continue;
+                    }
+                    source_ids.insert(
+                        allocator.alloc_str(identifier.name.as_str()),
+                        SourceId::new(next_source),
+                    );
+                    next_source += 1;
+                }
+                if !bindings.is_empty() {
+                    continue;
+                }
             }
             let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
                 continue;
@@ -530,7 +587,8 @@ fn transform_component<'a>(
             };
             if (react.context_hook_call(call).is_some()
                 || react.is_sync_external_store_call(call)
-                || react.concurrent_hook_call(call) == Some(ConcurrentHook::DeferredValue))
+                || react.concurrent_hook_call(call) == Some(ConcurrentHook::DeferredValue)
+                || react.is_form_status_call(call))
                 && !source_ids.contains_key(identifier.name.as_str())
             {
                 source_ids.insert(
@@ -553,6 +611,7 @@ fn transform_component<'a>(
     let mut id_sources = BTreeSet::<SourceId>::new();
     let mut memo_sources = BTreeSet::<SourceId>::new();
     let mut concurrent_sources = BTreeSet::<SourceId>::new();
+    let mut action_sources = BTreeSet::<SourceId>::new();
     let iterative_plans = iterative::collect(&ast, body, scoping)?;
     let (mut item_source_symbols, mut item_state_symbols) = item_parameters(body, &ast);
     iterative::register_item_sources(
@@ -579,6 +638,18 @@ fn transform_component<'a>(
             continue;
         };
         for declarator in &declaration.declarations {
+            if let Some(Expression::CallExpression(call)) = &declarator.init
+                && !options.feature_enabled(CompilerFeature::Actions)
+                && let Some(name) = react
+                    .action_hook_call(call)
+                    .map(ActionHook::name)
+                    .or_else(|| react.is_form_status_call(call).then_some("useFormStatus"))
+            {
+                return Err(
+                    unsupported(format!("{name} requires the `actions` compiler feature"))
+                        .with_span(SourceSpan::new(call.span.start, call.span.end)),
+                );
+            }
             if let Some((_, value, setter)) =
                 state_binding_symbols(declarator, &source_ids, &react)?
             {
@@ -622,6 +693,69 @@ fn transform_component<'a>(
                 );
             } else if let Some(value) = deferred_binding_symbol(declarator, &source_ids, &react)? {
                 concurrent_sources.insert(value.source);
+                source_symbols.insert(value.symbol, value.source);
+                state_symbols.insert(
+                    value.symbol,
+                    StateReference {
+                        state_name: ast.allocator().alloc_str(value.name),
+                        setter: false,
+                        path: Vec::new(),
+                    },
+                );
+            } else if let Some(bindings) =
+                action_state_binding_symbols(declarator, &source_ids, &react)?
+            {
+                action_sources.extend([bindings.state.source, bindings.pending.source]);
+                source_symbols.insert(bindings.state.symbol, bindings.state.source);
+                source_symbols.insert(bindings.pending.symbol, bindings.pending.source);
+                state_symbols.insert(
+                    bindings.state.symbol,
+                    StateReference {
+                        state_name: ast.allocator().alloc_str(bindings.state.name),
+                        setter: false,
+                        path: vec!["value".to_string()],
+                    },
+                );
+                state_symbols.insert(
+                    bindings.dispatch.symbol,
+                    StateReference {
+                        state_name: ast.allocator().alloc_str(bindings.state.name),
+                        setter: true,
+                        path: Vec::new(),
+                    },
+                );
+                state_symbols.insert(
+                    bindings.pending.symbol,
+                    StateReference {
+                        state_name: ast.allocator().alloc_str(bindings.state.name),
+                        setter: false,
+                        path: vec!["pending".to_string()],
+                    },
+                );
+            } else if let Some((value, add)) =
+                optimistic_binding_symbols(declarator, &source_ids, &react)?
+            {
+                action_sources.insert(value.source);
+                source_symbols.insert(value.symbol, value.source);
+                state_symbols.insert(
+                    value.symbol,
+                    StateReference {
+                        state_name: ast.allocator().alloc_str(value.name),
+                        setter: false,
+                        path: Vec::new(),
+                    },
+                );
+                state_symbols.insert(
+                    add.symbol,
+                    StateReference {
+                        state_name: ast.allocator().alloc_str(value.name),
+                        setter: true,
+                        path: Vec::new(),
+                    },
+                );
+            } else if let Some(value) = form_status_binding_symbol(declarator, &source_ids, &react)?
+            {
+                action_sources.insert(value.source);
                 source_symbols.insert(value.symbol, value.source);
                 state_symbols.insert(
                     value.symbol,
@@ -735,6 +869,18 @@ fn transform_component<'a>(
                 &source_symbols,
                 &item_source_symbols,
             )?;
+            transform_action_state_declarator(&ast, declarator, &source_ids, &react, options)?;
+            transform_optimistic_declarator(
+                &ast,
+                declarator,
+                &source_ids,
+                &react,
+                options,
+                scoping,
+                &source_symbols,
+                &item_source_symbols,
+            )?;
+            transform_form_status_declarator(&ast, declarator, &source_ids, &react, options)?;
             transform_memo_declarator(
                 &ast,
                 declarator,
@@ -762,6 +908,7 @@ fn transform_component<'a>(
                         && source.name == identifier.name.as_str()
                         && !memo_sources.contains(&source.id)
                         && !concurrent_sources.contains(&source.id)
+                        && !action_sources.contains(&source.id)
                         && !context_sources.contains(&source.id)
                         && !external_sources.contains(&source.id)
                         && !effect_event_sources.contains(&source.id)
@@ -895,6 +1042,7 @@ fn transform_component<'a>(
         };
         if memo_sources.contains(write)
             || concurrent_sources.contains(write)
+            || action_sources.contains(write)
             || context_sources.contains(write)
             || external_sources.contains(write)
             || effect_event_sources.contains(write)
@@ -1022,6 +1170,12 @@ struct StateBinding<'a> {
     name: &'a str,
     symbol: SymbolId,
     source: SourceId,
+}
+
+struct ActionStateBindings<'a> {
+    state: StateBinding<'a>,
+    dispatch: StateBinding<'a>,
+    pending: StateBinding<'a>,
 }
 
 struct PropBinding<'a> {
@@ -1191,6 +1345,135 @@ fn deferred_binding_symbol<'a>(
         symbol,
         source,
     }))
+}
+
+fn action_state_binding_symbols<'a>(
+    declarator: &'a VariableDeclarator<'a>,
+    sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
+) -> Result<Option<ActionStateBindings<'a>>, Diagnostic> {
+    let BindingPattern::ArrayPattern(pattern) = &declarator.id else {
+        return Ok(None);
+    };
+    let Some(Expression::CallExpression(call)) = &declarator.init else {
+        return Ok(None);
+    };
+    if react.action_hook_call(call) != Some(ActionHook::ActionState) {
+        return Ok(None);
+    }
+    let [
+        Some(BindingPattern::BindingIdentifier(state)),
+        Some(BindingPattern::BindingIdentifier(dispatch)),
+        Some(BindingPattern::BindingIdentifier(pending)),
+    ] = pattern.elements.as_slice()
+    else {
+        return Err(
+            unsupported("useActionState must bind [state, dispatch, isPending]")
+                .with_span(SourceSpan::new(pattern.span.start, pattern.span.end)),
+        );
+    };
+    let state_source = sources.get(state.name.as_str()).copied().ok_or_else(|| {
+        unsupported(format!(
+            "action state {} is absent from analysis",
+            state.name
+        ))
+        .with_span(SourceSpan::new(state.span.start, state.span.end))
+    })?;
+    let pending_source = sources.get(pending.name.as_str()).copied().ok_or_else(|| {
+        unsupported(format!(
+            "action pending state {} is absent from analysis",
+            pending.name
+        ))
+        .with_span(SourceSpan::new(pending.span.start, pending.span.end))
+    })?;
+    Ok(Some(ActionStateBindings {
+        state: resolved_state_binding(state, state_source, "action state")?,
+        dispatch: resolved_state_binding(dispatch, state_source, "action dispatch")?,
+        pending: resolved_state_binding(pending, pending_source, "action pending state")?,
+    }))
+}
+
+fn optimistic_binding_symbols<'a>(
+    declarator: &'a VariableDeclarator<'a>,
+    sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
+) -> Result<Option<(StateBinding<'a>, StateBinding<'a>)>, Diagnostic> {
+    let BindingPattern::ArrayPattern(pattern) = &declarator.id else {
+        return Ok(None);
+    };
+    let Some(Expression::CallExpression(call)) = &declarator.init else {
+        return Ok(None);
+    };
+    if react.action_hook_call(call) != Some(ActionHook::Optimistic) {
+        return Ok(None);
+    }
+    let [
+        Some(BindingPattern::BindingIdentifier(value)),
+        Some(BindingPattern::BindingIdentifier(add)),
+    ] = pattern.elements.as_slice()
+    else {
+        return Err(
+            unsupported("useOptimistic must bind [value, addOptimistic]")
+                .with_span(SourceSpan::new(pattern.span.start, pattern.span.end)),
+        );
+    };
+    let source = sources.get(value.name.as_str()).copied().ok_or_else(|| {
+        unsupported(format!(
+            "optimistic value {} is absent from analysis",
+            value.name
+        ))
+        .with_span(SourceSpan::new(value.span.start, value.span.end))
+    })?;
+    Ok(Some((
+        resolved_state_binding(value, source, "optimistic value")?,
+        resolved_state_binding(add, source, "optimistic dispatcher")?,
+    )))
+}
+
+fn form_status_binding_symbol<'a>(
+    declarator: &'a VariableDeclarator<'a>,
+    sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
+) -> Result<Option<StateBinding<'a>>, Diagnostic> {
+    let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+        return Ok(None);
+    };
+    let Some(Expression::CallExpression(call)) = &declarator.init else {
+        return Ok(None);
+    };
+    if !react.is_form_status_call(call) {
+        return Ok(None);
+    }
+    let source = sources
+        .get(identifier.name.as_str())
+        .copied()
+        .ok_or_else(|| {
+            unsupported(format!(
+                "form status {} is absent from analysis",
+                identifier.name
+            ))
+            .with_span(SourceSpan::new(identifier.span.start, identifier.span.end))
+        })?;
+    Ok(Some(resolved_state_binding(
+        identifier,
+        source,
+        "form status",
+    )?))
+}
+
+fn resolved_state_binding<'a>(
+    identifier: &'a BindingIdentifier<'a>,
+    source: SourceId,
+    kind: &str,
+) -> Result<StateBinding<'a>, Diagnostic> {
+    let symbol = identifier.symbol_id.get().ok_or_else(|| {
+        analysis_error(format!("{kind} {} has no semantic symbol", identifier.name))
+    })?;
+    Ok(StateBinding {
+        name: identifier.name.as_str(),
+        symbol,
+        source,
+    })
 }
 
 fn memo_binding_symbol<'a>(
@@ -1490,6 +1773,147 @@ fn transform_deferred_declarator<'a>(
         );
     }
     declarator.init = Some(call_name(ast, CREATE_DEFERRED, arguments));
+    Ok(())
+}
+
+fn transform_action_state_declarator<'a>(
+    ast: &AstBuilder<'a>,
+    declarator: &mut VariableDeclarator<'a>,
+    sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
+    options: &CompilationOptions,
+) -> Result<(), Diagnostic> {
+    let Some(bindings) = action_state_binding_symbols(declarator, sources, react)? else {
+        return Ok(());
+    };
+    let Some(Expression::CallExpression(call)) = &declarator.init else {
+        unreachable!();
+    };
+    if !options.feature_enabled(CompilerFeature::Actions) {
+        return Err(
+            unsupported("useActionState requires the `actions` compiler feature")
+                .with_span(SourceSpan::new(call.span.start, call.span.end)),
+        );
+    }
+    if !matches!(call.arguments.len(), 2 | 3) || call.arguments.iter().any(Argument::is_spread) {
+        return Err(unsupported(
+            "useActionState requires an action, initial state, and optional permalink",
+        )
+        .with_span(SourceSpan::new(call.span.start, call.span.end)));
+    }
+    let arguments = call
+        .arguments
+        .iter()
+        .map(|argument| {
+            argument
+                .as_expression()
+                .expect("spread arguments were rejected")
+                .clone_in_with_semantic_ids(ast.allocator())
+        })
+        .collect::<Vec<_>>();
+    let state_name = bindings.state.name.to_string();
+    let state_source = bindings.state.source;
+    let pending_source = bindings.pending.source;
+    declarator.id = BindingPattern::new_binding_identifier(SPAN, atom(ast, &state_name), ast);
+    let mut runtime_arguments = vec![
+        ident(ast, SCOPE),
+        mask(ast, &[state_source]),
+        mask(ast, &[pending_source]),
+    ];
+    runtime_arguments.extend(arguments);
+    declarator.init = Some(call_name(ast, CREATE_ACTION_STATE, runtime_arguments));
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn transform_optimistic_declarator<'a>(
+    ast: &AstBuilder<'a>,
+    declarator: &mut VariableDeclarator<'a>,
+    sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
+    options: &CompilationOptions,
+    scoping: &Scoping,
+    source_symbols: &BTreeMap<SymbolId, SourceId>,
+    item_source_symbols: &BTreeMap<SymbolId, SourceId>,
+) -> Result<(), Diagnostic> {
+    let Some((value, _)) = optimistic_binding_symbols(declarator, sources, react)? else {
+        return Ok(());
+    };
+    let Some(Expression::CallExpression(call)) = &declarator.init else {
+        unreachable!();
+    };
+    if !options.feature_enabled(CompilerFeature::Actions) {
+        return Err(
+            unsupported("useOptimistic requires the `actions` compiler feature")
+                .with_span(SourceSpan::new(call.span.start, call.span.end)),
+        );
+    }
+    if !matches!(call.arguments.len(), 1 | 2) || call.arguments.iter().any(Argument::is_spread) {
+        return Err(
+            unsupported("useOptimistic requires a passthrough value and optional reducer")
+                .with_span(SourceSpan::new(call.span.start, call.span.end)),
+        );
+    }
+    let input = call.arguments[0]
+        .as_expression()
+        .expect("spread arguments were rejected");
+    let reads = dependencies(input, scoping, source_symbols, item_source_symbols);
+    if !reads.item.is_empty() {
+        return Err(
+            unsupported("component optimistic values cannot capture keyed item slots")
+                .with_span(SourceSpan::from_oxc(input.span())),
+        );
+    }
+    let mut arguments = vec![
+        ident(ast, SCOPE),
+        dependency_mask(ast, &reads.parent),
+        mask(ast, &[value.source]),
+        arrow_expression(ast, [], input.clone_in_with_semantic_ids(ast.allocator())),
+    ];
+    if let Some(reducer) = call.arguments.get(1) {
+        arguments.push(
+            reducer
+                .as_expression()
+                .expect("spread arguments were rejected")
+                .clone_in_with_semantic_ids(ast.allocator()),
+        );
+    }
+    declarator.id = BindingPattern::new_binding_identifier(SPAN, atom(ast, value.name), ast);
+    declarator.init = Some(call_name(ast, CREATE_OPTIMISTIC, arguments));
+    Ok(())
+}
+
+fn transform_form_status_declarator<'a>(
+    ast: &AstBuilder<'a>,
+    declarator: &mut VariableDeclarator<'a>,
+    sources: &BTreeMap<&str, SourceId>,
+    react: &ReactBindings<'_>,
+    options: &CompilationOptions,
+) -> Result<(), Diagnostic> {
+    let Some(value) = form_status_binding_symbol(declarator, sources, react)? else {
+        return Ok(());
+    };
+    let Some(Expression::CallExpression(call)) = &declarator.init else {
+        unreachable!();
+    };
+    if !options.feature_enabled(CompilerFeature::Actions) {
+        return Err(
+            unsupported("useFormStatus requires the `actions` compiler feature")
+                .with_span(SourceSpan::new(call.span.start, call.span.end)),
+        );
+    }
+    if !call.arguments.is_empty() {
+        return Err(unsupported("useFormStatus does not accept arguments")
+            .with_span(SourceSpan::new(call.span.start, call.span.end)));
+    }
+    let value_name = value.name.to_string();
+    let value_source = value.source;
+    declarator.id = BindingPattern::new_binding_identifier(SPAN, atom(ast, &value_name), ast);
+    declarator.init = Some(call_name(
+        ast,
+        CREATE_FORM_STATUS,
+        [ident(ast, SCOPE), mask(ast, &[value_source])],
+    ));
     Ok(())
 }
 
@@ -2221,6 +2645,10 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
                 }
             }
         }
+        if let Err(diagnostic) = prepare_action_element(self.ast, self.options, element) {
+            self.diagnostic = Some(diagnostic);
+            return;
+        }
         let reactive_spreads = element
             .opening_element
             .attributes
@@ -2547,6 +2975,88 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
         append_item_dependency(self.ast, &mut arguments, &reads);
         *expression = call_name(self.ast, BINDING, arguments);
     }
+}
+
+fn prepare_action_element<'a>(
+    ast: &AstBuilder<'a>,
+    options: &CompilationOptions,
+    element: &mut JSXElement<'a>,
+) -> Result<(), Diagnostic> {
+    let Some(tag) = raw_html::intrinsic_jsx_name(&element.opening_element.name) else {
+        return Ok(());
+    };
+    let tag = tag.to_string();
+    for item in &mut element.opening_element.attributes {
+        let JSXAttributeItem::Attribute(attribute) = item else {
+            if options.feature_enabled(CompilerFeature::Actions)
+                && matches!(tag.as_str(), "form" | "button" | "input")
+                && let JSXAttributeItem::SpreadAttribute(spread) = item
+            {
+                spread.argument = call_name(
+                    ast,
+                    COMPILED_FORM_ACTION,
+                    [spread.argument.clone_in_with_semantic_ids(ast.allocator())],
+                );
+            }
+            continue;
+        };
+        let JSXAttributeName::Identifier(name) = &attribute.name else {
+            continue;
+        };
+        let prop = name.name.as_str();
+        if !matches!(prop, "action" | "formAction") {
+            continue;
+        }
+        let valid_host = (prop == "action" && tag == "form")
+            || (prop == "formAction" && matches!(tag.as_str(), "button" | "input"));
+        let Some(value) = &mut attribute.value else {
+            return Err(unsupported(format!("{prop} must have a value"))
+                .with_span(SourceSpan::new(attribute.span.start, attribute.span.end)));
+        };
+        if matches!(value, JSXAttributeValue::StringLiteral(_)) {
+            continue;
+        }
+        if !valid_host {
+            return Err(unsupported(format!(
+                "function {prop} is only supported on {}",
+                if prop == "action" {
+                    "<form>"
+                } else {
+                    "<button> and <input>"
+                }
+            ))
+            .with_span(SourceSpan::new(attribute.span.start, attribute.span.end)));
+        }
+        if !options.feature_enabled(CompilerFeature::Actions) {
+            return Err(unsupported(format!(
+                "function {prop} requires the `actions` compiler feature"
+            ))
+            .with_span(SourceSpan::new(attribute.span.start, attribute.span.end)));
+        }
+        let JSXAttributeValue::ExpressionContainer(container) = value else {
+            return Err(
+                unsupported(format!("function {prop} must be an expression"))
+                    .with_span(SourceSpan::new(attribute.span.start, attribute.span.end)),
+            );
+        };
+        let Some(expression) = container.expression.as_expression() else {
+            return Err(unsupported(format!("function {prop} must have a value"))
+                .with_span(SourceSpan::new(container.span.start, container.span.end)));
+        };
+        container.expression = JSXExpression::from(call_name(
+            ast,
+            COMPILED_FORM_ACTION,
+            [expression.clone_in_with_semantic_ids(ast.allocator())],
+        ));
+    }
+    if options.feature_enabled(CompilerFeature::Actions) && tag == "form" {
+        element.opening_element.name =
+            JSXElementName::new_identifier_reference(SPAN, ACTION_FORM, ast);
+        if let Some(closing) = &mut element.closing_element {
+            closing.name = JSXElementName::new_identifier_reference(SPAN, ACTION_FORM, ast);
+        }
+    }
+    Ok(())
 }
 
 fn is_generated_list_call(expression: &Expression<'_>) -> bool {
@@ -3535,6 +4045,7 @@ fn runtime_import<'a>(
     options: &CompilationOptions,
 ) -> Statement<'a> {
     let names = [
+        ("ActionForm", ACTION_FORM),
         ("binding", BINDING),
         ("combineSources", COMBINE_SOURCES),
         ("compiledComponentSpread", COMPILED_COMPONENT_SPREAD),
@@ -3543,16 +4054,20 @@ fn runtime_import<'a>(
         ("compiledImperativeHandle", COMPILED_IMPERATIVE_HANDLE),
         ("compiledInsertionEffect", COMPILED_INSERTION_EFFECT),
         ("compiledLayoutEffect", COMPILED_LAYOUT_EFFECT),
+        ("compiledFormAction", COMPILED_FORM_ACTION),
         ("compiledSpread", COMPILED_SPREAD),
         ("compiledRoot", COMPILED_ROOT),
         ("choose", CHOOSE),
         ("createCompiledAsync", CREATE_ASYNC),
+        ("createCompiledActionState", CREATE_ACTION_STATE),
         ("createCompiledContext", CREATE_CONTEXT),
         ("createCompiledDeferred", CREATE_DEFERRED),
         ("createCompiledExternalStore", CREATE_EXTERNAL_STORE),
+        ("createCompiledFormStatus", CREATE_FORM_STATUS),
         ("createCompiledEffectEvent", CREATE_EFFECT_EVENT),
         ("createCompiledId", CREATE_ID),
         ("createCompiledMemo", CREATE_MEMO),
+        ("createCompiledOptimistic", CREATE_OPTIMISTIC),
         ("createCompiledProp", CREATE_PROP),
         ("createCompiledRestProp", CREATE_REST_PROP),
         ("createCompiledReducer", CREATE_REDUCER),
@@ -3593,16 +4108,21 @@ fn runtime_import<'a>(
             match (
                 options.feature_enabled(CompilerFeature::Async),
                 options.feature_enabled(CompilerFeature::Concurrent),
+                options.feature_enabled(CompilerFeature::Actions),
                 options.target() == crate::CompilerTarget::Hydrate,
             ) {
-                (true, true, true) => "@vidact/runtime/async/concurrent/hydrate",
-                (true, true, false) => "@vidact/runtime/async/concurrent",
-                (true, false, true) => "@vidact/runtime/async/hydrate",
-                (true, false, false) => "@vidact/runtime/async",
-                (false, true, true) => "@vidact/runtime/concurrent/hydrate",
-                (false, true, false) => "@vidact/runtime/concurrent",
-                (false, false, true) => "@vidact/runtime/hydrate",
-                (false, false, false) => "@vidact/runtime",
+                (true, _, true, true) => "@vidact/runtime/async/actions/hydrate",
+                (true, _, true, false) => "@vidact/runtime/async/actions",
+                (false, _, true, true) => "@vidact/runtime/actions/hydrate",
+                (false, _, true, false) => "@vidact/runtime/actions",
+                (true, true, false, true) => "@vidact/runtime/async/concurrent/hydrate",
+                (true, true, false, false) => "@vidact/runtime/async/concurrent",
+                (true, false, false, true) => "@vidact/runtime/async/hydrate",
+                (true, false, false, false) => "@vidact/runtime/async",
+                (false, true, false, true) => "@vidact/runtime/concurrent/hydrate",
+                (false, true, false, false) => "@vidact/runtime/concurrent",
+                (false, false, false, true) => "@vidact/runtime/hydrate",
+                (false, false, false, false) => "@vidact/runtime",
             },
             None,
             ast,

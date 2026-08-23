@@ -55,6 +55,7 @@ fn verify_fixture(root: &Path, fixture: &Value) {
                 "css-insertion" => CompilerFeature::CssInsertion,
                 "async" => CompilerFeature::Async,
                 "concurrent" => CompilerFeature::Concurrent,
+                "actions" => CompilerFeature::Actions,
                 feature => panic!("unknown compatibility fixture feature {feature}"),
             };
             options.with_feature(feature)

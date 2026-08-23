@@ -345,6 +345,24 @@
       "expectation": "rejected",
       "code": "UnsupportedSyntax",
       "spanContains": "flushSync"
+    },
+    {
+      "path": "accepted/actions.tsx",
+      "expectation": "accepted",
+      "features": ["actions"],
+      "components": ["Status", "Actions"]
+    },
+    {
+      "path": "rejected/action-hook-disabled.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "useActionState"
+    },
+    {
+      "path": "rejected/function-action-disabled.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "action={submit}"
     }
   ]
 }

@@ -19,11 +19,13 @@ source while preserving TSX for the Vidact compiler:
 
 The package reuses `@types/react` for standard HTML, ARIA, `key`, and `ref`
 attributes. It adapts event handlers to the native DOM events Vidact actually
-dispatches, including capture handlers. React-only hydration flags, function
-form actions, and unsupported namespaces are excluded. `dangerouslySetInnerHTML`
-uses React's `{ __html: string | TrustedHTML }` contract and remains an explicit,
-unsanitized HTML sink. SVG remains rejected until Vidact has namespace-aware
-compiler lowering.
+dispatches, including capture handlers. Function-valued `action` and
+`formAction` props use the React 19 `FormData` contract, and `useFormStatus` is
+available from `react-dom`; compilation still requires the `actions` feature.
+React-only hydration flags remain excluded. `dangerouslySetInnerHTML` uses
+React's `{ __html: string | TrustedHTML }` contract and remains an explicit,
+unsanitized HTML sink. HTML, SVG, and MathML intrinsic types follow Vidact's
+namespace-aware DOM lowering.
 
 The package also replaces React's element and child value types with Vidact's
 owned compiled values. Use `VidactNode` for component props that accept

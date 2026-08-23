@@ -1,6 +1,14 @@
 import type { VidactNode } from '@vidact/react-types'
-import { Suspense, createContext, lazy, use, type ReactElement } from 'react'
-import { createPortal } from 'react-dom'
+import {
+  Suspense,
+  createContext,
+  lazy,
+  use,
+  useActionState,
+  useOptimistic,
+  type ReactElement,
+} from 'react'
+import { createPortal, useFormStatus } from 'react-dom'
 
 const child: VidactNode = 'child'
 
@@ -68,6 +76,17 @@ const asyncBoundary = (
   </Suspense>
 )
 const usedPromise: string = use(Promise.resolve('ready'))
+const [actionState, submitAction, actionPending] = useActionState(
+  async (previous: string, data: FormData) => previous + String(data.get('value')),
+  '',
+)
+const [optimisticState, addOptimistic] = useOptimistic(actionState)
+const formStatus = useFormStatus()
+const functionFormAction = (
+  <form action={submitAction}>
+    <button formAction={async (data) => void data.get('value')}>save</button>
+  </form>
+)
 
 void nativeElements
 void customElement
@@ -80,15 +99,17 @@ void legacyContextProvider
 void portal
 void asyncBoundary
 void usedPromise
+void actionPending
+void optimisticState
+void addOptimistic
+void formStatus
+void functionFormAction
 
 // @ts-expect-error `href` is not a button attribute.
 const invalidAttribute = <button href="/not-a-button-link" />
 
 // @ts-expect-error Raw HTML must use React's `{ __html: string | TrustedHTML }` shape.
 const invalidRawHtml = <div dangerouslySetInnerHTML={{ html: '<b>invalid</b>' }} />
-
-// @ts-expect-error React server actions are not native DOM form actions.
-const unsupportedFormAction = <form action={() => undefined} />
 
 // @ts-expect-error Vidact does not hydrate server-rendered markup.
 const unsupportedHydrationFlag = <div suppressHydrationWarning />
@@ -110,7 +131,6 @@ const promiseChild = <div>{Promise.resolve('invalid')}</div>
 
 void invalidAttribute
 void invalidRawHtml
-void unsupportedFormAction
 void unsupportedHydrationFlag
 void reactElement
 void objectChild

@@ -24,6 +24,8 @@ type TransitionWork = {
   readonly generation: number
   readonly slots: Map<object, StagedSlot>
   readonly settled: Set<() => void>
+  readonly finalizers: Set<() => void>
+  readonly aborters: Set<() => void>
   cancelTask: CancelScheduledTask | undefined
   awaiting: number
   committed: boolean
@@ -109,6 +111,47 @@ export function useDeferredValue<Value>(_value: Value, _initialValue?: Value): n
   throw new Error(DEV ? 'useDeferredValue requires compiler lowering' : 'V033')
 }
 
+/** @internal */
+export function registerTransitionSettlement(settle: () => void): boolean {
+  if (activeTransition === undefined) return false
+  activeTransition.settled.add(settle)
+  return true
+}
+
+/** @internal */
+export function registerTransitionFinalizer(finalize: () => void): boolean {
+  if (activeTransition === undefined) return false
+  activeTransition.finalizers.add(finalize)
+  return true
+}
+
+/** @internal */
+export function registerTransitionAborter(abort: () => void): boolean {
+  if (activeTransition === undefined) return false
+  activeTransition.aborters.add(abort)
+  return true
+}
+
+/** @internal */
+export function runUrgentUpdate<Result>(operation: () => Result): Result {
+  return runUrgent(operation)
+}
+
+/** @internal */
+export function startIndependentTransition(action: TransitionAction): void {
+  ensureConcurrentScheduler()
+  const previous = activeTransition
+  activeTransition = undefined
+  try {
+    startLaneTransition(
+      createLane(() => {}),
+      action,
+    )
+  } finally {
+    activeTransition = previous
+  }
+}
+
 function createLane(pending: (value: boolean) => void): TransitionLane {
   return { generation: 0, current: undefined, pending }
 }
@@ -135,6 +178,8 @@ function startLaneTransition(lane: TransitionLane, action: TransitionAction): vo
     generation: lane.generation,
     slots: new Map(),
     settled: new Set(),
+    finalizers: new Set(),
+    aborters: new Set(),
     cancelTask: undefined,
     awaiting: 0,
     committed: false,
@@ -210,7 +255,13 @@ function commitWork(work: TransitionWork): void {
         for (const update of slot.updates) slot.commit(update)
       }
     })
+    for (const finalize of work.finalizers) finalize()
+    work.finalizers.clear()
+    work.aborters.clear()
     work.committed = true
+  } catch (error) {
+    cancelWork(work)
+    throw error
   } finally {
     activeTransition = previous
     finishWork(work)
@@ -222,6 +273,9 @@ function cancelWork(work: TransitionWork | undefined, preserveLanePending = fals
   work.canceled = true
   work.cancelTask?.()
   work.cancelTask = undefined
+  work.finalizers.clear()
+  for (const abort of work.aborters) abort()
+  work.aborters.clear()
   work.committed = true
   work.awaiting = 0
   if (preserveLanePending && work.lane.current === work) work.lane.current = undefined

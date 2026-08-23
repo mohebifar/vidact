@@ -86,7 +86,8 @@ export function applyFormProp(element: Element, name: string, value: unknown): b
     return true
   }
   if (name === 'defaultValue' && 'defaultValue' in element) {
-    Reflect.set(element, 'defaultValue', value === null || value === undefined ? '' : String(value))
+    const next = value === null || value === undefined ? '' : String(value)
+    if (Reflect.get(element, 'defaultValue') !== next) Reflect.set(element, 'defaultValue', next)
     return true
   }
   if (name === 'defaultChecked' && element instanceof HTMLInputElement) {
@@ -106,6 +107,33 @@ export function applyFormProp(element: Element, name: string, value: unknown): b
     return true
   }
   return false
+}
+
+function restoreControlledForm(form: HTMLFormElement): void {
+  for (const element of form.elements) {
+    if (element instanceof Element) restoreControlledFormState(element)
+  }
+}
+
+export function resetActionForm(form: HTMLFormElement): void {
+  for (const element of form.elements) {
+    const controlled = controlledFormStates.get(element)
+    if (controlled?.[0] !== undefined || controlled?.[1] !== undefined) continue
+    if (element instanceof HTMLInputElement) {
+      if (element.type === 'checkbox' || element.type === 'radio') {
+        element.checked = element.defaultChecked
+      } else {
+        element.value = element.type === 'file' ? '' : element.defaultValue
+      }
+      continue
+    }
+    if (element instanceof HTMLTextAreaElement) {
+      element.value = element.defaultValue
+      continue
+    }
+    if (element instanceof HTMLSelectElement) resetSelect(element)
+  }
+  restoreControlledForm(form)
 }
 
 export function restoreControlledFormState(element: Element): void {
@@ -178,4 +206,15 @@ function applySelectValue(element: HTMLSelectElement, value: unknown): void {
 
   const selected = new Set(value as readonly string[])
   for (const option of element.options) option.selected = selected.has(option.value)
+}
+
+function resetSelect(element: HTMLSelectElement): void {
+  let selected = false
+  for (const option of element.options) {
+    option.selected = option.defaultSelected
+    selected ||= option.selected
+  }
+  if (!element.multiple && !selected && element.options.length > 0) {
+    element.options[0]!.selected = true
+  }
 }

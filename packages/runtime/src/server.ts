@@ -142,6 +142,9 @@ const ATTRIBUTE_ALIASES: Readonly<Record<string, string>> = {
   acceptCharset: 'accept-charset',
   className: 'class',
   crossOrigin: 'crossorigin',
+  defaultChecked: 'checked',
+  defaultValue: 'value',
+  formAction: 'formaction',
   htmlFor: 'for',
   httpEquiv: 'http-equiv',
 }
@@ -299,6 +302,32 @@ export function useDeferredValue<Value>(value: Value, _initialValue?: Value): Va
 
 export function flushSync<Result>(operation?: () => Result): Result | undefined {
   return operation?.()
+}
+
+export function useActionState<State, Payload>(
+  _action: (previousState: State, payload: Payload) => State | PromiseLike<State>,
+  initialState: State,
+  permalink?: string,
+): [State, (payload: Payload) => void, boolean] {
+  const dispatch = (_payload: Payload): void => serverDispatch()
+  if (permalink !== undefined) Object.defineProperty(dispatch, 'permalink', { value: permalink })
+  return [initialState, dispatch, false]
+}
+
+export function useOptimistic<Value, Update = Value>(
+  passthrough: Value,
+  _reducer?: (current: Value, update: Update) => Value,
+): [Value, (update: Update) => void] {
+  return [passthrough, serverDispatch]
+}
+
+export function useFormStatus(): {
+  readonly pending: false
+  readonly data: null
+  readonly method: 'get'
+  readonly action: null
+} {
+  return { pending: false, data: null, method: 'get', action: null }
 }
 
 export function useMemo<Value>(factory: () => Value, _dependencies: readonly unknown[]): Value {
@@ -515,6 +544,13 @@ function serializeAttributes(props: ServerProps): string {
 
 function serializeAttribute(name: string, value: unknown): string {
   if (
+    (name === 'action' || name === 'formAction') &&
+    typeof value === 'function' &&
+    typeof Reflect.get(value, 'permalink') === 'string'
+  ) {
+    return ` ${attributeName(name)}="${escapeAttribute(Reflect.get(value, 'permalink') as string)}"`
+  }
+  if (
     name === 'children' ||
     name === 'dangerouslySetInnerHTML' ||
     name === 'key' ||
@@ -528,10 +564,12 @@ function serializeAttribute(name: string, value: unknown): string {
     return ''
   }
   if (name === 'style') return serializeStyleAttribute(value)
-  if (BOOLEAN_ATTRIBUTES.has(name)) return value ? ` ${attributeName(name)}=""` : ''
-  if (typeof value === 'boolean') return ''
-
   const normalizedName = attributeName(name)
+  if (name.startsWith('data-') || name.startsWith('aria-')) {
+    return ` ${normalizedName}="${escapeAttribute(String(value))}"`
+  }
+  if (BOOLEAN_ATTRIBUTES.has(normalizedName)) return value ? ` ${normalizedName}=""` : ''
+  if (typeof value === 'boolean') return ''
   if (!VALID_ATTRIBUTE_NAME.test(normalizedName)) return ''
   return ` ${normalizedName}="${escapeAttribute(String(value))}"`
 }

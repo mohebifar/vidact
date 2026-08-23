@@ -46,10 +46,12 @@ type VidactStyle = CSSProperties & {
   [Name in `--${string}`]?: string | number | null | undefined
 }
 
+type FunctionFormAction = (data: FormData) => void | Promise<void>
+
 type NativeProperty<Property extends PropertyKey, ReactAttribute> = Property extends
   | 'action'
   | 'formAction'
-  ? Extract<ReactAttribute, string | undefined>
+  ? Extract<ReactAttribute, string | undefined> | FunctionFormAction
   : Property extends 'style'
     ? VidactStyle | Extract<ReactAttribute, null | undefined>
     : ReactAttribute

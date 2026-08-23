@@ -89,21 +89,30 @@ try {
     `import { source, type CompiledRenderValue } from '@vidact/runtime'
 import { Suspense, createResource, lazy } from '@vidact/runtime/async'
 import { flushSync, startTransition } from '@vidact/runtime/concurrent'
+import { createCompiledActionState, useActionState } from '@vidact/runtime/actions'
+import { Suspense as AsyncActionsSuspense } from '@vidact/runtime/async/actions'
+import { renderToStaticMarkup as renderActionsToStaticMarkup } from '@vidact/runtime/actions/server'
 import { renderToStaticMarkup } from '@vidact/runtime/server'
 import { act } from '@vidact/test-support'
 import { vidact } from '@vidact/vite'
 
 const view: CompiledRenderValue = <button onClick={(event) => event.currentTarget.focus()}>ok</button>
+const actionView: CompiledRenderValue = <form action={async (_data) => {}} />
 void view
+void actionView
 void source(0)
 void Suspense
 void createResource
 void lazy
 void flushSync
 void startTransition
+void createCompiledActionState
+void useActionState
+void AsyncActionsSuspense
 void act
 void vidact()
 if (renderToStaticMarkup(() => 'ready') !== 'ready') throw new Error('server entry failed')
+if (renderActionsToStaticMarkup(() => 'ready') !== 'ready') throw new Error('Actions server entry failed')
 `,
   )
   await writeFile(
@@ -111,6 +120,9 @@ if (renderToStaticMarkup(() => 'ready') !== 'ready') throw new Error('server ent
     `import { VIDACT_RUNTIME_PROTOCOL } from '@vidact/runtime/protocol'
 import { Suspense, createResource, lazy } from '@vidact/runtime/async'
 import { flushSync, startTransition } from '@vidact/runtime/concurrent'
+import { createCompiledActionState, useActionState } from '@vidact/runtime/actions'
+import { Suspense as AsyncActionsSuspense } from '@vidact/runtime/async/actions'
+import { renderToStaticMarkup as renderActionsToStaticMarkup } from '@vidact/runtime/actions/server'
 import { renderToStaticMarkup } from '@vidact/runtime/server'
 import { act } from '@vidact/test-support'
 import { vidact } from '@vidact/vite'
@@ -119,13 +131,20 @@ if (VIDACT_RUNTIME_PROTOCOL !== 'vidact-runtime-v1') throw new Error('runtime en
 if (renderToStaticMarkup(() => 'ready') !== 'ready') throw new Error('server entry failed')
 if ([Suspense, createResource, lazy].some((value) => typeof value !== 'function')) throw new Error('async entry failed')
 if ([flushSync, startTransition].some((value) => typeof value !== 'function')) throw new Error('concurrent entry failed')
+if ([createCompiledActionState, useActionState, AsyncActionsSuspense].some((value) => typeof value !== 'function')) throw new Error('Actions entry failed')
+if (renderActionsToStaticMarkup(() => 'ready') !== 'ready') throw new Error('Actions server entry failed')
 if (typeof act !== 'function' || typeof vidact !== 'function') throw new Error('package entry failed')
 `,
   )
 
   run(npm, ['install', '--ignore-scripts', '--no-audit', '--no-fund'], consumerDirectory)
   run(node, ['smoke.mjs'], consumerDirectory)
-  const tsc = path.join(consumerDirectory, 'node_modules', '.bin', `tsc${process.platform === 'win32' ? '.cmd' : ''}`)
+  const tsc = path.join(
+    consumerDirectory,
+    'node_modules',
+    '.bin',
+    `tsc${process.platform === 'win32' ? '.cmd' : ''}`,
+  )
   run(tsc, ['-p', 'tsconfig.json'], consumerDirectory)
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })

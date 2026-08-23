@@ -15,6 +15,13 @@ primitives directly.
 - `@vidact/runtime/concurrent/server`: deterministic concurrent server shims
 - `@vidact/runtime/async/concurrent`: composed async and concurrent capabilities;
   hydrate and server variants follow the same suffix convention
+- `@vidact/runtime/actions`: queued action state, optimistic layers, function
+  form actions, and form status
+- `@vidact/runtime/actions/hydrate`: Actions client hydration
+- `@vidact/runtime/actions/server`: deterministic Actions state and permalink
+  form serialization
+- `@vidact/runtime/async/actions`: composed async and Actions capabilities;
+  hydrate and server variants follow the same suffix convention
 - `@vidact/runtime/testing`: deterministic runtime queue draining
 
 The compiler and runtime validate the `vidact-runtime-v1` protocol. Server and

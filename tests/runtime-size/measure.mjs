@@ -25,7 +25,19 @@ const fixtures = [
     name: 'concurrent',
     entry: path.join(directory, 'fixtures/concurrent.tsx'),
     features: ['concurrent'],
-    gzipBudget: 9_730,
+    gzipBudget: 9_734,
+  },
+  {
+    name: 'actions-unused',
+    entry: path.join(directory, 'fixtures/counter.tsx'),
+    features: ['actions'],
+    gzipBudget: 8_069,
+  },
+  {
+    name: 'actions',
+    entry: path.join(directory, 'fixtures/actions.tsx'),
+    features: ['actions'],
+    gzipBudget: 11_446,
   },
   {
     name: 'control-flow',
@@ -60,16 +72,22 @@ const asyncUnused = measurements.find((measurement) => measurement.fixture === '
 const concurrentUnused = measurements.find(
   (measurement) => measurement.fixture === 'concurrent-unused',
 )
+const actionsUnused = measurements.find((measurement) => measurement.fixture === 'actions-unused')
 if (
   counter === undefined ||
   asyncUnused === undefined ||
   concurrentUnused === undefined ||
+  actionsUnused === undefined ||
   counter.minified !== asyncUnused.minified ||
   counter.gzip !== asyncUnused.gzip ||
   counter.minified !== concurrentUnused.minified ||
-  counter.gzip !== concurrentUnused.gzip
+  counter.gzip !== concurrentUnused.gzip ||
+  counter.minified !== actionsUnused.minified ||
+  counter.gzip !== actionsUnused.gzip
 ) {
-  regressions.push('enabling an unused async or concurrent family changed the counter artifact')
+  regressions.push(
+    'enabling an unused async, concurrent, or Actions family changed the counter artifact',
+  )
 }
 if (regressions.length > 0) {
   throw new Error(`gzip budget exceeded:\n${regressions.join('\n')}`)
@@ -80,9 +98,7 @@ async function measureFixture(fixture) {
     root: directory,
     configFile: false,
     logLevel: 'silent',
-    plugins: [
-      vidact({ manifestPath: '../../Cargo.toml', features: fixture.features ?? [] }),
-    ],
+    plugins: [vidact({ manifestPath: '../../Cargo.toml', features: fixture.features ?? [] })],
     build: {
       write: false,
       minify: 'oxc',

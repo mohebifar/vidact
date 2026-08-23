@@ -24,6 +24,112 @@ fn compile_concurrent(input: ModuleInput<'_>) -> Result<String, Vec<Diagnostic>>
     )
 }
 
+fn compile_actions(input: ModuleInput<'_>) -> Result<String, Vec<Diagnostic>> {
+    compile_surgical_module_with_options(
+        input,
+        &CompilationOptions::default().with_feature(CompilerFeature::Actions),
+    )
+}
+
+#[test]
+fn gates_and_lowers_actions_at_their_source_spans() {
+    let source = r#"
+        import { useActionState, useOptimistic } from 'react';
+        import { useFormStatus } from 'react-dom';
+        function SubmitStatus(): Node {
+            const status = useFormStatus();
+            return <output>{status.pending ? 'saving' : 'ready'}</output>;
+        }
+        function ForwardedSubmitter({ submitterProps }): Node {
+            return <button {...submitterProps}>forwarded</button>;
+        }
+        export function Actions(): Node {
+            const [state, dispatch, pending] = useActionState(
+                async (previous, value: FormData) => previous + String(value.get('title')),
+                '',
+                '/actions',
+            );
+            const [optimistic, addOptimistic] = useOptimistic(
+                state,
+                (current, value: string) => current + value,
+            );
+            return <form action={dispatch}>
+                <input name="title" />
+                <button onClick={() => addOptimistic('pending')}>{pending ? 'pending' : optimistic}</button>
+                <ForwardedSubmitter submitterProps={{ formAction: dispatch }} />
+                <SubmitStatus />
+            </form>;
+        }
+    "#;
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "ActionsDisabled.tsx",
+        source,
+    })
+    .expect_err("Actions hooks must be gated");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.span.is_some() && diagnostic.message.contains("`actions` compiler feature")
+        }),
+        "{diagnostics:?}"
+    );
+
+    let output = compile_actions(ModuleInput {
+        filename: "Actions.tsx",
+        source,
+    })
+    .expect("Actions hooks and form actions should lower to runtime-owned slots");
+    assert!(
+        output.contains("from \"@vidact/runtime/actions\""),
+        "{output}"
+    );
+    assert!(output.contains("__vidactCreateActionState("), "{output}");
+    assert!(output.contains("__vidactCreateOptimistic("), "{output}");
+    assert!(output.contains("__vidactCreateFormStatus("), "{output}");
+    assert!(output.contains("<__vidactActionForm"), "{output}");
+    assert!(output.contains("__vidactFormAction(state.set)"), "{output}");
+    assert!(
+        output.contains("__vidactFormAction(submitterProps.get())"),
+        "{output}"
+    );
+    assert!(output.contains("state.get()[\"value\"]"), "{output}");
+    assert!(output.contains("state.get()[\"pending\"]"), "{output}");
+    assert!(output.contains("optimistic.set(\"pending\")"), "{output}");
+}
+
+#[test]
+fn compiles_actions_inside_module_local_custom_hooks() {
+    let output = compile_actions(ModuleInput {
+        filename: "CustomActionHook.tsx",
+        source: r#"
+            import { useActionState } from 'react';
+
+            function useQueue(initial) {
+                const [value, dispatch, pending] = useActionState(
+                    async (previous, increment: number) => previous + increment,
+                    initial,
+                );
+                return { value, dispatch, pending };
+            }
+
+            export function CustomActionHook(): Node {
+                const queue = useQueue(1);
+                return <button onClick={() => queue.dispatch(2)}>
+                    {queue.pending ? 'pending' : queue.value}
+                </button>;
+            }
+        "#,
+    })
+    .expect("Actions primitives should expand inside a module-local custom hook");
+
+    assert!(!output.contains("function useQueue"), "{output}");
+    assert!(!output.contains("useQueue("), "{output}");
+    assert!(output.contains("__vidactCreateActionState("), "{output}");
+    assert!(
+        output.contains("dispatch: __vidactHook0_0_value.set"),
+        "{output}"
+    );
+}
+
 #[test]
 fn gates_and_lowers_concurrent_hooks_at_their_source_spans() {
     let source = r#"

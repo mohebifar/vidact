@@ -83,4 +83,4 @@ during a transition, but resource staging remains owned by the separate
   preemption, stale suppression, and node identity in Chromium, Firefox, and
   WebKit.
 - `tests/runtime-size/measure.mjs` enforces zero bytes for an unused opt-in and a
-  9,730-byte gzip ceiling for the representative concurrent app.
+  9,734-byte gzip ceiling for the representative concurrent app.

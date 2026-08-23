@@ -159,6 +159,24 @@ describe('vidact compiler client', () => {
     expect(virtualReactDomModule({})).not.toContain('flushSync')
   })
 
+  it('selects isolated Actions facades and exposes form APIs only when enabled', () => {
+    expect(virtualReactModule({ features: ['actions'] })).toContain('@vidact/runtime/actions"')
+    expect(virtualReactModule({ target: 'hydrate', features: ['actions'] })).toContain(
+      '@vidact/runtime/actions/hydrate',
+    )
+    expect(virtualReactModule({ target: 'server', features: ['actions'] })).toContain(
+      '@vidact/runtime/actions/server',
+    )
+    expect(virtualReactModule({ features: ['async', 'actions'] })).toContain(
+      '@vidact/runtime/async/actions',
+    )
+    expect(virtualReactModule({ features: ['actions'] })).toContain('useActionState, useOptimistic')
+    expect(virtualReactModule({ features: ['actions'] })).not.toContain('startTransition')
+    expect(virtualReactModule({})).not.toContain('useActionState')
+    expect(virtualReactDomModule({ features: ['actions'] })).toContain('useFormStatus')
+    expect(virtualReactDomModule({})).not.toContain('useFormStatus')
+  })
+
   it('fingerprints compiler, runtime, target, features, environment, and source inputs', () => {
     const base = {
       source: 'export function App() { return <main /> }',

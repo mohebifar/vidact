@@ -46,6 +46,12 @@ pub(crate) enum ConcurrentHook {
     Transition,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ActionHook {
+    ActionState,
+    Optimistic,
+}
+
 impl StateHook {
     pub(crate) const fn name(self) -> &'static str {
         match self {
@@ -78,6 +84,15 @@ impl ConcurrentHook {
         match self {
             Self::DeferredValue => "useDeferredValue",
             Self::Transition => "useTransition",
+        }
+    }
+}
+
+impl ActionHook {
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::ActionState => "useActionState",
+            Self::Optimistic => "useOptimistic",
         }
     }
 }
@@ -195,6 +210,25 @@ impl<'s> ReactBindings<'s> {
 
     pub(crate) fn is_start_transition_call(&self, call: &CallExpression<'_>) -> bool {
         self.is_named_call(call, "startTransition")
+    }
+
+    pub(crate) fn action_hook_call(&self, call: &CallExpression<'_>) -> Option<ActionHook> {
+        if self.is_named_call(call, "useActionState") {
+            Some(ActionHook::ActionState)
+        } else if self.is_named_call(call, "useOptimistic") {
+            Some(ActionHook::Optimistic)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn is_form_status_call(&self, call: &CallExpression<'_>) -> bool {
+        self.is_named_expression_from(
+            &call.callee,
+            "useFormStatus",
+            &self.dom_named,
+            &self.dom_namespaces,
+        )
     }
 
     pub(crate) fn is_flush_sync_call(&self, call: &CallExpression<'_>) -> bool {

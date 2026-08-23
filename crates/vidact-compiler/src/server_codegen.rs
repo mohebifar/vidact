@@ -2,7 +2,10 @@ use std::{collections::BTreeSet, path::Path};
 
 use oxc_allocator::Allocator;
 use oxc_ast::{
-    ast::{CallExpression, Class, JSXAttributeItem, JSXAttributeName, JSXElement, Program},
+    ast::{
+        CallExpression, Class, JSXAttributeItem, JSXAttributeName, JSXAttributeValue, JSXElement,
+        JSXElementName, Program,
+    },
     builder::AstBuilder,
 };
 use oxc_ast_visit::{
@@ -102,6 +105,7 @@ pub fn compile_server_module_with_options(
         unsafe_html: options.feature_enabled(CompilerFeature::UnsafeHtml),
         async_enabled: options.feature_enabled(CompilerFeature::Async),
         concurrent_enabled: options.feature_enabled(CompilerFeature::Concurrent),
+        actions_enabled: options.feature_enabled(CompilerFeature::Actions),
         suspense_spans: BTreeSet::new(),
         diagnostic: None,
     };
@@ -217,6 +221,7 @@ struct ServerSourceValidator<'r, 's> {
     unsafe_html: bool,
     async_enabled: bool,
     concurrent_enabled: bool,
+    actions_enabled: bool,
     suspense_spans: BTreeSet<u32>,
     diagnostic: Option<Diagnostic>,
 }
@@ -231,6 +236,27 @@ impl<'a> Visit<'a> for ServerSourceValidator<'_, '_> {
                 Diagnostic::new(
                     DiagnosticCode::UnsupportedSyntax,
                     "lazy requires the `async` compiler feature",
+                )
+                .with_span(SourceSpan::new(call.span.start, call.span.end)),
+            );
+            return;
+        }
+        let action_name = self
+            .react
+            .action_hook_call(call)
+            .map(crate::react_bindings::ActionHook::name)
+            .or_else(|| {
+                self.react
+                    .is_form_status_call(call)
+                    .then_some("useFormStatus")
+            });
+        if !self.actions_enabled
+            && let Some(name) = action_name
+        {
+            self.diagnostic = Some(
+                Diagnostic::new(
+                    DiagnosticCode::UnsupportedSyntax,
+                    format!("{name} requires the `actions` compiler feature"),
                 )
                 .with_span(SourceSpan::new(call.span.start, call.span.end)),
             );
@@ -306,6 +332,68 @@ impl<'a> Visit<'a> for ServerSourceValidator<'_, '_> {
             .is_named_jsx_element(&element.opening_element.name, "Suspense")
         {
             self.suspense_spans.insert(element.span.start);
+        }
+        if let JSXElementName::Identifier(tag) = &element.opening_element.name {
+            for item in &element.opening_element.attributes {
+                let JSXAttributeItem::Attribute(attribute) = item else {
+                    continue;
+                };
+                let JSXAttributeName::Identifier(name) = &attribute.name else {
+                    continue;
+                };
+                let prop = name.name.as_str();
+                if !matches!(prop, "action" | "formAction") {
+                    continue;
+                }
+                let Some(value) = &attribute.value else {
+                    self.diagnostic = Some(
+                        Diagnostic::new(
+                            DiagnosticCode::UnsupportedSyntax,
+                            format!("{prop} must have a value"),
+                        )
+                        .with_span(SourceSpan::new(attribute.span.start, attribute.span.end)),
+                    );
+                    return;
+                };
+                if matches!(value, JSXAttributeValue::StringLiteral(_)) {
+                    continue;
+                }
+                if matches!(
+                    value,
+                    JSXAttributeValue::ExpressionContainer(container)
+                        if container.expression.as_expression().is_none()
+                ) {
+                    self.diagnostic = Some(
+                        Diagnostic::new(
+                            DiagnosticCode::UnsupportedSyntax,
+                            format!("function {prop} must have a value"),
+                        )
+                        .with_span(SourceSpan::new(attribute.span.start, attribute.span.end)),
+                    );
+                    return;
+                }
+                let valid_host = (prop == "action" && tag.name == "form")
+                    || (prop == "formAction" && matches!(tag.name.as_str(), "button" | "input"));
+                let message = if !valid_host {
+                    format!(
+                        "function {prop} is only supported on {}",
+                        if prop == "action" {
+                            "<form>"
+                        } else {
+                            "<button> and <input>"
+                        }
+                    )
+                } else if !self.actions_enabled {
+                    format!("function {prop} requires the `actions` compiler feature")
+                } else {
+                    continue;
+                };
+                self.diagnostic = Some(
+                    Diagnostic::new(DiagnosticCode::UnsupportedSyntax, message)
+                        .with_span(SourceSpan::new(attribute.span.start, attribute.span.end)),
+                );
+                return;
+            }
         }
         if !self.unsafe_html
             && let Some(attribute) = element.opening_element.attributes.iter().find_map(|item| {

@@ -31,6 +31,13 @@ lanes and atomic compiled publication. Combine `async` and `concurrent` when an
 application needs both families; the plugin selects a composed entry without
 adding unused capability code.
 
+Use `features: ['actions']` for `useActionState`, `useOptimistic`,
+`useFormStatus`, and function-valued `action`/`formAction` props. The compiler
+rewrites forms to an owned status/reset boundary and selects isolated client,
+hydrate, or server Actions entries. Add `async` when Actions and Suspense are
+used together. Public transition APIs still require the separate `concurrent`
+feature even though Actions reuse its publication machinery internally.
+
 For production installs, pass `compilerPath` to a version-matched `vidactc`
 artifact. Workspace development builds `target/debug/vidactc` once per process
 and invokes that executable directly for subsequent transforms.

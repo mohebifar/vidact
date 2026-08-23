@@ -110,23 +110,28 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       if (id === REACT_MODULE) {
         const asyncEnabled = configuration.features.includes('async')
         const concurrentEnabled = configuration.features.includes('concurrent')
+        const actionsEnabled = configuration.features.includes('actions')
         const clientRuntime = clientRuntimeEntry(
           asyncEnabled,
           concurrentEnabled,
+          actionsEnabled,
           configuration.target === 'hydrate',
         )
-        const serverRuntime = serverRuntimeEntry(asyncEnabled, concurrentEnabled)
+        const serverRuntime = serverRuntimeEntry(asyncEnabled, concurrentEnabled, actionsEnabled)
         const concurrentExports = concurrentEnabled
           ? 'startTransition, useDeferredValue, useTransition, '
           : ''
+        const actionExports = actionsEnabled ? 'useActionState, useOptimistic, ' : ''
         return configuration.target === 'server'
-          ? `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "${serverRuntime}"`
-          : `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "${clientRuntime}"`
+          ? `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "${serverRuntime}"`
+          : `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "${clientRuntime}"`
       }
+      const actionsEnabled = configuration.features.includes('actions')
+      const concurrentEnabled = configuration.features.includes('concurrent')
       return id === REACT_DOM_MODULE
         ? configuration.target === 'server'
-          ? `export { createPortal${configuration.features.includes('concurrent') ? ', flushSync' : ''} } from "${serverRuntimeEntry(configuration.features.includes('async'), configuration.features.includes('concurrent'))}"`
-          : `export { createPortal${configuration.features.includes('concurrent') ? ', flushSync' : ''} } from "${clientRuntimeEntry(configuration.features.includes('async'), configuration.features.includes('concurrent'), configuration.target === 'hydrate')}"`
+          ? `export { createPortal${concurrentEnabled ? ', flushSync' : ''}${actionsEnabled ? ', useFormStatus' : ''} } from "${serverRuntimeEntry(configuration.features.includes('async'), concurrentEnabled, actionsEnabled)}"`
+          : `export { createPortal${concurrentEnabled ? ', flushSync' : ''}${actionsEnabled ? ', useFormStatus' : ''} } from "${clientRuntimeEntry(configuration.features.includes('async'), concurrentEnabled, actionsEnabled, configuration.target === 'hydrate')}"`
         : null
     },
     async transform(source, id) {
@@ -192,18 +197,33 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
   }
 }
 
-function clientRuntimeEntry(asyncEnabled: boolean, concurrentEnabled: boolean, hydrate: boolean) {
-  const family = asyncEnabled
-    ? concurrentEnabled
-      ? '/async/concurrent'
-      : '/async'
-    : concurrentEnabled
-      ? '/concurrent'
-      : ''
+function clientRuntimeEntry(
+  asyncEnabled: boolean,
+  concurrentEnabled: boolean,
+  actionsEnabled: boolean,
+  hydrate: boolean,
+) {
+  const family = actionsEnabled
+    ? asyncEnabled
+      ? '/async/actions'
+      : '/actions'
+    : asyncEnabled
+      ? concurrentEnabled
+        ? '/async/concurrent'
+        : '/async'
+      : concurrentEnabled
+        ? '/concurrent'
+        : ''
   return `@vidact/runtime${family}${hydrate ? '/hydrate' : ''}`
 }
 
-function serverRuntimeEntry(asyncEnabled: boolean, concurrentEnabled: boolean) {
+function serverRuntimeEntry(
+  asyncEnabled: boolean,
+  concurrentEnabled: boolean,
+  actionsEnabled: boolean,
+) {
+  if (actionsEnabled && asyncEnabled) return '@vidact/runtime/async/actions/server'
+  if (actionsEnabled) return '@vidact/runtime/actions/server'
   if (asyncEnabled && concurrentEnabled) return '@vidact/runtime/async/concurrent/server'
   if (asyncEnabled) return '@vidact/runtime/async/server'
   if (concurrentEnabled) return '@vidact/runtime/concurrent/server'

@@ -7,4 +7,13 @@ declare module 'react-dom' {
     container: Element | DocumentFragment,
     key?: Key | null,
   ): import('@vidact/runtime').StructuralBinding
+
+  export interface FormStatus {
+    readonly pending: boolean
+    readonly data: FormData | null
+    readonly method: 'get' | 'post'
+    readonly action: ((data: FormData) => unknown | PromiseLike<unknown>) | null
+  }
+
+  export function useFormStatus(): FormStatus
 }

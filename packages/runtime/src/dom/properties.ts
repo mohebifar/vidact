@@ -123,7 +123,18 @@ const kebabCaseSvgAttributes = new Set([
   'xHeight',
 ])
 
-export function applyDomProp(element: Element, name: string, value: unknown): void {
+type DomPropHandler = (element: Element, name: string, value: unknown) => boolean
+
+export let applyDomProp = applyBaseDomProp
+
+export function installDomPropHandler(handler: DomPropHandler): void {
+  const fallback = applyDomProp
+  applyDomProp = (element, name, value) => {
+    if (!handler(element, name, value)) fallback(element, name, value)
+  }
+}
+
+function applyBaseDomProp(element: Element, name: string, value: unknown): void {
   if (name === 'dangerouslySetInnerHTML') {
     throw new Error(
       DEV ? 'dangerouslySetInnerHTML must be handled as an owned opaque subtree' : 'V401',

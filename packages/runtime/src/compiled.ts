@@ -723,6 +723,19 @@ export function createContext<T>(defaultValue: T): CompiledContext<T> {
   return context
 }
 
+/** @internal */
+export function runWithCompiledContext<Value, Result>(
+  context: CompiledContext<Value>,
+  value: Value | CompiledBinding<Value>,
+  operation: () => Result,
+): Result {
+  const parent = activeContextFrame ?? activeOwner?.[2] ?? null
+  return withContextFrame(
+    { context: context as CompiledContext<unknown>, input: value, parent },
+    operation,
+  )
+}
+
 export function createCompiledContext<T>(
   scope: CompiledScope,
   sourceMask: SourceMask,
@@ -998,6 +1011,25 @@ export function compiledEvent<T extends Event>(
   }
   const errorOwner = activeOwner ?? owner
   return (event) => runOwnerTask(errorOwner, () => scope[2](() => handler(event)))
+}
+
+export interface CompiledTaskController {
+  readonly disposed: () => boolean
+  readonly report: (error: unknown) => void
+}
+
+export function captureCompiledTask(scope?: CompiledScope): CompiledTaskController {
+  const owner = scope === undefined ? activeOwner : scopeOwners.get(scope)
+  if (owner === null || owner === undefined) {
+    throw new Error(DEV ? 'compiled task must be captured during owned construction' : 'V034')
+  }
+  return {
+    disposed: () => owner[0],
+    report: (error) =>
+      runOwnerTask(owner, () => {
+        throw error
+      }),
+  }
 }
 
 export function when(

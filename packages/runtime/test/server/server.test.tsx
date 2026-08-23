@@ -15,6 +15,14 @@ import {
 } from '@vidact/runtime/server'
 import { describe, expect, it } from 'vitest'
 
+import {
+  jsx as actionJsx,
+  renderToStaticMarkup as renderActionsToStaticMarkup,
+  useActionState,
+  useFormStatus,
+  useOptimistic,
+} from '../../src/server-actions.ts'
+
 describe('server rendering', () => {
   it('serializes deterministic escaped HTML without browser globals', () => {
     const globalObject = globalThis as Record<string, unknown>
@@ -137,5 +145,29 @@ describe('server rendering', () => {
     await Promise.resolve()
     expect(renderToStaticMarkup(boundary)).toBe('<em>loaded</em>')
     expect(loads).toBe(1)
+  })
+
+  it('renders deterministic Actions state and permalink fallbacks', () => {
+    function Form(): ServerChild {
+      const [value, submit, pending] = useActionState(
+        async () => 'next',
+        'initial',
+        '/save?return="list"&ready=true',
+      )
+      const [optimistic] = useOptimistic(value)
+      const status = useFormStatus()
+      return actionJsx('form', {
+        action: submit,
+        children: actionJsx('button', {
+          formAction: submit,
+          children: pending || status.pending ? 'saving' : optimistic,
+        }),
+      })
+    }
+
+    const html = renderActionsToStaticMarkup(() => actionJsx(Form, {}))
+    expect(html).toContain('action="/save?return=&quot;list&quot;&amp;ready=true"')
+    expect(html).toContain('formaction="/save?return=&quot;list&quot;&amp;ready=true"')
+    expect(html).toContain('>initial</button>')
   })
 })

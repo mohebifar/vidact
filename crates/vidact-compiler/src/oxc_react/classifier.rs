@@ -12,7 +12,7 @@ use crate::{
         ControlFlowFacts, KeyPath, SourceId, SourceKind, UpdaterFact, UpdaterId, UpdaterKind,
     },
     ast_utils::{component_function_parts, is_event_attribute},
-    react_bindings::{ConcurrentHook, ReactBindings, reference_symbol},
+    react_bindings::{ActionHook, ConcurrentHook, ReactBindings, reference_symbol},
     render_flow::{RenderFlowGraph, lower_render_flow},
 };
 
@@ -328,9 +328,13 @@ fn state_source(
         hook.name()
     } else if react.concurrent_hook_call(call) == Some(ConcurrentHook::Transition) {
         "useTransition"
+    } else if let Some(hook @ (ActionHook::ActionState | ActionHook::Optimistic)) =
+        react.action_hook_call(call)
+    {
+        hook.name()
     } else {
         return Err(unsupported_at(
-            "array-destructured calls are unsupported unless the callee resolves to React useState, useReducer, or useTransition",
+            "array-destructured calls are unsupported unless the callee resolves to React useState, useReducer, useTransition, useActionState, or useOptimistic",
             call.span,
         ));
     };

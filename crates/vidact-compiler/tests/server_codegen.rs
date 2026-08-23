@@ -118,3 +118,60 @@ fn gates_concurrent_server_hooks_at_their_calls() {
     )
     .expect("the concurrent server target should preserve deterministic hook values");
 }
+
+#[test]
+fn gates_actions_server_hooks_and_function_form_actions() {
+    let input = ModuleInput {
+        filename: "ServerActions.tsx",
+        source: r#"
+            import { useActionState, useOptimistic } from 'react';
+            import { useFormStatus } from 'react-dom';
+            function Status() {
+                const status = useFormStatus();
+                return <span>{status.pending ? 'saving' : 'ready'}</span>;
+            }
+            export function ServerActions() {
+                const [value, submit, pending] = useActionState(async () => 'next', 'initial', '/save');
+                const [optimistic] = useOptimistic(value);
+                return <form action={submit}><button>{pending ? optimistic : value}</button><Status /></form>;
+            }
+        "#,
+    };
+    let diagnostics =
+        compile_server_module(input).expect_err("server Actions APIs must remain gated");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.message.contains("`actions`")
+            && diagnostic.span.is_some()
+    }));
+
+    let compilation = compile_server_module_with_options(
+        input,
+        &CompilationOptions::new(CompilerTarget::Server).with_feature(CompilerFeature::Actions),
+    )
+    .expect("the Actions server target should preserve deterministic hook and form output");
+    assert!(
+        compilation.code.contains("useActionState("),
+        "{}",
+        compilation.code
+    );
+    assert!(
+        compilation.code.contains("action={submit}"),
+        "{}",
+        compilation.code
+    );
+
+    let diagnostics = compile_server_module_with_options(
+        ModuleInput {
+            filename: "InvalidServerAction.tsx",
+            source: "export function Invalid() { return <form action />; }",
+        },
+        &CompilationOptions::new(CompilerTarget::Server).with_feature(CompilerFeature::Actions),
+    )
+    .expect_err("invalid server Action props must fail at their attributes");
+    assert!(
+        diagnostics[0].message.contains("must have a value"),
+        "{diagnostics:?}"
+    );
+    assert!(diagnostics[0].span.is_some());
+}

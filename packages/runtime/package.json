@@ -28,6 +28,22 @@
       "types": "./dist/async-concurrent-hydrate.d.ts",
       "import": "./dist/async-concurrent-hydrate.js"
     },
+    "./actions": {
+      "types": "./dist/actions.d.ts",
+      "import": "./dist/actions.js"
+    },
+    "./actions/hydrate": {
+      "types": "./dist/actions-hydrate.d.ts",
+      "import": "./dist/actions-hydrate.js"
+    },
+    "./async/actions": {
+      "types": "./dist/async-actions.d.ts",
+      "import": "./dist/async-actions.js"
+    },
+    "./async/actions/hydrate": {
+      "types": "./dist/async-actions-hydrate.d.ts",
+      "import": "./dist/async-actions-hydrate.js"
+    },
     "./concurrent": {
       "types": "./dist/concurrent.d.ts",
       "import": "./dist/concurrent.js"
@@ -71,6 +87,14 @@
     "./async/concurrent/server": {
       "types": "./dist/server-async-concurrent.d.ts",
       "import": "./dist/server-async-concurrent.js"
+    },
+    "./actions/server": {
+      "types": "./dist/server-actions.d.ts",
+      "import": "./dist/server-actions.js"
+    },
+    "./async/actions/server": {
+      "types": "./dist/server-async-actions.d.ts",
+      "import": "./dist/server-async-actions.js"
     },
     "./server/jsx-dev-runtime": {
       "types": "./dist/server-jsx-dev-runtime.d.ts",
