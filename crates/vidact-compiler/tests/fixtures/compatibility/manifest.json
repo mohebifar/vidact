@@ -12,6 +12,11 @@
       "components": ["Early"]
     },
     {
+      "path": "accepted/event-policy.tsx",
+      "expectation": "accepted",
+      "components": ["EventPolicy"]
+    },
+    {
       "path": "accepted/iterative-jsx-arrays.tsx",
       "expectation": "accepted",
       "components": ["IterativeJsxArrays"]
@@ -82,6 +87,12 @@
       "expectation": "rejected",
       "code": "AnalysisFailed",
       "spanContains": "throw"
+    },
+    {
+      "path": "rejected/unknown-event.tsx",
+      "expectation": "rejected",
+      "code": "UnsupportedSyntax",
+      "spanContains": "onDefinitelyNotAnEvent"
     },
     {
       "path": "accepted/react-change-event.tsx",

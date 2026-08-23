@@ -13,7 +13,7 @@ use oxc_ast_visit::{
         walk_jsx_spread_attribute,
     },
 };
-use oxc_codegen::Codegen;
+use oxc_codegen::{Codegen, CodegenOptions};
 use oxc_parser::Parser;
 use oxc_semantic::{Scoping, SemanticBuilder};
 use oxc_span::{SPAN, SourceType, Span};
@@ -22,7 +22,7 @@ use oxc_syntax::{operator::LogicalOperator, scope::ScopeFlags, symbol::SymbolId}
 use crate::{
     Diagnostic, DiagnosticCode, SourceSpan,
     analysis::{ModuleInput, SourceId, SourceKind},
-    ast_utils::is_event_attribute,
+    ast_utils::{is_event_attribute, is_supported_react_event_attribute},
     ir::{ComponentIr, lower_component},
     oxc_react::analyze_program,
     react_bindings::ReactBindings,
@@ -59,6 +59,7 @@ const WHEN: &str = "__vidactWhen";
 #[derive(Debug)]
 pub struct SurgicalCompilation {
     pub code: String,
+    pub source_map: String,
     pub components: Vec<ComponentIr>,
 }
 
@@ -101,8 +102,19 @@ pub fn compile_surgical_module_with_ir(
     let scoping = semantic.semantic.into_scoping();
     transform_program(&allocator, &scoping, &components, &mut parsed.program)
         .map_err(|diagnostic| vec![diagnostic])?;
+    let generated = Codegen::new()
+        .with_options(CodegenOptions {
+            source_map_path: Some(Path::new(input.filename).to_path_buf()),
+            ..CodegenOptions::default()
+        })
+        .build(&parsed.program);
+    let source_map = generated
+        .map
+        .expect("source map is enabled for surgical compilation")
+        .to_json_string();
     Ok(SurgicalCompilation {
-        code: Codegen::new().build(&parsed.program).code,
+        code: generated.code,
+        source_map,
         components,
     })
 }
@@ -668,6 +680,28 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
         if let Some(diagnostic) = raw_html::validate(element) {
             self.diagnostic = Some(diagnostic);
             return;
+        }
+        if raw_html::intrinsic_jsx_name(&element.opening_element.name).is_some() {
+            for item in &element.opening_element.attributes {
+                let JSXAttributeItem::Attribute(attribute) = item else {
+                    continue;
+                };
+                let JSXAttributeName::Identifier(name) = &attribute.name else {
+                    continue;
+                };
+                if is_event_attribute(name.name.as_str())
+                    && !is_supported_react_event_attribute(name.name.as_str())
+                {
+                    self.diagnostic = Some(
+                        unsupported(format!(
+                            "unsupported React event prop {}; use a supported React 19 event name",
+                            name.name
+                        ))
+                        .with_span(SourceSpan::new(name.span.start, name.span.end)),
+                    );
+                    return;
+                }
+            }
         }
         walk_jsx_element(self, element);
     }

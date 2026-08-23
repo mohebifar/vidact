@@ -16,4 +16,11 @@ describe('runtime public surface', () => {
 
     expect(ref).toEqual({ current: 'initial' })
   })
+
+  it('refuses compiled modules built for a different runtime protocol', () => {
+    expect(() => runtime.assertRuntimeProtocol('vidact-runtime-v1')).not.toThrow()
+    expect(() => runtime.assertRuntimeProtocol('vidact-runtime-v0')).toThrow(
+      /compiler\/runtime protocol mismatch/i,
+    )
+  })
 })

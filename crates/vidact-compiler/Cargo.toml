@@ -14,7 +14,7 @@ path = "src/lib.rs"
 oxc_allocator = { path = "../../vendor/oxc/crates/oxc_allocator" }
 oxc_ast = { path = "../../vendor/oxc/crates/oxc_ast" }
 oxc_ast_visit = { path = "../../vendor/oxc/crates/oxc_ast_visit" }
-oxc_codegen = { path = "../../vendor/oxc/crates/oxc_codegen", default-features = false }
+oxc_codegen = { path = "../../vendor/oxc/crates/oxc_codegen", default-features = false, features = ["sourcemap"] }
 oxc_diagnostics = { path = "../../vendor/oxc/crates/oxc_diagnostics" }
 oxc_parser = { path = "../../vendor/oxc/crates/oxc_parser", features = ["regular_expression"] }
 oxc_react_compiler = { path = "../../vendor/oxc/crates/oxc_react_compiler" }

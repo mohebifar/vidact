@@ -11,6 +11,9 @@
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"
   },
+  "dependencies": {
+    "@vidact/runtime": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^24.13.3",
     "typescript": "7.0.2",

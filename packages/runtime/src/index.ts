@@ -10,6 +10,7 @@ export {
   type DirectProps,
 } from './direct-dom.ts'
 export { useRef, type MutableRef } from './ref.ts'
+export { assertRuntimeProtocol, VIDACT_RUNTIME_PROTOCOL } from './protocol.ts'
 export {
   binding,
   choose,

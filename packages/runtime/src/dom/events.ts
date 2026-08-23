@@ -2,6 +2,12 @@ import { isReactFormChangeEvent, restoreControlledFormState } from './forms.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 
+function isSupportedReactEventName(name: string): boolean {
+  return '|Abort|AnimationEnd|AnimationIteration|AnimationStart|AuxClick|BeforeInput|BeforeToggle|Blur|CanPlay|CanPlayThrough|Cancel|Change|Click|Close|CompositionEnd|CompositionStart|CompositionUpdate|ContextMenu|Copy|Cut|DoubleClick|Drag|DragEnd|DragEnter|DragExit|DragLeave|DragOver|DragStart|Drop|DurationChange|Emptied|Encrypted|Ended|Error|Focus|GotPointerCapture|Input|Invalid|KeyDown|KeyPress|KeyUp|Load|LoadedData|LoadedMetadata|LoadStart|LostPointerCapture|MouseDown|MouseEnter|MouseLeave|MouseMove|MouseOut|MouseOver|MouseUp|Paste|Pause|Play|Playing|PointerCancel|PointerDown|PointerEnter|PointerLeave|PointerMove|PointerOut|PointerOver|PointerUp|Progress|RateChange|Reset|Resize|Scroll|ScrollEnd|Seeked|Seeking|Select|Stalled|Submit|Suspend|TimeUpdate|Toggle|TouchCancel|TouchEnd|TouchMove|TouchStart|TransitionCancel|TransitionEnd|TransitionRun|TransitionStart|VolumeChange|Waiting|Wheel|'.includes(
+    `|${name}|`,
+  )
+}
+
 export function attachEventProp(element: Element, name: string, value: unknown): () => void {
   if (value === null || value === undefined) return () => {}
   if (typeof value !== 'function') {
@@ -9,29 +15,30 @@ export function attachEventProp(element: Element, name: string, value: unknown):
   }
 
   const reactEventName = name.slice(2)
-  const capture = reactEventName.endsWith('Capture')
+  const capture = reactEventName.endsWith('Capture') && !reactEventName.endsWith('PointerCapture')
   const eventNameWithoutPhase = capture
     ? reactEventName.slice(0, -'Capture'.length)
     : reactEventName
-  const listener = value as EventListener
-
+  if (DEV && !isSupportedReactEventName(eventNameWithoutPhase)) {
+    throw new TypeError(DEV ? `unsupported event prop ${name}` : 'V202')
+  }
   if (eventNameWithoutPhase === 'Change') {
-    return attachReactChangeEvent(element, listener, capture)
+    return attachReactChangeEvent(element, value as EventListener, capture)
   }
 
   const eventName = nativeEventName(eventNameWithoutPhase)
-  if (eventName === 'input' || eventName === 'change') {
-    const dispatch = (event: Event): void => invokeFormListener(element, listener, event)
+  if (eventName === 'input') {
+    const dispatch = (event: Event): void =>
+      invokeFormListener(element, value as EventListener, event)
     element.addEventListener(eventName, dispatch, capture)
     return () => element.removeEventListener(eventName, dispatch, capture)
   }
-  element.addEventListener(eventName, listener, capture)
-  return () => element.removeEventListener(eventName, listener, capture)
+  element.addEventListener(eventName, value as EventListener, capture)
+  return () => element.removeEventListener(eventName, value as EventListener, capture)
 }
 
 export function isEventProp(name: string): boolean {
-  const firstEventCharacter = name.charCodeAt(2)
-  return name.startsWith('on') && firstEventCharacter >= 65 && firstEventCharacter <= 90
+  return /^on[A-Z]/.test(name)
 }
 
 function attachReactChangeEvent(

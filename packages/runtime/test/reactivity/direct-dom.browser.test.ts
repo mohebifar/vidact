@@ -58,6 +58,34 @@ describe('direct DOM construction', () => {
     expect(calls).toBe(1)
   })
 
+  it.each([
+    ['onAnimationEnd', 'animationend'],
+    ['onBeforeInput', 'beforeinput'],
+    ['onCompositionStart', 'compositionstart'],
+    ['onGotPointerCapture', 'gotpointercapture'],
+    ['onMouseEnter', 'mouseenter'],
+    ['onPointerLeave', 'pointerleave'],
+    ['onScrollEnd', 'scrollend'],
+    ['onTransitionCancel', 'transitioncancel'],
+  ] as const)('maps %s to the native %s event', (prop, eventName) => {
+    let calls = 0
+    const element = h('div', {
+      [prop]: () => {
+        calls += 1
+      },
+    })
+
+    element.dispatchEvent(new Event(eventName))
+
+    expect(calls).toBe(1)
+  })
+
+  it('rejects unknown React-shaped event props instead of attaching guessed names', () => {
+    expect(() => h('div', { onDefinitelyNotAnEvent: () => {} })).toThrow(
+      /unsupported event prop onDefinitelyNotAnEvent/i,
+    )
+  })
+
   it('registers React capture handlers in the native capture phase', () => {
     const calls: string[] = []
     const child = h(

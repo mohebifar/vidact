@@ -1,6 +1,27 @@
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 
+import { VIDACT_RUNTIME_PROTOCOL } from '@vidact/runtime/protocol'
+
+export const VIDACT_COMPILE_PROTOCOL = 'vidact-compile-v2'
+export { VIDACT_RUNTIME_PROTOCOL }
+
+export type VidactTarget = 'client' | 'hydrate' | 'server'
+export type VidactFeature =
+  | 'unsafe-html'
+  | 'async'
+  | 'concurrent'
+  | 'actions'
+  | 'css-insertion'
+  | 'retained-ui'
+  | 'profiling'
+  | 'framework'
+
+export interface VidactCompilerConfiguration {
+  readonly target: VidactTarget
+  readonly features: readonly VidactFeature[]
+}
+
 export interface VidactAnalysis {
   readonly protocol: 'vidact-analysis-v1'
   readonly components: readonly VidactComponentAnalysis[]
@@ -26,8 +47,11 @@ export interface VidactComponentAnalysis {
 }
 
 export interface VidactCompilation {
-  readonly protocol: 'vidact-compile-v1'
+  readonly protocol: typeof VIDACT_COMPILE_PROTOCOL
+  readonly runtimeProtocol: typeof VIDACT_RUNTIME_PROTOCOL
+  readonly configuration: VidactCompilerConfiguration
   readonly code: string
+  readonly sourceMap: Record<string, unknown>
   readonly analysis: VidactAnalysis
 }
 
@@ -35,8 +59,9 @@ export function analyzeWithCompiler(
   source: string,
   filename: string,
   manifestPath: string,
+  configuration: VidactCompilerConfiguration = { target: 'client', features: [] },
 ): Promise<VidactAnalysis> {
-  return runCompiler('analyze', source, filename, manifestPath).then((result) => {
+  return runCompiler('analyze', source, filename, manifestPath, configuration).then((result) => {
     const analysis = result as Partial<VidactAnalysis>
     if (analysis.protocol !== 'vidact-analysis-v1' || !Array.isArray(analysis.components)) {
       throw new Error('vidactc returned an unsupported analysis protocol')
@@ -49,18 +74,41 @@ export function compileWithCompiler(
   source: string,
   filename: string,
   manifestPath: string,
+  configuration: VidactCompilerConfiguration = { target: 'client', features: [] },
 ): Promise<VidactCompilation> {
-  return runCompiler('compile', source, filename, manifestPath).then((result) => {
-    const compilation = result as Partial<VidactCompilation>
-    if (
-      compilation.protocol !== 'vidact-compile-v1' ||
-      typeof compilation.code !== 'string' ||
-      compilation.analysis?.protocol !== 'vidact-analysis-v1'
-    ) {
-      throw new Error('vidactc returned an unsupported compilation protocol')
-    }
-    return compilation as VidactCompilation
-  })
+  const normalizedConfiguration = normalizeConfiguration(configuration)
+  return runCompiler('compile', source, filename, manifestPath, normalizedConfiguration).then(
+    (result) => {
+      const compilation = result as Partial<VidactCompilation>
+      if (
+        compilation.protocol !== VIDACT_COMPILE_PROTOCOL ||
+        compilation.runtimeProtocol !== VIDACT_RUNTIME_PROTOCOL ||
+        typeof compilation.code !== 'string' ||
+        compilation.sourceMap === null ||
+        typeof compilation.sourceMap !== 'object' ||
+        compilation.analysis?.protocol !== 'vidact-analysis-v1'
+      ) {
+        throw new Error('vidactc returned an unsupported compilation protocol')
+      }
+      if (
+        compilation.configuration?.target !== normalizedConfiguration.target ||
+        JSON.stringify(compilation.configuration.features) !==
+          JSON.stringify(normalizedConfiguration.features)
+      ) {
+        throw new Error('vidactc returned a compilation for different target or feature options')
+      }
+      return compilation as VidactCompilation
+    },
+  )
+}
+
+export function normalizeConfiguration(
+  configuration: VidactCompilerConfiguration,
+): VidactCompilerConfiguration {
+  return {
+    target: configuration.target,
+    features: [...new Set(configuration.features)].toSorted(),
+  }
 }
 
 function runCompiler(
@@ -68,6 +116,7 @@ function runCompiler(
   source: string,
   filename: string,
   manifestPath: string,
+  configuration: VidactCompilerConfiguration,
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let settled = false
@@ -86,6 +135,9 @@ function runCompiler(
         command,
         '--filename',
         filename,
+        '--target',
+        configuration.target,
+        ...configuration.features.flatMap((feature) => ['--feature', feature]),
       ],
       {
         cwd: path.dirname(manifestPath),

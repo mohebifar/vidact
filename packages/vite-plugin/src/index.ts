@@ -3,20 +3,58 @@ import path from 'node:path'
 
 import { transformWithOxc, type Plugin } from 'vite'
 
-import { compileWithCompiler, type VidactAnalysis } from './compiler-client.ts'
+import {
+  compileWithCompiler,
+  normalizeConfiguration,
+  VIDACT_COMPILE_PROTOCOL,
+  VIDACT_RUNTIME_PROTOCOL,
+  type VidactAnalysis,
+  type VidactCompilerConfiguration,
+  type VidactFeature,
+  type VidactTarget,
+} from './compiler-client.ts'
 
 const REACT_MODULE = '\0vidact:react'
 
 export interface VidactPluginOptions {
   /** Path to the Rust workspace Cargo.toml. Relative paths resolve from Vite's root. */
   readonly manifestPath?: string
+  /** Compiler target. Server and hydration targets use separate entry points. */
+  readonly target?: VidactTarget
+  /** Opt-in semantic feature families. */
+  readonly features?: readonly VidactFeature[]
+}
+
+export interface CompilationCacheInput extends VidactCompilerConfiguration {
+  readonly source: string
+  readonly filename: string
+  readonly manifestPath: string
+  readonly environment: string
+}
+
+export function compilationCacheKey(input: CompilationCacheInput): string {
+  const configuration = normalizeConfiguration(input)
+  return JSON.stringify({
+    compilerProtocol: VIDACT_COMPILE_PROTOCOL,
+    runtimeProtocol: VIDACT_RUNTIME_PROTOCOL,
+    manifestPath: input.manifestPath,
+    filename: input.filename,
+    environment: input.environment,
+    target: configuration.target,
+    features: configuration.features,
+    source: input.source,
+  })
 }
 
 export function vidact(options: VidactPluginOptions = {}): Plugin {
   let manifestPath = ''
+  const configuration = normalizeConfiguration({
+    target: options.target ?? 'client',
+    features: options.features ?? [],
+  })
   const compilationCache = new Map<
     string,
-    { source: string; code: string; analysis: VidactAnalysis }
+    { code: string; sourceMap: Record<string, unknown>; analysis: VidactAnalysis }
   >()
 
   return {
@@ -47,23 +85,38 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       const filename = id.split('?', 1)[0] ?? id
       if (!filename.endsWith('.tsx') || filename.includes('/node_modules/')) return null
 
-      const cached = compilationCache.get(filename)
-      let compilation = cached?.source === source ? cached : undefined
+      const cacheKey = compilationCacheKey({
+        source,
+        filename,
+        manifestPath,
+        environment: this.environment.name,
+        ...configuration,
+      })
+      let compilation = compilationCache.get(cacheKey)
       if (compilation === undefined) {
-        const result = await compileWithCompiler(source, filename, manifestPath)
-        compilation = { source, code: result.code, analysis: result.analysis }
-        compilationCache.set(filename, compilation)
+        const result = await compileWithCompiler(source, filename, manifestPath, configuration)
+        compilation = {
+          code: result.code,
+          sourceMap: result.sourceMap,
+          analysis: result.analysis,
+        }
+        compilationCache.set(cacheKey, compilation)
       }
 
-      const transformed = await transformWithOxc(compilation.code, filename, {
-        lang: 'tsx',
-        jsx: {
-          runtime: 'automatic',
-          importSource: '@vidact/runtime',
+      const transformed = await transformWithOxc(
+        compilation.code,
+        filename,
+        {
+          lang: 'tsx',
+          jsx: {
+            runtime: 'automatic',
+            importSource: '@vidact/runtime',
+          },
+          sourcemap: true,
+          target: 'es2022',
         },
-        sourcemap: true,
-        target: 'es2022',
-      })
+        compilation.sourceMap,
+      )
       return {
         code: transformed.code,
         ...(transformed.map === undefined ? {} : { map: transformed.map }),
@@ -90,4 +143,7 @@ export type {
   VidactAnalysis,
   VidactCompilation,
   VidactComponentAnalysis,
+  VidactCompilerConfiguration,
+  VidactFeature,
+  VidactTarget,
 } from './compiler-client.ts'

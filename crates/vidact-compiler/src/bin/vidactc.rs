@@ -31,9 +31,43 @@ fn run() -> Result<Value, String> {
     let filename = arguments
         .next()
         .ok_or_else(|| "missing value for --filename".to_string())?;
-    if arguments.next().is_some() {
-        return Err("unexpected arguments after --filename <path>".to_string());
+    let mut target = "client".to_string();
+    let mut features = Vec::new();
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--target" => {
+                target = arguments
+                    .next()
+                    .ok_or_else(|| "missing value for --target".to_string())?;
+                if !matches!(target.as_str(), "client" | "hydrate" | "server") {
+                    return Err(format!("unsupported Vidact target {target}"));
+                }
+            }
+            "--feature" => {
+                let feature = arguments
+                    .next()
+                    .ok_or_else(|| "missing value for --feature".to_string())?;
+                if !matches!(
+                    feature.as_str(),
+                    "unsafe-html"
+                        | "async"
+                        | "concurrent"
+                        | "actions"
+                        | "css-insertion"
+                        | "retained-ui"
+                        | "profiling"
+                        | "framework"
+                ) {
+                    return Err(format!("unsupported Vidact feature {feature}"));
+                }
+                if !features.contains(&feature) {
+                    features.push(feature);
+                }
+            }
+            _ => return Err(format!("unexpected argument {argument}")),
+        }
     }
+    features.sort();
 
     let mut source = String::new();
     std::io::stdin()
@@ -47,8 +81,15 @@ fn run() -> Result<Value, String> {
         let compilation = compile_surgical_module_with_ir(input)
             .map_err(|diagnostics| format_diagnostics(&filename, &source, &diagnostics))?;
         return Ok(json!({
-            "protocol": "vidact-compile-v1",
+            "protocol": "vidact-compile-v2",
+            "runtimeProtocol": "vidact-runtime-v1",
+            "configuration": {
+                "target": target,
+                "features": features,
+            },
             "code": compilation.code,
+            "sourceMap": serde_json::from_str::<Value>(&compilation.source_map)
+                .map_err(|error| format!("could not serialize compiler source map: {error}"))?,
             "analysis": analysis_json(compilation.components),
         }));
     }
