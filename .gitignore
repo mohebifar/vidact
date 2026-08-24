@@ -8,3 +8,6 @@ test-results/
 **/__screenshots__/
 .DS_Store
 .artifacts/
+packages/compiler/.verify-npm-*/
+packages/compiler/.verify-release-*/
+packages/compiler/npm/

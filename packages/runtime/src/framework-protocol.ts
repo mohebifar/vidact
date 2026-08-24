@@ -284,7 +284,7 @@ function assertFrameworkValue(value: unknown): asserts value is FrameworkValue {
   encodeFrameworkValue(value as FrameworkValue)
 }
 
-function isClientReference(value: unknown): value is ClientReference {
+export function isClientReference(value: unknown): value is ClientReference {
   return typeof value === 'object' && value !== null && CLIENT_REFERENCE in value
 }
 

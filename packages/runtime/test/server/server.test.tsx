@@ -95,6 +95,17 @@ describe('server rendering', () => {
     )
   })
 
+  it('recognizes server nodes created before a runtime module hot replacement', () => {
+    const nodeFromPreviousModule = {
+      [Symbol.for('vidact.v1.ServerNode')]: () => '<span>retained</span>',
+      [Symbol.for('vidact.v1.ServerNodeKind')]: 'transparent',
+    }
+
+    expect(renderToString(nodeFromPreviousModule as never)).toBe(
+      '<!--vidact:v1:r--><!--vidact:v1:b--><span>retained</span><!--/vidact:v1:b--><!--/vidact:v1:r-->',
+    )
+  })
+
   it('marks a single array child as an owned hydration range', () => {
     expect(
       renderToString(() => (

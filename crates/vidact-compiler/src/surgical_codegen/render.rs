@@ -150,11 +150,8 @@ impl<'a> RenderLowerer<'a, '_> {
         consequent: Expression<'a>,
         alternate: Expression<'a>,
     ) -> Result<Expression<'a>, Diagnostic> {
-        if let Some(aligned) = self.merge_aligned(
-            &test,
-            consequent.clone_in_with_semantic_ids(self.ast.allocator()),
-            alternate.clone_in_with_semantic_ids(self.ast.allocator()),
-        )? {
+        if let Some(aligned) = align_render_alternatives(self.ast, &test, &consequent, &alternate)?
+        {
             return Ok(aligned);
         }
         let reads = dependencies(
@@ -231,7 +228,7 @@ impl<'a> RenderLowerer<'a, '_> {
             };
             matches!(&attribute.name, JSXAttributeName::Identifier(name) if name.name == "key")
         });
-        let key_identity = self.attribute_expression(key)?;
+        let key_identity = AlignedRenderLowerer { ast: self.ast }.attribute_expression(key)?;
         let mut reads = dependencies(
             &type_identity,
             self.scoping,
@@ -341,35 +338,101 @@ impl<'a> RenderLowerer<'a, '_> {
                 ))
             })
     }
+}
 
+pub(super) fn align_render_alternatives<'a>(
+    ast: &AstBuilder<'a>,
+    test: &Expression<'a>,
+    consequent: &Expression<'a>,
+    alternate: &Expression<'a>,
+) -> Result<Option<Expression<'a>>, Diagnostic> {
+    AlignedRenderLowerer { ast }.merge_aligned(test, consequent, alternate)
+}
+
+struct AlignedRenderLowerer<'a, 's> {
+    ast: &'s AstBuilder<'a>,
+}
+
+impl<'a> AlignedRenderLowerer<'a, '_> {
     fn merge_aligned(
         &self,
         test: &Expression<'a>,
-        consequent: Expression<'a>,
-        alternate: Expression<'a>,
+        consequent: &Expression<'a>,
+        alternate: &Expression<'a>,
     ) -> Result<Option<Expression<'a>>, Diagnostic> {
-        let (Expression::JSXElement(mut consequent), Expression::JSXElement(alternate)) =
-            (consequent, alternate)
-        else {
+        let (Expression::JSXElement(consequent), Expression::JSXElement(alternate)) = (
+            consequent.without_parentheses(),
+            alternate.without_parentheses(),
+        ) else {
             return Ok(None);
         };
+        if matches!(static_key(&consequent.opening_element), StaticKey::Dynamic)
+            || matches!(static_key(&alternate.opening_element), StaticKey::Dynamic)
+        {
+            return Err(super::unsupported(
+                "reactive keys in conditional JSX alternatives require nested identity dispatch",
+            )
+            .with_span(SourceSpan::from_oxc(consequent.span)));
+        }
         if jsx_name(&consequent.opening_element.name) != jsx_name(&alternate.opening_element.name)
             || !aligned_key(&consequent.opening_element, &alternate.opening_element)
         {
             return Ok(None);
         }
+        let mut consequent = consequent.clone_in_with_semantic_ids(self.ast.allocator());
         self.merge_attributes(
             test,
             &mut consequent.opening_element,
             &alternate.opening_element,
         )?;
-        if consequent.children.len() != alternate.children.len() {
-            return Ok(None);
-        }
-        for (consequent, alternate) in consequent.children.iter_mut().zip(&alternate.children) {
+        self.merge_children(test, &mut consequent.children, &alternate.children)?;
+        Ok(Some(Expression::JSXElement(consequent)))
+    }
+
+    fn merge_children(
+        &self,
+        test: &Expression<'a>,
+        consequent: &mut oxc_allocator::Vec<'a, JSXChild<'a>>,
+        alternate: &oxc_allocator::Vec<'a, JSXChild<'a>>,
+    ) -> Result<(), Diagnostic> {
+        let shared = consequent.len().min(alternate.len());
+        for (consequent, alternate) in consequent[..shared].iter_mut().zip(&alternate[..shared]) {
             self.merge_child(test, consequent, alternate)?;
         }
-        Ok(Some(Expression::JSXElement(consequent)))
+        if consequent.len() == alternate.len() {
+            return Ok(());
+        }
+
+        let consequent_tail = self.child_fragment(&consequent[shared..]);
+        let alternate_tail = self.child_fragment(&alternate[shared..]);
+        consequent.truncate(shared);
+        consequent.push(JSXChild::new_expression_container(
+            SPAN,
+            JSXExpression::from(Expression::new_conditional_expression(
+                SPAN,
+                test.clone_in_with_semantic_ids(self.ast.allocator()),
+                consequent_tail,
+                alternate_tail,
+                self.ast,
+            )),
+            self.ast,
+        ));
+        Ok(())
+    }
+
+    fn child_fragment(&self, children: &[JSXChild<'a>]) -> Expression<'a> {
+        Expression::JSXFragment(JSXFragment::boxed(
+            SPAN,
+            JSXOpeningFragment::new(SPAN, self.ast),
+            oxc_allocator::Vec::from_iter_in(
+                children
+                    .iter()
+                    .map(|child| child.clone_in_with_semantic_ids(self.ast.allocator())),
+                self.ast,
+            ),
+            JSXClosingFragment::new(SPAN, self.ast),
+            self.ast,
+        ))
     }
 
     fn merge_attributes(
@@ -484,17 +547,7 @@ impl<'a> RenderLowerer<'a, '_> {
                     &mut consequent.opening_element,
                     &alternate.opening_element,
                 )?;
-                if consequent.children.len() != alternate.children.len() {
-                    return Err(super::unsupported(
-                        "aligned JSX children currently require equal child positions",
-                    )
-                    .with_span(SourceSpan::from_oxc(consequent.span)));
-                }
-                for (consequent, alternate) in
-                    consequent.children.iter_mut().zip(&alternate.children)
-                {
-                    self.merge_child(test, consequent, alternate)?;
-                }
+                self.merge_children(test, &mut consequent.children, &alternate.children)?;
                 Ok(())
             }
             (JSXChild::Text(left), JSXChild::Text(right)) if left.value == right.value => Ok(()),

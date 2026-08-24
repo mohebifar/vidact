@@ -1,8 +1,8 @@
 // oxlint-disable-next-line typescript/triple-slash-reference -- Include compiler feature defines.
 /// <reference path="./env.d.ts" />
 
-const SERVER_NODE = Symbol('Vidact.ServerNode')
-const SERVER_NODE_KIND = Symbol('Vidact.ServerNodeKind')
+const SERVER_NODE = Symbol.for('vidact.v1.ServerNode')
+const SERVER_NODE_KIND = Symbol.for('vidact.v1.ServerNodeKind')
 const SERVER_CONTEXT = Symbol('Vidact.ServerContext')
 const SERVER_ASYNC_RESOURCE = Symbol('Vidact.ServerAsyncResource')
 const SERVER_SUSPENSION = Symbol('Vidact.ServerSuspension')
@@ -49,6 +49,7 @@ export interface ServerFrameworkRenderContext {
 interface RenderContext {
   hydrationMarkers: boolean
   identifierPrefix: string
+  nextBoundary: number
   nextId: number
   activityHidden: boolean
 }
@@ -328,6 +329,33 @@ export function jsxDEV(
   return createServerElement(type, props, isStaticChildren)
 }
 
+/** @internal */
+export function createServerHydrationBoundary(
+  value: ServerChild,
+  hostProps: Readonly<Record<string, unknown>> = {},
+): ServerNode {
+  return serverNode((context) => {
+    const boundaryIndex = context.nextBoundary
+    context.nextBoundary += 1
+    const identifierPrefix = `${context.identifierPrefix}b${boundaryIndex}-`
+    const boundaryContext: RenderContext = {
+      hydrationMarkers: true,
+      identifierPrefix,
+      nextBoundary: 0,
+      nextId: 0,
+      activityHidden: false,
+    }
+    const attributes = serializeAttributes(
+      {
+        ...hostProps,
+        'data-vidact-identifier-prefix': identifierPrefix,
+      },
+      context.activityHidden,
+    )
+    return `<div${attributes}>${hydrationRange('r', serializeSlot(value, boundaryContext))}</div>`
+  }, 'transparent')
+}
+
 function createServerElement(
   type: ServerElementType,
   props: ServerProps,
@@ -434,6 +462,7 @@ export function renderToString(
   const context = {
     hydrationMarkers: true,
     identifierPrefix: options.identifierPrefix ?? '',
+    nextBoundary: 0,
     nextId: 0,
     activityHidden: false,
   }
@@ -458,6 +487,7 @@ export function renderToStaticMarkup(
   const context = {
     hydrationMarkers: false,
     identifierPrefix: options.identifierPrefix ?? '',
+    nextBoundary: 0,
     nextId: 0,
     activityHidden: false,
   }
@@ -577,6 +607,7 @@ export function useId(): string {
   const context = (activeRender ??= {
     hydrationMarkers: true,
     identifierPrefix: '',
+    nextBoundary: 0,
     nextId: 0,
     activityHidden: false,
   })

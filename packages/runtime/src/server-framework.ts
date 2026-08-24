@@ -1,15 +1,19 @@
+import type { CompiledComponentResult } from './compiled.ts'
 import {
   decodeFrameworkValue,
   encodeFrameworkValue,
   type ClientModuleManifest,
+  type ClientReference,
   type FrameworkValue,
 } from './framework-protocol.ts'
 import {
+  createServerHydrationBoundary,
   createServerFrameworkRenderContext,
   renderToString,
   withServerFrameworkRenderContext,
   type ServerChild,
   type ServerFrameworkRenderContext,
+  type ServerNode,
   type ServerRenderOptions,
 } from './server.ts'
 
@@ -54,6 +58,25 @@ export interface ServerComponentPayload {
   readonly kind: 'server-component'
   readonly html: string
   readonly model: FrameworkValue
+}
+
+export interface ClientBoundaryOptions {
+  readonly clientManifest: ClientModuleManifest
+  readonly hostProps?: Readonly<Record<string, unknown>>
+}
+
+export function createClientBoundary(
+  reference: ClientReference,
+  props: FrameworkValue,
+  serverContent: ServerChild | CompiledComponentResult,
+  options: ClientBoundaryOptions,
+): ServerNode & CompiledComponentResult {
+  const payload = encodeFrameworkValue({ reference, props }, options.clientManifest)
+  return createServerHydrationBoundary(serverContent as ServerChild, {
+    ...options.hostProps,
+    'data-vidact-client-boundary': true,
+    'data-vidact-client-payload': payload,
+  }) as ServerNode & CompiledComponentResult
 }
 
 export function renderToReadableStream(

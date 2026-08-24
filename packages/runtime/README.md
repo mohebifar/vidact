@@ -22,10 +22,20 @@ primitives directly.
   form serialization
 - `@vidact/runtime/async/actions`: composed async and Actions capabilities;
   hydrate and server variants follow the same suffix convention
+- `@vidact/runtime/framework/server`: request-scoped streams, continuations,
+  manifest-checked client references, and explicit client boundaries
+- `@vidact/runtime/framework/hydrate`: async client-module loading, event replay,
+  independent boundary hydration, and boundary replacement
 - `@vidact/runtime/testing`: deterministic runtime queue draining
 
 The compiler and runtime validate the `vidact-runtime-v1` protocol. Server and
 hydration builds must use matching package versions.
+
+Framework client boundaries use the closed `vidact-framework-v1` value model.
+The server checks references against an application-supplied manifest, and the
+browser asks an application-supplied loader for that exact reference. Vidact
+does not import a serialized path, implement React Flight, or automatically
+split a `"use client"` module graph.
 
 Text inputs and textareas use React-shaped controlled-form timing: `onInput`
 receives the native `input` event, while `onChange` is dispatched from that same

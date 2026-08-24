@@ -1,21 +1,23 @@
-<p className="eyebrow">Quick start</p>
+<p className="eyebrow">Tutorial · About five minutes</p>
 
-<h1>Build your first Vidact app</h1>
+<h1>Build a counter that updates without rerendering</h1>
 
-<p className="lede">Write the function component you already know. Vidact turns it into a one-time DOM construction pass and a static update plan.</p>
+<p className="lede">You will compile a React-shaped function component, mount it, and check that one state write changes one text node.</p>
 
 <div className="callout">
-  <strong>Experimental software.</strong> Vidact is an early compiler project. Use it to explore the model, measure the output, and help shape the contract.
+  <strong>Vidact is experimental.</strong> Use this tutorial in a test project, not in an application that you need to ship.
 </div>
 
-<h2 id="install">Install the workspace packages</h2>
+<h2 id="install">Install the packages</h2>
 
-<p>Start with Vite, the Vidact compiler plugin, the tiny runtime, and React-compatible authoring types.</p>
+<p>Install the runtime as an application dependency. Install the Vite plugin and React-compatible authoring types as development dependencies.</p>
 
 <pre><code>{`pnpm add @vidact/runtime
 pnpm add -D @vidact/vite @vidact/react-types`}</code></pre>
 
 <h2 id="configure">Configure Vite</h2>
+
+<p>Add the Vidact plugin before another plugin lowers JSX. The plugin sends each supported TSX module through the Rust compiler.</p>
 
 <pre><code>{`import { vidact } from '@vidact/vite'
 
@@ -24,6 +26,8 @@ export default {
 }`}</code></pre>
 
 <h2 id="component">Write a component</h2>
+
+<p>Write the component with familiar JSX and <code>useState</code>. Vidact recognizes the hook by its imported binding, not by its spelling alone.</p>
 
 <pre><code>{`import { useState } from 'react'
 
@@ -39,9 +43,25 @@ export function Counter() {
 
 <h2 id="mount">Mount the compiled root</h2>
 
+<p><code>mountCompiled</code> is the public client entry point. It mounts compiler output and returns an owner that you can dispose.</p>
+
 <pre><code>{`import { mountCompiled } from '@vidact/runtime'
 import { Counter } from './Counter.tsx'
 
-mountCompiled(Counter, document.querySelector('#app'))`}</code></pre>
+const root = document.querySelector('#app')
 
-<p>The component executes once. Clicking the button invalidates the compiler-assigned state source, then runs only the text binding that reads it.</p>
+if (!root) throw new Error('Missing #app')
+
+mountCompiled(Counter, root)`}</code></pre>
+
+<h2 id="verify">Check the update</h2>
+
+<p>Start the Vite app, open DevTools, and save a reference to the button.</p>
+
+<pre><code>{`const button = document.querySelector('button')`}</code></pre>
+
+<p>Click the counter several times. The button's text changes. The button remains the same DOM object, so this expression returns <code>true</code>:</p>
+
+<pre><code>{`button === document.querySelector('button')`}</code></pre>
+
+<p><code>setCount</code> marks the compiler-assigned source for <code>count</code> dirty. The next batch runs the text updater that reads that source. It does not call <code>Counter</code> again.</p>

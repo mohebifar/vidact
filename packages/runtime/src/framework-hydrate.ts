@@ -1,4 +1,11 @@
 import type { CompiledComponentResult, MountCompiledOptions } from './compiled.ts'
+import {
+  decodeFrameworkValue,
+  isClientBoundaryDefinition,
+  isClientReference,
+  type ClientReference,
+  type FrameworkValue,
+} from './framework.ts'
 import { installHydration } from './hydration.ts'
 import { hydrateRoot, type CompiledRoot } from './root.ts'
 
@@ -10,6 +17,16 @@ export interface EventReplayQueue {
   readonly dispose: () => void
   readonly replay: () => void
   readonly size: () => number
+}
+
+export type ClientModuleLoader = (
+  reference: ClientReference,
+) => PromiseLike<Readonly<Record<string, unknown>>>
+
+export interface HydratedClientBoundaries {
+  readonly roots: readonly CompiledRoot[]
+  readonly dispose: () => void
+  readonly replace: (loadModule?: ClientModuleLoader) => Promise<void>
 }
 
 type ReplayRecord = {
@@ -90,6 +107,99 @@ export function hydrateFrameworkBoundary(
     options?.replay?.dispose()
     throw error
   }
+}
+
+export async function hydrateClientBoundaries(
+  root: ParentNode,
+  loadModule: ClientModuleLoader,
+  options?: MountCompiledOptions,
+): Promise<HydratedClientBoundaries> {
+  const hosts = clientBoundaryHosts(root)
+  const payloads = hosts.map(readClientBoundaryPayload)
+  const replays = hosts.map((host) => createEventReplayQueue(host))
+  const roots: CompiledRoot[] = []
+  try {
+    const applications = await Promise.all(
+      payloads.map((payload) => prepareClientBoundary(loadModule, payload)),
+    )
+    for (const [index, host] of hosts.entries()) {
+      const identifierPrefix = host.getAttribute('data-vidact-identifier-prefix') ?? ''
+      roots[index] = hydrateFrameworkBoundary(host, applications[index]!, {
+        ...options,
+        identifierPrefix,
+        replay: replays[index]!,
+      })
+    }
+  } catch (error) {
+    for (const replay of replays) replay.dispose()
+    for (const compiledRoot of roots) compiledRoot?.unmount()
+    throw error
+  }
+  return {
+    roots,
+    dispose() {
+      for (const compiledRoot of roots) compiledRoot.unmount()
+    },
+    async replace(nextLoader = loadModule) {
+      const applications = await Promise.all(
+        payloads.map((payload) => prepareClientBoundary(nextLoader, payload)),
+      )
+      for (const [index, compiledRoot] of roots.entries()) {
+        compiledRoot.replace(applications[index]!)
+      }
+    },
+  }
+}
+
+async function prepareClientBoundary(
+  loadModule: ClientModuleLoader,
+  { reference, props }: ClientBoundaryPayload,
+): Promise<() => CompiledComponentResult> {
+  const definition = await loadClientBoundary(loadModule, reference)
+  const prepared = await definition.prepare?.(props)
+  return () => definition.render(props, prepared)
+}
+
+async function loadClientBoundary(loadModule: ClientModuleLoader, reference: ClientReference) {
+  const module = await loadModule(reference)
+  const definition = module[reference.exportName]
+  if (!isClientBoundaryDefinition(definition)) {
+    throw new TypeError(
+      `client module ${reference.id} does not export Vidact boundary ${reference.exportName}`,
+    )
+  }
+  return definition
+}
+
+function clientBoundaryHosts(root: ParentNode): HTMLElement[] {
+  const selector = '[data-vidact-client-boundary][data-vidact-client-payload]'
+  const descendants = [...root.querySelectorAll<HTMLElement>(selector)]
+  return root instanceof HTMLElement && root.matches(selector)
+    ? [root, ...descendants]
+    : descendants
+}
+
+interface ClientBoundaryPayload {
+  readonly reference: ClientReference
+  readonly props: FrameworkValue
+}
+
+function readClientBoundaryPayload(host: HTMLElement): ClientBoundaryPayload {
+  const encoded = host.getAttribute('data-vidact-client-payload')
+  if (encoded === null) throw new TypeError('client boundary payload is missing')
+  const payload = decodeFrameworkValue(encoded)
+  if (
+    !isRecord(payload) ||
+    !Object.hasOwn(payload, 'props') ||
+    !isClientReference(payload.reference)
+  ) {
+    throw new TypeError('invalid Vidact client boundary payload')
+  }
+  return { reference: payload.reference, props: payload.props as FrameworkValue }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function nodePath(root: ParentNode, node: Node): readonly number[] | undefined {

@@ -19,7 +19,7 @@ export default defineConfig({
   plugins: [
     vidactForEnvironment('client', {
       target: 'hydrate',
-      features: ['async'],
+      features: ['async', 'framework'],
     }),
     vidactForEnvironment('ssr', {
       target: 'server',

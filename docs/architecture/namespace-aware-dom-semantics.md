@@ -2,6 +2,8 @@
 
 - Decision state: Accepted
 - Decided: 2026-08-22
+- Amended: 2026-08-23 — controlled-form fallback restoration now waits for the
+  current native event dispatch to finish
 - Amends: [React-shaped JSX type package](react-shaped-jsx-type-package.md)
 
 ## Context
@@ -51,9 +53,11 @@ lowering and small runtime modules:
   is registered on an ancestor.
 - Controlled `value` and `checked` writes avoid redundant assignments and are
   restored synchronously after managed form handlers and normal native event
-  propagation. A microtask remains only as a fallback for unmanaged or stopped
-  native dispatch. Multiple selects accept array values, apply selection after
-  their options are inserted, and publish mode changes before values.
+  propagation. A later task remains only as a fallback for unmanaged or stopped
+  native dispatch; a microtask is too early because Chromium and WebKit may run
+  its checkpoint between same-target listeners. Multiple selects accept array
+  values, apply selection after their options are inserted, and publish mode
+  changes before values.
 
 ## Compiler and runtime contract
 
@@ -101,8 +105,10 @@ to component replay.
 - Capture handlers run in capture order and owner disposal removes the exact
   phase-specific listener.
 - A normal controlled text edit publishes from `input`, including through an
-  ancestor `onChange`; an unaccepted edit restores the last compiled value
-  before managed dispatch returns, including when its handler stops propagation.
+  ancestor `onChange`. Both `onInput` and React-shaped `onChange` observe the
+  browser-updated `target.value` before controlled restoration. An unaccepted
+  edit restores the last compiled value before managed dispatch returns,
+  including when its handler stops propagation.
 - These updates preserve the intrinsic node's identity.
 
 ## Alternatives considered
@@ -140,7 +146,8 @@ remain roadmap items.
   propagation including delayed branches and component-child insertion through
   `foreignObject`, namespaced attributes, style deletion, ARIA/data values,
   property removal, capture
-  order, ancestor change timing, handler-free controlled restoration, textarea,
+  order, provider-backed keyboard input through React-shaped `onChange`,
+  ancestor change timing, handler-free controlled restoration, textarea,
   checkbox, external form-associated radio, and single/multiple select behavior
   while retaining node identity.
 - `packages/runtime/test/reactivity/direct-dom.browser.test.ts` covers the

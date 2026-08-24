@@ -26,6 +26,14 @@ its reset/default behavior. Reactive event props use the same binding shape,
 but applying a new value owns a cleanup that detaches the previous listener
 before the old branch can act again.
 
+The same rule applies to conditional expressions inside JSX children. A
+reactive `test ? consequent : alternate` is lowered recursively as one logical
+choice: matching static type/key shells are aligned, divergent alternatives
+use one owned `choose` range, and unequal aligned child tails become nested
+owned choices. JSX-free scalar branches remain ordinary live bindings. Each
+JSX-producing branch must be a direct JSX value or another supported
+conditional so the compiler can see and assign every owner statically.
+
 Alternatives that do not align compile to an owned `choose` range. A JSX
 position with a reactive key compiles to the narrower `dispatch` range. The
 dispatcher subscribes only to the statically supplied identity dependencies,
@@ -57,6 +65,10 @@ callable is not invoked until that render factory runs.
   identity is stable and remounts exactly that dispatched range when it changes.
 - A retained branch updates through static bindings; the dispatcher does not
   rerun its render factory for ordinary prop or child changes.
+- A nested conditional has one selector owner; inactive branch bindings are
+  disposed and cannot publish after selection changes.
+- Nested conditional branches with reactive keys fail closed until nested
+  identity dispatch is available.
 - Event replacement and removal leave at most one active listener, and owner
   disposal detaches static and reactive listeners.
 - Ref replacement transfers cleanup without replacing the host; a failed next
@@ -71,6 +83,9 @@ callable is not invoked until that render factory runs.
 
 - **Always remount alternatives:** small compiler, but observably loses state,
   focus, refs, and descendant identity when React would retain them.
+- **Desugar a ternary into two independent `&&` blocks:** produces the same
+  visible truth table for Boolean predicates, but loses the single identity
+  decision and gives each branch a separate selector/owner lifecycle.
 - **General runtime reconciliation:** broad dynamic support, but adds an element
   representation, tree diffing, and bundle/runtime cost.
 - **Compile only static identity:** avoids a helper, but rejects ordinary
@@ -84,18 +99,22 @@ Common conditional prop and event changes are surgical and pay no child-list
 mutation. True identity changes pay for one small pair of range markers and one
 feature-level dispatcher. The compiler must keep expanding explicit DOM reset
 semantics rather than treating arbitrary JSX objects as reconcilable values.
+Calls or other opaque expressions that may return JSX remain unsupported in a
+nested conditional branch, as do reactive nested keys; both boundaries are
+reported at compile time rather than approximated with remounting behavior.
 
 ## Verification
 
 - `crates/vidact-compiler/tests/surgical_codegen.rs` proves aligned emission,
-  helper tree shaking, dynamic-key dispatch, reactive ref bindings, and precise
-  component-type diagnostics.
+  helper tree shaking, recursive nested conditionals, mixed JSX/scalar branches,
+  dynamic-key boundaries, reactive ref bindings, and precise diagnostics.
 - `packages/runtime/test/reactivity/component-ranges.browser.test.ts` proves
   retained dispatch identity, key replacement, event cleanup, and failed
   replacement rollback.
 - `tests/browser/corpus/apps/control-flow/` proves repeated aligned and divergent
-  transitions, local component state, focus, nested keyed-row identity, dynamic
-  key remounting, terminal switch selection, disposed-listener inactivity, and
-  MutationObserver envelopes through the Vite compiler path.
+  transitions, nested ternary identity and disposal, local component state,
+  focus, nested keyed-row identity, dynamic key remounting, terminal switch
+  selection, disposed-listener inactivity, and MutationObserver envelopes
+  through the Vite compiler path.
 - Run `cargo test -p vidact-compiler`, `pnpm test:runtime`,
   `pnpm test:browser`, and `pnpm typecheck`.

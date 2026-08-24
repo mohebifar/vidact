@@ -78,6 +78,48 @@ export function LogicalFlowApp(): JSX.Element {
   )
 }
 
+export function NestedTernaryApp(): JSX.Element {
+  const [alternate, setAlternate] = useState(false)
+  const [showList, setShowList] = useState(false)
+  const [showScalarJsx, setShowScalarJsx] = useState(false)
+  const [label, setLabel] = useState('first')
+
+  return (
+    <main data-nested-ternary>
+      {alternate ? (
+        <section data-nested-shell data-mode="second">
+          <Counter label="second" />
+          <p data-nested-extra>extra</p>
+        </section>
+      ) : (
+        <section data-nested-shell data-mode="first">
+          <Counter label="first" />
+        </section>
+      )}
+      {showList ? (
+        <ul data-nested-list>
+          <li>list</li>
+        </ul>
+      ) : (
+        <div data-nested-empty>empty</div>
+      )}
+      <output data-nested-scalar>{showScalarJsx ? <i>jsx</i> : label}</output>
+      <button data-nested-toggle onClick={() => setAlternate((current) => !current)}>
+        toggle aligned
+      </button>
+      <button data-nested-replace onClick={() => setShowList((current) => !current)}>
+        toggle divergent
+      </button>
+      <button data-nested-scalar-toggle onClick={() => setShowScalarJsx((current) => !current)}>
+        toggle scalar
+      </button>
+      <button data-nested-label onClick={() => setLabel((current) => `${current}!`)}>
+        update label
+      </button>
+    </main>
+  )
+}
+
 function KeyedCounter({ swap }: { swap: () => void }): JSX.Element {
   const [count, setCount] = useState(0)
   return (

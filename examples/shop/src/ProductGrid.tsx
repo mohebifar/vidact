@@ -27,14 +27,13 @@ export function ProductResults({
       <p className="results-count">
         {visibleProducts.length} {visibleProducts.length === 1 ? 'piece' : 'pieces'}
       </p>
-      {visibleProducts.length === 0 && (
+      {visibleProducts.length === 0 ? (
         <div className="empty-results">
           <span aria-hidden="true">⌕</span>
           <h3>No pieces found</h3>
           <p>Try a different search or category.</p>
         </div>
-      )}
-      {visibleProducts.length > 0 && (
+      ) : (
         <ul className="product-grid">
           {visibleProducts.map((product) => (
             <li key={product.id} className="product-card">

@@ -2603,6 +2603,108 @@ enum ReactiveSpreadKind {
     Intrinsic,
 }
 
+impl<'a> JsxBindingTransformer<'a, '_, '_> {
+    fn lower_choice_branch(&mut self, expression: &mut Expression<'a>) {
+        if self.lower_structural_conditional(expression) {
+            return;
+        }
+        if matches!(
+            expression.without_parentheses(),
+            Expression::JSXElement(_) | Expression::JSXFragment(_)
+        ) {
+            self.visit_expression(expression);
+            return;
+        }
+        if contains_jsx(expression) {
+            let span = expression.span();
+            self.diagnostic = Some(
+                unsupported(
+                    "ternary branches containing JSX must be a direct JSX value or supported conditional",
+                )
+                .with_span(SourceSpan::new(span.start, span.end)),
+            );
+            return;
+        }
+        let reads = dependencies(
+            expression,
+            self.scoping,
+            self.source_symbols,
+            self.item_source_symbols,
+        );
+        self.visit_expression(expression);
+        if reads.is_empty() {
+            return;
+        }
+        let evaluate = expression.clone_in_with_semantic_ids(self.ast.allocator());
+        let mut arguments = vec![
+            ident(self.ast, SCOPE),
+            dependency_mask(self.ast, &reads.parent),
+            arrow_expression(self.ast, [], evaluate),
+        ];
+        append_item_dependency(self.ast, &mut arguments, &reads);
+        *expression = call_name(self.ast, BINDING, arguments);
+    }
+
+    fn lower_structural_conditional(&mut self, expression: &mut Expression<'a>) -> bool {
+        let expression = expression.without_parentheses_mut();
+        let Expression::ConditionalExpression(conditional) = expression else {
+            return false;
+        };
+        if !contains_jsx(&conditional.consequent) && !contains_jsx(&conditional.alternate) {
+            return false;
+        }
+        let reads = dependencies(
+            &conditional.test,
+            self.scoping,
+            self.source_symbols,
+            self.item_source_symbols,
+        );
+        if reads.is_empty() {
+            self.visit_expression(&mut conditional.test);
+            self.lower_choice_branch(&mut conditional.consequent);
+            self.lower_choice_branch(&mut conditional.alternate);
+            return true;
+        }
+        match render::align_render_alternatives(
+            self.ast,
+            &conditional.test,
+            &conditional.consequent,
+            &conditional.alternate,
+        ) {
+            Ok(Some(aligned)) => {
+                *expression = aligned;
+                self.visit_expression(expression);
+            }
+            Ok(None) => {
+                self.visit_expression(&mut conditional.test);
+                self.lower_choice_branch(&mut conditional.consequent);
+                self.lower_choice_branch(&mut conditional.alternate);
+                let test = conditional
+                    .test
+                    .clone_in_with_semantic_ids(self.ast.allocator());
+                let consequent = conditional
+                    .consequent
+                    .clone_in_with_semantic_ids(self.ast.allocator());
+                let alternate = conditional
+                    .alternate
+                    .clone_in_with_semantic_ids(self.ast.allocator());
+                let mut arguments = vec![
+                    ident(self.ast, SCOPE),
+                    dependency_mask(self.ast, &reads.parent),
+                    Expression::new_string_literal(SPAN, "truthy", None, self.ast),
+                    arrow_expression(self.ast, [], test),
+                    arrow_expression(self.ast, [], consequent),
+                    arrow_expression(self.ast, [], alternate),
+                ];
+                append_item_dependency(self.ast, &mut arguments, &reads);
+                *expression = call_name(self.ast, CHOOSE, arguments);
+            }
+            Err(diagnostic) => self.diagnostic = Some(diagnostic),
+        }
+        true
+    }
+}
+
 pub(super) fn prepare_suspense_element<'a>(
     ast: &AstBuilder<'a>,
     react: &ReactBindings<'_>,
@@ -3365,6 +3467,10 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             return;
         }
 
+        if self.lower_structural_conditional(expression) {
+            return;
+        }
+
         if let Expression::LogicalExpression(logical) = expression
             && logical.operator == LogicalOperator::And
             && is_syntactically_boolean(&logical.left)
@@ -3495,8 +3601,10 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
         if contains_reactive_jsx {
             let span = expression.span();
             self.diagnostic = Some(
-                unsupported("reactive JSX blocks must use a keyed map or an && conditional")
-                    .with_span(SourceSpan::new(span.start, span.end)),
+                unsupported(
+                    "reactive JSX blocks must use a supported list or conditional expression",
+                )
+                .with_span(SourceSpan::new(span.start, span.end)),
             );
             return;
         }

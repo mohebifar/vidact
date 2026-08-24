@@ -7,23 +7,15 @@ import { vidact } from '../packages/vite-plugin/dist/index.js'
 
 const directory = path.dirname(fileURLToPath(import.meta.url))
 const repository = path.resolve(directory, '..')
-const compilerPath = path.join(
-  repository,
-  'target',
-  'debug',
-  process.platform === 'win32' ? 'vidactc.exe' : 'vidactc',
-)
 const fixtures = [
   'tests/runtime-size/fixtures/counter.tsx',
   'tests/runtime-size/fixtures/control-flow.tsx',
   'tests/runtime-size/fixtures/keyed-list.tsx',
 ]
-const plugin = vidact({ compilerPath })
+const plugin = vidact()
 
-if (typeof plugin.configResolved !== 'function' || typeof plugin.transform !== 'function') {
-  throw new TypeError('Vidact benchmark requires callable Vite plugin hooks')
-}
-plugin.configResolved({ root: repository })
+if (typeof plugin.transform !== 'function')
+  throw new TypeError('Vidact benchmark requires a transform hook')
 const context = { environment: { name: 'benchmark-client' } }
 const samples = []
 

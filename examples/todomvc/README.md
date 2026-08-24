@@ -14,8 +14,8 @@ pnpm install
 pnpm dev:todomvc
 ```
 
-Open the URL printed by Vite. The first TSX transform may take a moment while
-Cargo builds `vidactc`; later transforms use the incremental Rust build.
+Open the URL printed by Vite. The workspace build creates the native compiler
+addon before Vite starts; published installs use a prebuilt platform package.
 
 You can also run the example's gates directly:
 
@@ -27,7 +27,7 @@ pnpm --filter @vidact/example-todomvc build
 
 ## What the plugin does
 
-1. `@vidact/vite` sends the untouched TSX source to `vidactc`.
+1. `@vidact/vite` sends the untouched TSX source to `@vidact/compiler`.
 2. The Rust compiler runs the vendored React Compiler analysis, lowers a static
    updater graph, and rewrites state, scalar, branch, and keyed-list expressions.
 3. OXC Codegen prints the transformed TSX; Vite's OXC transform then lowers JSX

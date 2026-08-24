@@ -2,7 +2,6 @@ import { useState } from 'react'
 
 import { CartPanel } from './CartPanel.tsx'
 import { CatalogPanel } from './CatalogPanel.tsx'
-
 import {
   cartQuantity,
   type CartLine,
@@ -151,7 +150,7 @@ export function ShopApp({
 
       <footer className="site-footer">
         <span>Northstar Supply</span>
-        <span>SSR + Suspense + surgical hydration by Vidact</span>
+        <span>Server Components + Suspense + surgical hydration by Vidact</span>
         <span>© 2026</span>
       </footer>
     </div>

@@ -31,6 +31,9 @@ describe('shop development server', () => {
     await clientResponse.text()
     const clientModule =
       await server.environments.client.moduleGraph.getModuleByUrl('/src/client.ts')
+    const clientBoundaryModule = await server.environments.client.moduleGraph.getModuleByUrl(
+      '/src/ShopClient.client.tsx',
+    )
     const productsResponse = await fetch(
       `http://127.0.0.1:${address.port}/api/products?category=travel`,
     )
@@ -54,7 +57,7 @@ describe('shop development server', () => {
     expect(html).toContain('/@vite/client')
     expect(html).toContain('src="/src/client.ts"')
     expect(clientResponse.status).toBe(200)
-    expect(clientModule?.isSelfAccepting).toBe(true)
+    expect(clientModule?.acceptedHmrDeps.has(clientBoundaryModule!)).toBe(true)
     expect(productsResponse.status).toBe(200)
     expect(products.products).toHaveLength(2)
     expect(products.products.every((product) => product.category === 'travel')).toBe(true)

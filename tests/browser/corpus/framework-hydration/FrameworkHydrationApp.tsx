@@ -1,8 +1,14 @@
 import { useState } from 'react'
 import { preconnect } from 'react-dom'
 
-export function FrameworkHydrationApp(): JSX.Element {
-  const [count, setCount] = useState(0)
+export interface FrameworkHydrationAppProps {
+  readonly initialCount?: number
+}
+
+export function FrameworkHydrationApp({
+  initialCount = 0,
+}: FrameworkHydrationAppProps = {}): JSX.Element {
+  const [count, setCount] = useState(initialCount)
   preconnect('https://assets.example.test', { crossOrigin: 'anonymous' })
   return (
     <section data-framework-boundary>

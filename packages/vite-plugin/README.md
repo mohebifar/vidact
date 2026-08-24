@@ -48,9 +48,9 @@ hydrate, or server Actions entries. Add `async` when Actions and Suspense are
 used together. Public transition APIs still require the separate `concurrent`
 feature even though Actions reuse its publication machinery internally.
 
-For production installs, pass `compilerPath` to a version-matched `vidactc`
-artifact. Workspace development builds `target/debug/vidactc` once per process
-and invokes that executable directly for subsequent transforms.
+The plugin calls the prebuilt `@vidact/compiler` Node-API addon. Consumers do
+not need Rust, Cargo, or a separate `vidactc` executable; the command-line tool
+is a thin wrapper over the same package API.
 
 The cache fingerprint includes compiler/runtime protocols, filename, source,
 target, features, and Vite environment.

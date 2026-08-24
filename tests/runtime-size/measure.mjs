@@ -197,7 +197,7 @@ async function measureFixture(fixture) {
     root: directory,
     configFile: false,
     logLevel: 'silent',
-    plugins: [vidact({ manifestPath: '../../Cargo.toml', features: fixture.features ?? [] })],
+    plugins: [vidact({ features: fixture.features ?? [] })],
     build: {
       write: false,
       minify: 'oxc',

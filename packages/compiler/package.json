@@ -1,0 +1,76 @@
+{
+  "name": "@vidact/compiler",
+  "version": "0.0.0",
+  "description": "Native React-to-Vanilla compiler bindings for Vidact",
+  "keywords": [
+    "compiler",
+    "react",
+    "tsx",
+    "vidact"
+  ],
+  "homepage": "https://github.com/mohebifar/vidact#readme",
+  "bugs": "https://github.com/mohebifar/vidact/issues",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mohebifar/vidact.git",
+    "directory": "packages/compiler"
+  },
+  "bin": {
+    "vidactc": "./bin/vidactc.mjs"
+  },
+  "files": [
+    "bin",
+    "CHANGELOG.md",
+    "dist/binding.d.ts",
+    "dist/binding.js",
+    "dist/index.d.ts",
+    "dist/index.d.ts.map",
+    "dist/index.js",
+    "dist/index.js.map",
+    "LICENSE",
+    "README.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "pnpm build:native && pnpm build:js",
+    "build:js": "tsc -p tsconfig.build.json && node ../../scripts/finalize-typescript-package.mjs dist",
+    "build:native": "napi build --manifest-path ../../crates/vidact-node/Cargo.toml --output-dir dist --platform --esm --js binding.js --dts binding.d.ts",
+    "build:native:release": "pnpm build:native --release --strip",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@emnapi/runtime": "2.0.0-alpha.3",
+    "@napi-rs/cli": "3.8.2",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  },
+  "napi": {
+    "binaryName": "vidact-compiler",
+    "packageName": "@vidact/compiler",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-musl",
+      "x86_64-unknown-linux-musl"
+    ]
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

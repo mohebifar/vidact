@@ -1,11 +1,16 @@
 import { mountCompiled } from '@vidact/runtime'
-import { assertMutationEnvelope, captureMutations } from '@vidact/test-support'
+import {
+  assertMutationEnvelope,
+  captureMutations,
+  requireSingleDirectText,
+} from '@vidact/test-support'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   ControlFlowApp,
   KeyedControlFlowApp,
   LogicalFlowApp,
+  NestedTernaryApp,
   NestedListsApp,
   ReactiveRefApp,
   SlotTypeApp,
@@ -225,6 +230,93 @@ describe('compiled render control flow', () => {
     )
     expect(host.querySelector('[data-keyed-counter]')).not.toBe(secondCounter)
     expect(host.querySelector('[data-keyed-count]')?.textContent).toBe('0')
+  })
+
+  it('retains aligned nested ternaries and replaces divergent nested ternaries', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    dispose = mountCompiled(NestedTernaryApp, host).dispose
+
+    const root = host.querySelector<HTMLElement>('[data-nested-ternary]')!
+    const shell = host.querySelector<HTMLElement>('[data-nested-shell]')!
+    const counter = host.querySelector<HTMLElement>('[data-counter]')!
+    const increment = host.querySelector<HTMLButtonElement>('[data-counter-increment]')!
+    const empty = host.querySelector<HTMLElement>('[data-nested-empty]')!
+    increment.click()
+    expect(increment.textContent).toBe('first:1')
+
+    const aligned = await captureMutations(host, () =>
+      host.querySelector<HTMLButtonElement>('[data-nested-toggle]')!.click(),
+    )
+    expect(host.querySelector('[data-nested-ternary]')).toBe(root)
+    expect(host.querySelector('[data-nested-shell]')).toBe(shell)
+    expect(host.querySelector('[data-counter]')).toBe(counter)
+    expect(host.querySelector('[data-counter-increment]')).toBe(increment)
+    expect(increment.textContent).toBe('second:1')
+    expect(shell.dataset.mode).toBe('second')
+    expect(host.querySelector('[data-nested-extra]')?.textContent).toBe('extra')
+    expect(() =>
+      assertMutationEnvelope(
+        aligned.records,
+        [
+          { type: 'attributes', target: shell, attributeName: 'data-mode' },
+          { type: 'attributes', target: counter, attributeName: 'data-label' },
+          { type: 'characterData', within: counter },
+          { type: 'characterData', within: shell },
+          { type: 'childList', target: shell },
+        ],
+        'aligned nested ternary',
+      ),
+    ).not.toThrow()
+
+    const scalar = host.querySelector<HTMLOutputElement>('[data-nested-scalar]')!
+    const scalarText = requireSingleDirectText(scalar, 'nested scalar ternary')
+    const scalarUpdate = await captureMutations(host, () =>
+      host.querySelector<HTMLButtonElement>('[data-nested-label]')!.click(),
+    )
+    expect(scalar.textContent).toBe('first!')
+    expect(() =>
+      assertMutationEnvelope(
+        scalarUpdate.records,
+        [{ type: 'characterData', target: scalarText }],
+        'selected scalar ternary branch',
+      ),
+    ).not.toThrow()
+
+    await captureMutations(host, () =>
+      host.querySelector<HTMLButtonElement>('[data-nested-scalar-toggle]')!.click(),
+    )
+    expect(scalar.querySelector('i')?.textContent).toBe('jsx')
+    const inactiveScalarUpdate = await captureMutations(host, () =>
+      host.querySelector<HTMLButtonElement>('[data-nested-label]')!.click(),
+    )
+    expect(inactiveScalarUpdate.records).toEqual([])
+    expect(scalarText.data).toBe('first!')
+
+    const divergent = await captureMutations(host, () =>
+      host.querySelector<HTMLButtonElement>('[data-nested-replace]')!.click(),
+    )
+    expect(host.querySelector('[data-nested-ternary]')).toBe(root)
+    expect(host.querySelector('[data-nested-empty]')).toBeNull()
+    expect(host.querySelector('[data-nested-list]')).not.toBeNull()
+    expect(() =>
+      assertMutationEnvelope(
+        divergent.records,
+        [
+          { type: 'childList', target: root },
+          { type: 'childList', within: empty },
+        ],
+        'divergent nested ternary',
+      ),
+    ).not.toThrow()
+
+    const list = host.querySelector<HTMLElement>('[data-nested-list]')!
+    await captureMutations(host, () =>
+      host.querySelector<HTMLButtonElement>('[data-nested-replace]')!.click(),
+    )
+    expect(host.querySelector('[data-nested-list]')).toBeNull()
+    expect(host.querySelector('[data-nested-empty]')).not.toBe(empty)
+    expect(list.isConnected).toBe(false)
   })
 
   it('executes terminal switch branches through one owned range repeatedly', async () => {

@@ -1,0 +1,216 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - name: Require the tagged commit to be on main
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "tagged commit $GITHUB_SHA is not an ancestor of origin/main" >&2
+            exit 1
+          fi
+      - id: version
+        name: Validate coordinated version and tag
+        shell: bash
+        run: echo "version=$(node scripts/verify-release-version.mjs '${GITHUB_REF_NAME}')" >> "$GITHUB_OUTPUT"
+
+  native:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@01ba1edad32c6f80dbcce879d3e0fa5a00b2a84e # 1.96.0
+        with:
+          targets: ${{ matrix.target }}
+      - name: Prepare patched Oxc checkout
+        shell: bash
+        run: scripts/prepare-oxc.sh
+      - run: pnpm install --frozen-lockfile
+      - name: Build native addon
+        run: pnpm --filter @vidact/compiler exec napi build --manifest-path ../../crates/vidact-node/Cargo.toml --output-dir dist --platform --release --strip --esm --js binding.js --dts binding.d.ts --target ${{ matrix.target }}
+      - name: Test native addon
+        run: pnpm --filter @vidact/compiler test
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: native-${{ matrix.target }}
+          path: packages/compiler/dist/*.node
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        with:
+          name: compiler-bindings
+          path: |
+            packages/compiler/dist/binding.d.ts
+            packages/compiler/dist/binding.js
+          if-no-files-found: error
+
+  native-musl:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+    runs-on: ${{ matrix.runner }}
+    container: node:24-alpine
+    timeout-minutes: 45
+    steps:
+      - name: Install build tools
+        run: apk add --no-cache bash build-base curl git perl python3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: recursive
+      - name: Install Rust
+        shell: sh
+        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.96.0 --target ${{ matrix.target }}
+      - name: Install pnpm
+        run: npm install --global pnpm@10.19.0
+      - name: Prepare patched Oxc checkout
+        shell: bash
+        run: scripts/prepare-oxc.sh
+      - run: pnpm install --frozen-lockfile
+      - name: Build native addon
+        shell: sh
+        run: . "$HOME/.cargo/env" && pnpm --filter @vidact/compiler exec napi build --manifest-path ../../crates/vidact-node/Cargo.toml --output-dir dist --platform --release --strip --esm --js binding.js --dts binding.d.ts --target ${{ matrix.target }}
+      - name: Test native addon
+        run: pnpm --filter @vidact/compiler test
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: native-${{ matrix.target }}
+          path: packages/compiler/dist/*.node
+          if-no-files-found: error
+
+  assemble:
+    needs: [validate, native, native-musl]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: compiler-bindings
+          path: packages/compiler/dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: native-*
+          path: packages/compiler/artifacts
+          merge-multiple: true
+      - name: Assemble native packages and JavaScript packages
+        run: |
+          pnpm --filter @vidact/compiler build:js
+          pnpm --filter @vidact/compiler exec napi create-npm-dirs --npm-dir npm
+          pnpm --filter @vidact/compiler exec napi artifacts --output-dir artifacts --npm-dir npm
+          test "$(find packages/compiler/npm -name '*.node' | wc -l | tr -d ' ')" = 7
+          pnpm --filter @vidact/compiler exec napi pre-publish --npm-dir npm --tag-style npm --no-gh-release --skip-optional-publish
+          pnpm --filter @vidact/runtime build
+          pnpm --filter @vidact/test-support build
+          pnpm --filter @vidact/vite build
+      - name: Pack and verify the complete release
+        shell: bash
+        run: |
+          mkdir -p release-tarballs
+          for package_directory in packages/compiler/npm/*; do
+            pnpm --dir "$package_directory" pack --pack-destination "$GITHUB_WORKSPACE/release-tarballs"
+          done
+          pnpm --filter @vidact/compiler pack --pack-destination release-tarballs
+          pnpm --filter @vidact/runtime pack --pack-destination release-tarballs
+          pnpm --filter @vidact/test-support pack --pack-destination release-tarballs
+          pnpm --filter @vidact/react-types pack --pack-destination release-tarballs
+          pnpm --filter @vidact/vite pack --pack-destination release-tarballs
+          node scripts/verify-assembled-compiler.mjs release-tarballs '${{ needs.validate.outputs.version }}'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-tarballs
+          path: release-tarballs/*.tgz
+          if-no-files-found: error
+
+  publish:
+    needs: [validate, assemble]
+    runs-on: ubuntu-24.04
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Require an OIDC-capable npm CLI
+        shell: bash
+        run: |
+          npm_version="$(npm --version)"
+          minimum_version='11.5.1'
+          if [ "$(printf '%s\n%s\n' "$minimum_version" "$npm_version" | sort -V | head -n1)" != "$minimum_version" ]; then
+            echo "npm $npm_version is older than required $minimum_version" >&2
+            exit 1
+          fi
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-tarballs
+          path: release-tarballs
+      - name: Select npm distribution tag
+        id: npm-tag
+        shell: bash
+        run: |
+          version='${{ needs.validate.outputs.version }}'
+          if [[ "$version" == *-* ]]; then
+            echo 'tag=next' >> "$GITHUB_OUTPUT"
+          else
+            echo 'tag=latest' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish coordinated release
+        env:
+          NPM_CONFIG_TAG: ${{ steps.npm-tag.outputs.tag }}
+          NPM_CONFIG_PROVENANCE: true
+        run: node scripts/publish-release-packages.mjs release-tarballs "$NPM_CONFIG_TAG"

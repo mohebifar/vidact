@@ -3,9 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "benchmark": "cargo build --quiet -p vidact-compiler --bin vidactc && pnpm build:packages && node --expose-gc scripts/benchmark.mjs",
+    "benchmark": "pnpm build:packages && node --expose-gc scripts/benchmark.mjs",
     "build:examples": "pnpm --filter @vidact/example-todomvc build && pnpm --filter @vidact/example-shop build && pnpm --filter @vidact/example-docs build",
-    "build:packages": "pnpm --filter @vidact/runtime build && pnpm --filter @vidact/test-support build && pnpm --filter @vidact/vite build",
+    "build:packages": "pnpm --filter @vidact/compiler build && pnpm --filter @vidact/runtime build && pnpm --filter @vidact/test-support build && pnpm --filter @vidact/vite build",
+    "changeset": "changeset",
+    "changeset:check": "node scripts/verify-release-intent.mjs",
+    "changeset:status": "changeset status --since=origin/main",
     "check": "pnpm lint && pnpm format && pnpm typecheck && pnpm test && pnpm size && pnpm benchmark",
     "dev:docs": "pnpm --filter @vidact/example-docs dev",
     "dev:shop": "pnpm --filter @vidact/example-shop dev",
@@ -16,17 +19,20 @@
     "lint": "oxlint --disable-nested-config . && ast-grep scan --globs '!vendor/**'",
     "lint:fix": "oxlint . --fix",
     "size": "pnpm --fail-if-no-match --filter @vidact/runtime-size measure",
-    "test": "pnpm build:packages && pnpm test:rust && pnpm test:runtime && pnpm test:tools && pnpm test:browser && pnpm test:examples && pnpm test:packages",
+    "test": "pnpm build:packages && pnpm test:rust && pnpm test:runtime && pnpm test:tools && pnpm test:browser && pnpm test:examples && pnpm test:packages && pnpm test:release",
     "test:browser": "pnpm --filter @vidact/browser-corpus test",
     "test:examples": "pnpm --filter @vidact/example-todomvc test && pnpm --filter @vidact/example-shop test && pnpm --filter @vidact/example-docs test",
     "test:packages": "node scripts/verify-packages.mjs",
+    "test:release": "node --test scripts/verify-release-version.test.mjs",
     "test:runtime": "pnpm --filter @vidact/runtime test",
     "test:rust": "cargo test --workspace",
-    "test:tools": "pnpm --filter @vidact/vite test",
-    "typecheck": "pnpm build:packages && pnpm --recursive typecheck"
+    "test:tools": "node --test scripts/verify-release-intent.test.mjs && pnpm --filter @vidact/vite test",
+    "typecheck": "pnpm build:packages && pnpm --recursive typecheck",
+    "version-packages": "changeset version && node scripts/verify-release-version.mjs"
   },
   "devDependencies": {
     "@ast-grep/cli": "^0.45.1",
+    "@changesets/cli": "3.0.1",
     "oxfmt": "^0.64.0",
     "oxlint": "^1.79.0"
   },

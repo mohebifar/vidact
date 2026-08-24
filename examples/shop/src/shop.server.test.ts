@@ -5,15 +5,19 @@ import { CATALOG } from './catalog.ts'
 import { renderShopPage } from './server.ts'
 
 describe('shop server', () => {
-  it('renders a fulfilled async catalog with hydration data and client assets', async () => {
+  it('renders a fulfilled server component with a manifest client boundary', async () => {
     const html = await renderShopPage(CATALOG.slice(0, 2))
 
     expect(html).toContain('<!doctype html>')
     expect(html).toContain('Ridge Bottle')
     expect(html).toContain('Weekender Tote')
     expect(html).toContain('vidact:v1')
-    expect(html).toContain('id="shop-data"')
+    expect(html).toContain('data-server-component="shop-page"')
+    expect(html).toContain('data-vidact-client-boundary="true"')
+    expect(html).toContain('data-vidact-client-payload=')
+    expect(html).toContain('shop/ShopClient')
     expect(html).toContain('src="/assets/client.js"')
+    expect(html).not.toContain('id="shop-data"')
     expect(html).not.toContain('Updating the collection')
   })
 

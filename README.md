@@ -38,8 +38,10 @@ the rationale and integration constraints.
 ## Repository layout
 
 - `crates/vidact-compiler`: compiler-neutral analysis facts and updater IR
+- `crates/vidact-node`: narrow Node-API adapter over the Rust compiler
+- `packages/compiler`: stable JavaScript API, TypeScript declarations, and CLI
 - `packages/runtime`: tree-shakeable scheduler, state slots, and keyed arrays
-- `packages/vite-plugin`: Rust compilation and OXC JSX-lowering Vite adapter
+- `packages/vite-plugin`: native compilation and OXC JSX-lowering Vite adapter
 - `tests/browser`: compiled Vitest Browser corpora running in Chromium, Firefox, and WebKit
 - `examples/todomvc`: runnable array-state TodoMVC without a Virtual DOM
 - `docs/architecture`: durable architecture decisions and upstream constraints
@@ -60,6 +62,9 @@ pnpm test:browser
 `pnpm check` runs lint/format/type gates, Rust and cross-browser suites, package
 and example verification, production size reachability, and compiler/runtime
 performance and retention budgets.
+Every pull request needs a changeset file. Run `pnpm changeset` for a published
+package change, or `pnpm changeset --empty` for repository-only work. Merged
+changesets feed the automated coordinated Version Packages pull request.
 The prepare script initializes the pinned Oxc submodule and applies Vidact's
 checked-in React Compiler patch. Maintainers editing that patch install the
 pinned tool with `go install github.com/microsoft/go-infra/cmd/git-go-patch@v0.0.16`;
@@ -71,8 +76,8 @@ Run the first example from the repository root:
 pnpm dev:todomvc
 ```
 
-Vite sends every TSX module to the Rust compiler before OXC lowers JSX through
-`@vidact/runtime/jsx-runtime`. For the supported `useState` subset, Rust rewrites
+Vite sends every TSX module through `@vidact/compiler` before OXC lowers JSX
+through `@vidact/runtime/jsx-runtime`. For the supported `useState` subset, Rust rewrites
 state reads and writes by semantic identity, removes the lowered React state
 import, and emits static bindings before OXC prints and lowers the module.
 `mountCompiled` is the only public root renderer; there is no uncompiled

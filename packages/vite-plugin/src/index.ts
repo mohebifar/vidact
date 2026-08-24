@@ -1,8 +1,5 @@
 /* oxlint-disable no-underscore-dangle -- Runtime build constants intentionally use reserved global names. */
 
-import fs from 'node:fs'
-import path from 'node:path'
-
 import { createFilter, transformWithOxc, type FilterPattern, type Plugin } from 'vite'
 
 import {
@@ -22,10 +19,6 @@ const REACT_DOM_SERVER_MODULE = '\0vidact:react-dom-server'
 const REACT_DOM_STATIC_MODULE = '\0vidact:react-dom-static'
 
 export interface VidactPluginOptions {
-  /** Path to the Rust workspace Cargo.toml. Relative paths resolve from Vite's root. */
-  readonly manifestPath?: string
-  /** Prebuilt vidactc executable. Relative paths resolve from Vite's root. */
-  readonly compilerPath?: string
   /** Compiler target. Server and hydration targets use separate entry points. */
   readonly target?: VidactTarget
   /** Opt-in semantic feature families. */
@@ -41,8 +34,6 @@ export interface VidactPluginOptions {
 export interface CompilationCacheInput extends VidactCompilerConfiguration {
   readonly source: string
   readonly filename: string
-  readonly manifestPath: string
-  readonly compilerPath?: string
   readonly environment: string
 }
 
@@ -51,8 +42,6 @@ export function compilationCacheKey(input: CompilationCacheInput): string {
   return JSON.stringify({
     compilerProtocol: VIDACT_COMPILE_PROTOCOL,
     runtimeProtocol: VIDACT_RUNTIME_PROTOCOL,
-    manifestPath: input.manifestPath,
-    compilerPath: input.compilerPath,
     filename: input.filename,
     environment: input.environment,
     target: configuration.target,
@@ -62,8 +51,15 @@ export function compilationCacheKey(input: CompilationCacheInput): string {
 }
 
 export function vidact(options: VidactPluginOptions = {}): Plugin {
-  let manifestPath = ''
-  let compilerPath: string | undefined
+  const legacyOptions = options as VidactPluginOptions & {
+    readonly compilerPath?: unknown
+    readonly manifestPath?: unknown
+  }
+  if (legacyOptions.compilerPath !== undefined || legacyOptions.manifestPath !== undefined) {
+    throw new Error(
+      '`compilerPath` and `manifestPath` were removed; install @vidact/compiler for the current platform',
+    )
+  }
   const configuration = normalizeConfiguration({
     target: options.target ?? 'client',
     features: options.features ?? [],
@@ -99,16 +95,6 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       return {
         define,
       }
-    },
-    configResolved(config) {
-      manifestPath =
-        options.manifestPath === undefined
-          ? findWorkspaceManifest(config.root)
-          : path.resolve(config.root, options.manifestPath)
-      compilerPath =
-        options.compilerPath === undefined
-          ? undefined
-          : path.resolve(config.root, options.compilerPath)
     },
     resolveId(source) {
       if (source === 'react') return REACT_MODULE
@@ -207,20 +193,12 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       const cacheKey = compilationCacheKey({
         source,
         filename,
-        manifestPath,
         environment: this.environment.name,
-        ...(compilerPath === undefined ? {} : { compilerPath }),
         ...configuration,
       })
       let compilation = compilationCache.get(cacheKey)
       if (compilation === undefined) {
-        const result = await compileWithCompiler(
-          source,
-          filename,
-          manifestPath,
-          configuration,
-          compilerPath === undefined ? {} : { compilerPath },
-        )
+        const result = await compileWithCompiler(source, filename, configuration)
         compilation = {
           code: result.code,
           sourceMap: result.sourceMap,
@@ -288,19 +266,6 @@ function serverRuntimeEntry(
   if (asyncEnabled) return '@vidact/runtime/async/server'
   if (concurrentEnabled) return '@vidact/runtime/concurrent/server'
   return '@vidact/runtime/server'
-}
-
-function findWorkspaceManifest(start: string): string {
-  let directory = path.resolve(start)
-  while (true) {
-    const candidate = path.join(directory, 'Cargo.toml')
-    if (fs.existsSync(candidate)) return candidate
-    const parent = path.dirname(directory)
-    if (parent === directory) {
-      throw new Error(`could not find a Cargo.toml above Vite root ${start}`)
-    }
-    directory = parent
-  }
 }
 
 export type {

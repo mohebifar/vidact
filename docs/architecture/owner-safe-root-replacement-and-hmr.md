@@ -24,6 +24,19 @@ data, accepts the module, replaces it on the next evaluation, and unmounts it
 when Vite prunes the module. Ordinary root options and error routing remain in
 effect.
 
+`hydrateHotRoot(import.meta.hot, host, application)` follows the same hot-data
+lifecycle but claims the server-owned DOM on its first evaluation. Later
+evaluations mount a replacement before disposing the hydrated owner. It never
+calls `createRoot` for the first development render and therefore does not
+discard or duplicate valid SSR markup.
+
+Vite discovers self-accepting modules through a lexical
+`import.meta.hot.accept()` call. Application entries must contain that call;
+passing `import.meta.hot` to a runtime helper alone cannot mark the module graph
+boundary. The runtime helper's `accept()` registration remains part of the
+generic hot-context lifecycle, but it does not replace the application-level
+lexical boundary required by Vite.
+
 The preservation boundary is explicit:
 
 - component-local compiled state, refs, and effects reset on replacement;
@@ -45,8 +58,17 @@ Applications that need preservation during development can place that state in
 a stable external store, which is already part of the default compatibility
 contract.
 
+SSR development needs distinct Vite client and server environments because
+the same React-shaped TSX must compile with the hydrate target in the browser
+and the server target in the SSR module runner. Environment-scoped plugin
+instances keep those compilation caches and runtime imports separate.
+
 ## Verification
 
 `packages/runtime/test/lifecycle/root.browser.test.ts` replaces a live stateful
 root, proves local-state reset, verifies old layout cleanup exactly once, and
-verifies prune unmounts the replacement owner.
+verifies prune unmounts the replacement owner. It also proves that
+`hydrateHotRoot` claims matching server markup without mutations before the
+next evaluation replaces and disposes it. `examples/shop/src/shop.dev.server.test.ts`
+proves that the Vite SSR server emits server markup, installs `/@vite/client`,
+serves the source client entry, and contains the lexical hot-accept boundary.

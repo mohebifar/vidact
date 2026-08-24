@@ -11,6 +11,9 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@fontsource-variable/ibm-plex-sans": "^5.3.0",
+    "@fontsource-variable/newsreader": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
     "@vidact/runtime": "workspace:*"
   },
   "devDependencies": {

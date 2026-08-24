@@ -4,6 +4,7 @@ import {
   Suspense,
   cache,
   cacheSignal,
+  createClientBoundary,
   createClientModuleManifest,
   createClientReference,
   createServerFunctionRegistry,
@@ -216,6 +217,27 @@ describe('framework server runtime', () => {
     const pendingInvocation = registry.invoke('wait/forever', [], controller.signal)
     controller.abort(new Error('cancel Server Function'))
     await expect(pendingInvocation).rejects.toThrow('cancel Server Function')
+  })
+
+  it('embeds a manifest-checked client boundary with an independently hydratable root', async () => {
+    const manifest = createClientModuleManifest({ 'shop/Counter': ['counter'] })
+    const reference = createClientReference('shop/Counter', 'counter')
+    const stream = await renderToReadableStream(
+      () =>
+        createClientBoundary(reference, { initialCount: 2 }, <button>count 2</button>, {
+          clientManifest: manifest,
+          hostProps: { className: 'counter-boundary' },
+        }),
+      { identifierPrefix: 'rsc-' },
+    )
+    const html = await readStream(stream)
+
+    expect(html).toContain('class="counter-boundary"')
+    expect(html).toContain('data-vidact-client-boundary="true"')
+    expect(html).toContain('data-vidact-client-payload=')
+    expect(html).toContain('data-vidact-identifier-prefix="rsc-b0-"')
+    expect(html).toContain('shop/Counter')
+    expect(html.match(/vidact:v1:r/g)).toHaveLength(4)
   })
 
   it('bounds framework payload depth and node count for untrusted transport values', () => {

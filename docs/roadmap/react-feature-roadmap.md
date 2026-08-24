@@ -1,7 +1,13 @@
 # React feature roadmap
 
-Updated: 2026-08-22
+Updated: 2026-08-23
 Decision state: Proposed
+
+> The canonical default/opt-in product boundary now lives in
+> [React parity gap audit](react-parity-gap-audit.md) and
+> [React Parity Contract](../plans/2026-08-23-0213-feat-react-parity-contract-plan.md).
+> This document supplies dependency order. A feature appearing in a phase does
+> not imply that it belongs in the default client contract.
 
 ## Product position
 
@@ -30,12 +36,16 @@ See the official [React API overview](https://react.dev/reference/react),
 
 | Level | Meaning | Examples |
 |---|---|---|
-| **Core** | Required to fulfill the existing 1.0 production plan | component props, owned children, refs, effects, context, complete arrays, DOM correctness, SSR/hydration |
-| **React-shaped** | Same authoring API and observable intent, implemented with Vidact ownership/updaters | `useReducer`, `useMemo`, `useCallback`, `useId`, `memo`, `lazy` |
-| **Adapted** | Useful feature with documented timing or scheduling differences | error boundaries, `StrictMode`, `Profiler`, transition APIs |
-| **Framework** | Belongs in a later server/router integration, not the client core | Actions, streaming SSR, prerender/resume, Server Components |
+| **Default core** | Common application and library-interoperability behavior available without configuration | props/children, state/reducer/ref, effects, context, errors, portals, complete arrays, DOM correctness |
+| **Required target** | Production requirement isolated from the client-only entry point | deterministic SSR and whole-root hydration |
+| **Opt-in feature** | Uncommon behavior with cross-cutting runtime machinery | async/Suspense, concurrent scheduling, Actions, insertion effects, retained UI, profiling, framework protocols |
+| **Adapted** | Same application intent with documented semantics that preserve Vidact's identity | function error boundaries, `memo`, native events, development checks |
 | **Diagnosed** | Conflicts with the no-element-tree identity or is legacy | class components, `Children`, `cloneElement`, arbitrary React elements |
 | **Track upstream** | Canary/experimental; do not stabilize Vidact around it yet | `<ViewTransition>`, experimental server/resource APIs |
+
+Usage-local capabilities remain default-compatible but must be imported only
+when used. Compiler flags are reserved for semantic families whose schedulers,
+lifecycles, caches, or protocols create global carrying cost.
 
 ## Dependency order
 
@@ -406,16 +416,16 @@ Candidates:
 | `useContext` | **Core** | 3 |
 | `useEffect` | **Core** | 3 |
 | `useLayoutEffect` | **Core for DOM libraries** | 3 |
-| `useInsertionEffect` | **Adapt or diagnose** until timing is exact | 3 |
+| `useInsertionEffect` | **Opt-in `css-insertion`** after timing is exact | 3 |
 | `useEffectEvent` | **Build** | 3 |
 | `useMemo`, `useCallback` | **Build or compile away with identity parity** | 3 |
 | `useId` | **Build with SSR determinism** | 3-4 |
 | `useSyncExternalStore` | **Build for library interop** | 3-4 |
-| `useTransition`, `useDeferredValue` | **Build after scheduler and Suspense** | 6 |
-| `useOptimistic`, `useActionState` | **Framework-aware build** | 6 |
-| `useFormStatus` | **DOM/framework build** | 6 |
-| `useDebugValue` | **Developer-only adaptation** | 6 |
-| `use` | **Resource/context subset** | 5 |
+| `useTransition`, `useDeferredValue` | **Opt-in `concurrent`** after scheduler and Suspense | 6 |
+| `useOptimistic`, `useActionState` | **Opt-in `actions`** | 6 |
+| `useFormStatus` | **Opt-in `actions`** | 6 |
+| `useDebugValue` | **Opt-in `profiling`; development-only** | 6 |
+| `use` | **Opt-in `async` for promises; default for context** | 5 |
 | Custom hooks | **Core for supported primitives** | 3 |
 
 ### Components and APIs
@@ -426,18 +436,19 @@ Candidates:
 | `createContext` | **Core** | 3 |
 | Error boundary | **Vidact function API; document difference** | 3 |
 | `createPortal` | **Build with logical ownership** | 4 |
-| `lazy`, Suspense | **Build together** | 5 |
-| `startTransition` | **Build with scheduler** | 6 |
-| Activity | **Build after retained-owner lifecycle** | 6 |
+| `lazy`, Suspense | **Opt-in `async`; build together** | 5 |
+| `startTransition` | **Opt-in `concurrent`** | 6 |
+| Activity | **Opt-in `retained-ui`** | 6 |
 | `memo` | **Compiler adaptation** | 6 |
 | StrictMode | **Adapted development checks, not exact replay** | 6 |
-| Profiler, `act`, `captureOwnerStack` | **Developer/test APIs** | 6 |
-| `cache`, `cacheSignal` | **Server/resource layer** | 7 |
+| Profiler, `captureOwnerStack` | **Opt-in `profiling`** | 6 |
+| `act` | **Default test package; zero production bytes** | 6 |
+| `cache`, `cacheSignal` | **Opt-in `framework`** | 7 |
 | ViewTransition | **Track Canary; do not promise yet** | 7+ |
 | `createRoot`, `hydrateRoot` | **Vidact-shaped root APIs** | 4 |
 | `flushSync` | **Only with async scheduler** | 6 |
-| Streaming/static/resume APIs | **Framework/server layer** | 7 |
-| Resource preloading APIs | **Framework/compiler layer** | 7 |
+| Streaming/static/resume APIs | **Opt-in `framework`** | 7 |
+| Resource preloading APIs | **Usage-reachable or opt-in `framework`** | 7 |
 
 ### Explicitly diagnosed or migration-only
 

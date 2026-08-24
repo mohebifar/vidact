@@ -1,7 +1,9 @@
 export * from './async-actions.ts'
 export * from './framework-protocol.ts'
 
+import type { CompiledComponentResult } from './compiled.ts'
 import { installFrameworkMetadata } from './direct-dom.ts'
+import type { FrameworkValue } from './framework-protocol.ts'
 import {
   hoistFrameworkMetadata,
   installFrameworkMetadataPropRekeying,
@@ -9,6 +11,33 @@ import {
 } from './metadata.ts'
 
 let metadataInstalled = false
+const CLIENT_BOUNDARY_DEFINITION = Symbol('Vidact.ClientBoundaryDefinition')
+
+export interface ClientBoundaryDefinition<Props = FrameworkValue, Prepared = unknown> {
+  readonly [CLIENT_BOUNDARY_DEFINITION]: true
+  readonly prepare?: (props: Props) => Prepared | PromiseLike<Prepared>
+  readonly render: (props: Props, prepared: Prepared) => CompiledComponentResult
+}
+
+export function defineClientBoundary<Props = FrameworkValue, Prepared = void>(
+  render: (props: Props, prepared: Prepared) => CompiledComponentResult,
+  prepare?: (props: Props) => Prepared | PromiseLike<Prepared>,
+): ClientBoundaryDefinition<Props, Prepared> {
+  return Object.freeze({
+    [CLIENT_BOUNDARY_DEFINITION]: true as const,
+    render,
+    ...(prepare === undefined ? {} : { prepare }),
+  })
+}
+
+export function isClientBoundaryDefinition(value: unknown): value is ClientBoundaryDefinition {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    CLIENT_BOUNDARY_DEFINITION in value &&
+    typeof Reflect.get(value, 'render') === 'function'
+  )
+}
 
 /** @internal */
 export function enableFrameworkMetadata(): void {

@@ -1,30 +1,30 @@
-<p className="eyebrow">Core concept</p>
+<p className="eyebrow">Explanation · Update model</p>
 
-<h1>The static updater model</h1>
+<h1>Why a state write can skip the component</h1>
 
-<p className="lede">Vidact moves the question “what changed?” out of your browser and into the compiler.</p>
+<p className="lede">The compiler turns reads and writes into an ordered update plan. The runtime follows that plan instead of calling the component again.</p>
 
-<h2 id="construction">Components construct once</h2>
+<h2 id="construction">The component is construction code</h2>
 
-<p>A compiled component creates its DOM and owned ranges during its initial execution. State slots hold ordinary values; there is no component replay loop waiting behind every update.</p>
+<p>A compiled component runs once to create its elements, listeners, text nodes, and owned ranges. State slots hold ordinary values. A later state write does not start a component replay loop.</p>
 
-<h2 id="sources">Writes mark sources dirty</h2>
+<h2 id="sources">A setter names its source</h2>
 
-<p>During compilation, Vidact assigns stable source IDs to state and props. A setter marks its source dirty and schedules a flush.</p>
+<p>Vidact assigns a stable source ID to each supported state slot and reactive prop. A setter marks its source dirty and schedules one batch.</p>
 
-<h2 id="updaters">Static masks select work</h2>
+<h2 id="updaters">Read masks replace subscription discovery</h2>
 
-<p>Each derived value, text binding, property binding, conditional range, and keyed list carries a compiler-produced read mask. The runtime intersects masks and executes affected updaters in order.</p>
+<p>The compiler gives each derived value, DOM binding, conditional range, and keyed list a read mask. The runtime intersects that mask with the dirty sources and runs each matching updater in order.</p>
 
 <pre><code>{`state write
   → dirty source mask
   → selected static updaters
   → direct DOM mutation`}</code></pre>
 
-<h2 id="identity">Identity is the proof</h2>
+<h2 id="identity">DOM identity makes the model visible</h2>
 
-<p>Unrelated elements remain the same DOM nodes. Keyed records move without remounting, controlled inputs retain browser state, and conditional ranges dispose only what they own.</p>
+<p>An unrelated element remains the same DOM node after an update. A keyed record can move without remounting. A controlled input keeps browser state. A conditional range disposes only the nodes that it owns.</p>
 
 <div className="callout">
-  <strong>No runtime graph.</strong> Unlike signal systems, the browser does not discover subscriptions while your code runs. The compiler already emitted the dependency edges.
+  <strong>No subscription pass.</strong> Solid records subscriptions when computations read signals. Vidact emits its source-to-updater links before the application runs.
 </div>

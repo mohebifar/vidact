@@ -1,13 +1,7 @@
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
 import { describe, expect, it } from 'vitest'
 
 import { analyzeWithCompiler, compileWithCompiler } from '../src/compiler-client.ts'
 import { compilationCacheKey, vidact } from '../src/index.ts'
-
-const packageDirectory = path.dirname(fileURLToPath(import.meta.url))
-const manifestPath = path.resolve(packageDirectory, '../../../Cargo.toml')
 
 type TransformHook = (
   this: { readonly environment: { readonly name: string } },
@@ -16,9 +10,7 @@ type TransformHook = (
 ) => Promise<unknown>
 
 function transformHook(options: Parameters<typeof vidact>[0]): TransformHook {
-  const plugin = vidact({ manifestPath, ...options })
-  const configure = Reflect.get(plugin, 'configResolved') as (config: { root: string }) => void
-  configure({ root: packageDirectory })
+  const plugin = vidact(options)
   return Reflect.get(plugin, 'transform') as TransformHook
 }
 
@@ -44,6 +36,15 @@ function virtualModule(source: string, options: Parameters<typeof vidact>[0]): s
 }
 
 describe('vidact compiler client', () => {
+  it('rejects removed compiler process options with a migration error', () => {
+    expect(() => vidact({ compilerPath: '/tmp/vidactc' } as never)).toThrow(
+      '`compilerPath` and `manifestPath` were removed; install @vidact/compiler for the current platform',
+    )
+    expect(() => vidact({ manifestPath: '/tmp/Cargo.toml' } as never)).toThrow(
+      '`compilerPath` and `manifestPath` were removed; install @vidact/compiler for the current platform',
+    )
+  })
+
   it('returns the Rust compiler analysis protocol for TSX arrays', async () => {
     const analysis = await analyzeWithCompiler(
       `
@@ -54,7 +55,6 @@ describe('vidact compiler client', () => {
         }
       `,
       'todos.tsx',
-      manifestPath,
     )
 
     expect(analysis.protocol).toBe('vidact-analysis-v1')
@@ -75,7 +75,6 @@ describe('vidact compiler client', () => {
         }
       `,
       'todos.tsx',
-      manifestPath,
     )
 
     expect(compilation.protocol).toBe('vidact-compile-v2')
@@ -104,7 +103,6 @@ describe('vidact compiler client', () => {
         }
       `,
       'greeting.tsx',
-      manifestPath,
       { target: 'server', features: [] },
     )
 
@@ -126,7 +124,6 @@ describe('vidact compiler client', () => {
         }
       `,
       'counter.tsx',
-      manifestPath,
       { target: 'hydrate', features: [] },
     )
 
@@ -240,7 +237,6 @@ describe('vidact compiler client', () => {
     const base = {
       source: 'export function App() { return <main /> }',
       filename: '/app/App.tsx',
-      manifestPath,
       target: 'client' as const,
       features: ['profiling', 'async'] as const,
       environment: 'client',
@@ -254,28 +250,12 @@ describe('vidact compiler client', () => {
     expect(compilationCacheKey(base)).not.toBe(
       compilationCacheKey({ ...base, source: `${base.source}\n` }),
     )
-    expect(compilationCacheKey(base)).not.toBe(
-      compilationCacheKey({ ...base, compilerPath: '/opt/vidact/vidactc' }),
-    )
-  })
-
-  it('accepts an explicit prebuilt compiler artifact', async () => {
-    const compilerPath = path.resolve(packageDirectory, '../../../target/debug/vidactc')
-    await expect(
-      compileWithCompiler(
-        'export function Ready() { return <p>ready</p> }',
-        'ready.tsx',
-        manifestPath,
-        { target: 'client', features: [] },
-        { compilerPath },
-      ),
-    ).resolves.toMatchObject({ protocol: 'vidact-compile-v2' })
   })
 
   it('rejects invalid modules with the compiler diagnostic', async () => {
-    await expect(
-      analyzeWithCompiler('export function Broken( {', 'broken.tsx', manifestPath),
-    ).rejects.toThrow(/AnalysisFailed/)
+    await expect(analyzeWithCompiler('export function Broken( {', 'broken.tsx')).rejects.toThrow(
+      /AnalysisFailed/,
+    )
   })
 
   it('requires the unsafe-html feature at the exact JSX attribute', async () => {
@@ -285,11 +265,11 @@ describe('vidact compiler client', () => {
       }
     `
 
-    await expect(compileWithCompiler(source, 'raw.tsx', manifestPath)).rejects.toThrow(
+    await expect(compileWithCompiler(source, 'raw.tsx')).rejects.toThrow(
       /raw\.tsx:3:\d+.*unsafe-html/,
     )
     await expect(
-      compileWithCompiler(source, 'raw.tsx', manifestPath, {
+      compileWithCompiler(source, 'raw.tsx', {
         target: 'client',
         features: ['unsafe-html'],
       }),

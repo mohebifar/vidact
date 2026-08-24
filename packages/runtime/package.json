@@ -1,8 +1,26 @@
 {
   "name": "@vidact/runtime",
-  "version": "0.1.0",
+  "version": "0.0.0",
+  "description": "Fine-grained direct-DOM runtime for compiled Vidact applications",
+  "keywords": [
+    "compiler",
+    "dom",
+    "react",
+    "runtime",
+    "vidact"
+  ],
+  "homepage": "https://github.com/mohebifar/vidact#readme",
+  "bugs": "https://github.com/mohebifar/vidact/issues",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mohebifar/vidact.git",
+    "directory": "packages/runtime"
+  },
   "files": [
+    "CHANGELOG.md",
     "dist",
+    "LICENSE",
     "README.md"
   ],
   "type": "module",

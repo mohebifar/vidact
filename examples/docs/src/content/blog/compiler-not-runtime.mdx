@@ -1,21 +1,34 @@
-<p className="eyebrow">Engineering · 6 min read</p>
+<p className="eyebrow">Compiler notes · August 24, 2026 · 4 min read</p>
 
-<h1>The compiler is the reactivity system</h1>
+<h1>Why Vidact puts reactivity in the compiler</h1>
 
-<p className="lede">Most UI systems ask the browser to discover or compare work. Vidact arrives with the update plan already written.</p>
+<p className="lede">A setter already names what changed. If the compiler can also name every reader, the browser does not need to call the component again or discover a subscription.</p>
 
-<p>React made component functions a remarkably productive unit of composition. The tradeoff is that a state update normally schedules component work and reconciles a new tree. Signal systems narrow that work by discovering dependencies at runtime. Vidact takes a third route: keep the React-shaped authoring model, then lower it to static source and updater relationships.</p>
+<p>React components are a useful way to organize UI code. In React, a state update normally schedules another render before React commits the necessary DOM changes. React Compiler can skip some of that work while keeping React's runtime model.</p>
 
-<h2>Why static edges matter</h2>
+<p>Vidact uses React Compiler analysis for a different target. It lowers supported components into DOM construction and ordered updaters. The component author still writes React-shaped TSX, but the browser runs a different program.</p>
 
-<p>A static dependency edge is inspectable before the app ships. It can participate in diagnostics, source maps, updater ordering, capability selection, and performance budgets. The browser receives a smaller job: store values, batch invalidations, and execute known DOM operations.</p>
+<h2>A setter already tells us what changed</h2>
 
-<blockquote>Compilation is not a build optimization bolted onto the model. In Vidact, compilation is the model.</blockquote>
+<p>Take <code>setCount(count + 1)</code>. The compiler assigns <code>count</code> a source ID and records every updater that reads it. At runtime, the setter marks that source dirty. The next batch runs the matching updaters in compiler order.</p>
 
-<h2>What this costs</h2>
+<pre><code>{`setCount(...)
+  → mark source:count dirty
+  → select updaters that read source:count
+  → mutate the owned DOM nodes`}</code></pre>
 
-<p>Static knowledge requires a defined language contract. Dynamic patterns that hide dependencies from analysis need a compiler feature, a deliberate escape hatch, or a diagnostic. Vidact chooses explicit boundaries over a broad runtime fallback that would silently change semantics.</p>
+<h2>Static edges buy more than speed</h2>
 
-<h2>What we are testing</h2>
+<p>A source-to-updater link exists before the app ships. The compiler can print it in diagnostics, order it with other writes, include it in source maps, and reject cycles before code generation. The same representation drives client updates, server output, and hydration.</p>
 
-<p>The project is testing whether React-compatible components can become a portable source language for direct DOM programs: surgical client updates, deterministic server output, hydration, and feature-gated runtime capabilities from one compiler-owned representation.</p>
+<blockquote>Compilation is not an optimization around Vidact's runtime model. Compilation defines the runtime model.</blockquote>
+
+<h2>The language contract gets stricter</h2>
+
+<p>The compiler can only emit a static link when it can prove the relationship. A dynamic pattern that hides a dependency needs a compiler feature or a clear error. Vidact does not send unsupported code to a fallback renderer because that would change the update model without telling the author.</p>
+
+<h2>The experiment has a clear failure test</h2>
+
+<p>Vidact has to compile useful React-shaped applications while preserving the DOM nodes that an update does not own. The browser corpus checks both facts. It runs compiled apps in Chromium, Firefox, and WebKit, records mutations, and compares node identity across updates.</p>
+
+<p>If the compiler needs broad rerenders or hidden runtime discovery to support ordinary application code, the model has failed on its own terms. That is more useful to learn than a benchmark number from a toy counter.</p>

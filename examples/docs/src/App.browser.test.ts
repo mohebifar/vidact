@@ -18,40 +18,49 @@ describe('Vidact documentation app', () => {
     const host = await mountApp('/')
     const header = host.querySelector('header')
 
-    expect(host.querySelector('h1')?.textContent).toContain('Render once')
+    expect(host.querySelector('h1')?.textContent).toContain('Your component runs once')
+    expect(host.textContent).toContain('Tested in Chromium, Firefox, and WebKit')
+    expect(host.textContent).toContain('Do not take "surgical" on faith')
 
     await act(() => clickLink(host, '/docs'))
     expect(window.location.pathname).toBe('/docs')
-    expect(host.querySelector('h1')?.textContent).toBe('Build your first Vidact app')
-    expect(host.textContent).toContain('The component executes once')
+    expect(host.querySelector('h1')?.textContent).toBe(
+      'Build a counter that updates without rerendering',
+    )
+    expect(host.textContent).toContain("The button's text changes")
     expect(host.querySelector('header')).toBe(header)
 
     await act(() => clickLink(host, '/docs/mental-model'))
-    expect(host.querySelector('h1')?.textContent).toBe('The static updater model')
-    expect(host.textContent).toContain('No runtime graph')
+    expect(host.querySelector('h1')?.textContent).toBe('Why a state write can skip the component')
+    expect(host.textContent).toContain('No subscription pass')
 
     await act(() => clickLink(host, '/examples'))
-    expect(host.querySelector('h1')?.textContent).toContain('See surgical updates')
+    expect(host.querySelector('h1')?.textContent).toContain('Run the cases that are hard to fake')
     expect(host.textContent).toContain('TodoMVC')
     expect(host.textContent).toContain('Async shop')
 
     await act(() => clickLink(host, '/blog'))
-    expect(host.querySelector('h1')?.textContent).toBe('Notes on doing less.')
+    expect(host.querySelector('h1')?.textContent).toBe(
+      'What Vidact learns before your code reaches the browser',
+    )
+    expect(host.textContent).toContain('React analysis boundary')
     await act(() => clickLink(host, '/blog/compiler-not-runtime'))
-    expect(host.querySelector('h1')?.textContent).toBe('The compiler is the reactivity system')
-    expect(host.textContent).toContain('Compilation is not a build optimization')
+    expect(host.querySelector('h1')?.textContent).toBe('Why Vidact puts reactivity in the compiler')
+    expect(host.textContent).toContain('A setter already tells us what changed')
   })
 
   it('responds to browser history navigation', async () => {
     const host = await mountApp('/docs')
-    expect(host.querySelector('h1')?.textContent).toBe('Build your first Vidact app')
+    expect(host.querySelector('h1')?.textContent).toBe(
+      'Build a counter that updates without rerendering',
+    )
 
     await act(() => {
       window.history.pushState({}, '', '/examples')
       window.dispatchEvent(new PopStateEvent('popstate'))
     })
 
-    expect(host.querySelector('h1')?.textContent).toContain('See surgical updates')
+    expect(host.querySelector('h1')?.textContent).toContain('Run the cases that are hard to fake')
   })
 })
 

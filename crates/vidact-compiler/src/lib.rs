@@ -12,6 +12,7 @@ mod framework_directives;
 pub mod ir;
 mod options;
 mod oxc_react;
+pub mod protocol;
 mod react_bindings;
 pub mod reactive_flow;
 pub mod render_flow;

@@ -1,24 +1,20 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import os from 'node:os'
+import { copyFile, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
+import { publicPackages } from './public-packages.mjs'
+
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'vidact-packages-'))
+const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'vidact-packages-'))
 const tarballDirectory = path.join(temporaryRoot, 'tarballs')
 const consumerDirectory = path.join(temporaryRoot, 'consumer')
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const node = process.execPath
-
-const packages = [
-  ['@vidact/runtime', 'packages/runtime/package.json'],
-  ['@vidact/test-support', 'packages/test-support/package.json'],
-  ['@vidact/vite', 'packages/vite-plugin/package.json'],
-  ['@vidact/react-types', 'packages/react-types/package.json'],
-]
+let nativePackageRoot
 
 function run(command, arguments_, cwd = repository) {
   execFileSync(command, arguments_, { cwd, stdio: 'inherit' })
@@ -28,8 +24,30 @@ try {
   await mkdir(tarballDirectory)
   await mkdir(consumerDirectory)
   const tarballs = new Map()
+  const compilerDirectory = path.join(repository, 'packages/compiler')
+  nativePackageRoot = await mkdtemp(path.join(compilerDirectory, '.verify-npm-'))
+  run(pnpm, ['exec', 'napi', 'create-npm-dirs', '--npm-dir', nativePackageRoot], compilerDirectory)
+  const nativeFilenames = (await readdir(path.join(compilerDirectory, 'dist'))).filter(
+    (filename) => filename.startsWith('vidact-compiler.') && filename.endsWith('.node'),
+  )
+  if (nativeFilenames.length !== 1) {
+    throw new Error(`expected one host native addon, found ${nativeFilenames.length}`)
+  }
+  const nativeFilename = nativeFilenames[0]
+  const nativeSuffix = nativeFilename.slice('vidact-compiler.'.length, -'.node'.length)
+  const nativePackageDirectory = path.join(nativePackageRoot, nativeSuffix)
+  await copyFile(
+    path.join(compilerDirectory, 'dist', nativeFilename),
+    path.join(nativePackageDirectory, nativeFilename),
+  )
+  const nativePackageName = `@vidact/compiler-${nativeSuffix}`
+  const nativeManifest = JSON.parse(
+    await readFile(path.join(nativePackageDirectory, 'package.json'), 'utf8'),
+  )
+  run(pnpm, ['pack', '--pack-destination', tarballDirectory], nativePackageDirectory)
+  const nativeTarball = `${nativePackageName.slice(1).replace('/', '-')}-${nativeManifest.version}.tgz`
   const manifests = await Promise.all(
-    packages.map(async ([name, manifestPath]) => [
+    publicPackages.map(async ({ name, manifestPath }) => [
       name,
       JSON.parse(await readFile(path.join(repository, manifestPath), 'utf8')),
     ]),
@@ -50,6 +68,7 @@ try {
         type: 'module',
         dependencies: {
           '@vidact/react-types': dependency('@vidact/react-types'),
+          '@vidact/compiler': dependency('@vidact/compiler'),
           '@vidact/runtime': dependency('@vidact/runtime'),
           '@vidact/test-support': dependency('@vidact/test-support'),
           '@vidact/vite': dependency('@vidact/vite'),
@@ -57,6 +76,9 @@ try {
           '@types/react': '19.2.18',
           typescript: '7.0.2',
           vite: '8.2.2',
+        },
+        optionalDependencies: {
+          [nativePackageName]: `file:../tarballs/${nativeTarball}`,
         },
       },
       null,
@@ -86,7 +108,8 @@ try {
   )
   await writeFile(
     path.join(consumerDirectory, 'smoke.tsx'),
-    `import { source, type CompiledRenderValue } from '@vidact/runtime'
+    `import { compile, type VidactCompilation } from '@vidact/compiler'
+import { source, type CompiledRenderValue } from '@vidact/runtime'
 import { Suspense, createResource, lazy } from '@vidact/runtime/async'
 import { flushSync, startTransition } from '@vidact/runtime/concurrent'
 import { createCompiledActionState, useActionState } from '@vidact/runtime/actions'
@@ -101,8 +124,10 @@ import { vidact } from '@vidact/vite'
 
 const view: CompiledRenderValue = <button onClick={(event) => event.currentTarget.focus()}>ok</button>
 const actionView: CompiledRenderValue = <form action={async (_data) => {}} />
+const compilation: Promise<VidactCompilation> = compile('export function App() { return <main /> }', { filename: 'App.tsx' })
 void view
 void actionView
+void compilation
 void source(0)
 void Suspense
 void createResource
@@ -123,7 +148,8 @@ if (renderActionsToStaticMarkup(() => 'ready') !== 'ready') throw new Error('Act
   )
   await writeFile(
     path.join(consumerDirectory, 'smoke.mjs'),
-    `import { VIDACT_RUNTIME_PROTOCOL } from '@vidact/runtime/protocol'
+    `import { compileSync } from '@vidact/compiler'
+import { VIDACT_RUNTIME_PROTOCOL } from '@vidact/runtime/protocol'
 import { Suspense, createResource, lazy } from '@vidact/runtime/async'
 import { flushSync, startTransition } from '@vidact/runtime/concurrent'
 import { createCompiledActionState, useActionState } from '@vidact/runtime/actions'
@@ -136,6 +162,8 @@ import { renderToStaticMarkup } from '@vidact/runtime/server'
 import { act } from '@vidact/test-support'
 import { vidact } from '@vidact/vite'
 
+const compilation = compileSync('export function App() { return <main>ready</main> }', { filename: 'App.tsx' })
+if (compilation.protocol !== 'vidact-compile-v2' || !compilation.code.includes('__vidactCompiledRoot')) throw new Error('compiler entry failed')
 if (VIDACT_RUNTIME_PROTOCOL !== 'vidact-runtime-v1') throw new Error('runtime entry failed')
 if (renderToStaticMarkup(() => 'ready') !== 'ready') throw new Error('server entry failed')
 if ([Suspense, createResource, lazy].some((value) => typeof value !== 'function')) throw new Error('async entry failed')
@@ -151,6 +179,20 @@ if (typeof act !== 'function' || typeof vidact !== 'function') throw new Error('
 
   run(npm, ['install', '--ignore-scripts', '--no-audit', '--no-fund'], consumerDirectory)
   run(node, ['smoke.mjs'], consumerDirectory)
+  const vidactc = path.join(
+    consumerDirectory,
+    'node_modules',
+    '.bin',
+    `vidactc${process.platform === 'win32' ? '.cmd' : ''}`,
+  )
+  const cliOutput = execFileSync(vidactc, ['analyze', '--filename', 'Cli.tsx'], {
+    cwd: consumerDirectory,
+    encoding: 'utf8',
+    input: 'export function Cli() { return <p>ready</p> }',
+  })
+  if (JSON.parse(cliOutput).protocol !== 'vidact-analysis-v1') {
+    throw new Error('compiler CLI entry failed')
+  }
   const tsc = path.join(
     consumerDirectory,
     'node_modules',
@@ -159,5 +201,8 @@ if (typeof act !== 'function' || typeof vidact !== 'function') throw new Error('
   )
   run(tsc, ['-p', 'tsconfig.json'], consumerDirectory)
 } finally {
+  if (nativePackageRoot !== undefined) {
+    await rm(nativePackageRoot, { recursive: true, force: true })
+  }
   await rm(temporaryRoot, { recursive: true, force: true })
 }

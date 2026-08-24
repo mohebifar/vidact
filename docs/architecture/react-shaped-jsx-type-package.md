@@ -2,6 +2,8 @@
 
 - Decision state: Accepted
 - Decided: 2026-08-22
+- Amended: 2026-08-23 — every handler target is non-null and specializes to
+  its intrinsic element
 - Amended by: [Namespace-aware DOM semantics](namespace-aware-dom-semantics.md)
 
 ## Context
@@ -35,7 +37,9 @@ adaptations:
   `CompiledRenderValue`, rather than `ReactNode`.
 - `on*` attributes receive native DOM events with an element-specific
   `currentTarget`, because the direct DOM runtime uses `addEventListener` and
-  does not construct synthetic events.
+  does not construct synthetic events. Their `target` is non-null while the
+  listener runs and specializes to the intrinsic element for every event,
+  allowing direct element-specific property access without casts.
 - `on*Capture` attributes register the same native event in the capture phase;
   the phase suffix is not part of the DOM event name.
 - `dangerouslySetInnerHTML` preserves React's `{ __html: string | TrustedHTML }`
@@ -48,7 +52,8 @@ adaptations:
   does not declare MathML intrinsics. Compiler lowering carries namespace
   context through nested elements and compiled component boundaries.
 - Hyphenated custom elements retain an open attribute surface until Vidact has
-  a custom-element attribute registry.
+  a custom-element attribute registry. Their event handlers infer `Element` as
+  the narrowest type available without that registry.
 
 `useState`, `useRef`, and ordinary React utility types come directly from
 `@types/react`; the shared package does not redeclare the `react` module.
@@ -79,6 +84,9 @@ promise every React behavior associated with that type.
   `CompiledComponentResult`, never `ReactElement`.
 - Renderable component props use `VidactNode`, not `ReactNode`.
 - Event callbacks are typed as the native events the runtime dispatches.
+- Event callback targets are non-null during dispatch and expose their
+  intrinsic HTML, SVG, or MathML element type without a cast; open custom
+  elements expose `Element`.
 - Accepted intrinsic element names have native HTML, SVG, or MathML namespace
   construction according to their compiler-carried host context.
 - Type-only dependencies do not add React to the browser bundle.

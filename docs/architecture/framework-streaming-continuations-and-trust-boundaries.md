@@ -63,6 +63,16 @@ carries an explicit framework protocol plus corruption checksum. Pending Server
 Function invocations race their request abort signal and remove abort listeners
 after settlement.
 
+A server component emits a client boundary as a normal host element containing
+a deterministic nested hydration root. Its framework payload carries the
+manifest-checked client reference and closed props model; the SSR content stays
+inside the host as ordinary HTML. The browser installs event replay before
+awaiting an application-supplied module loader, validates the requested export
+as a Vidact client-boundary definition, optionally prepares async client data,
+and claims that nested root with the server-provided identifier prefix. The
+prepared value is handed directly to the boundary render callback, so resource
+prewarming does not depend on decoded-props object identity.
+
 The checksum is not a message authentication code. Applications and frameworks
 remain responsible for authenticated transport, authorization, CSRF and origin
 checks, replay policy, secret handling, and deciding which Server Functions to
@@ -97,6 +107,14 @@ framework feature therefore retains the exact default client artifact.
 - Continuations and component payloads use `vidact-framework-v1`. Unknown
   protocols, invalid shapes, manifest misses, unsafe keys, cycles, and checksum
   mismatches fail before publication or invocation.
+- Client boundary hosts carry a deterministic nested root and identifier prefix.
+  Hydration retains the host and SSR nodes; hot replacement remounts only the
+  boundary-owned root while retaining the host.
+- Server-node brands use versioned global symbols so a Vite dependency rebuild
+  cannot strand an SSR value between old and new runtime module instances.
+- Client modules are selected by an application-owned loader receiving the
+  already validated reference. `"use client"` is a validated boundary marker,
+  not an automatic module-graph splitter in this release.
 - The runtime never resolves a serialized module path or Server Function
   identifier by importing or evaluating it implicitly.
 
@@ -109,6 +127,8 @@ framework feature therefore retains the exact default client artifact.
 - Serialized user objects cannot collide with protocol tags.
 - Client references are manifest-checked when a manifest is supplied, and
   Server Function calls reach only registered identifiers.
+- Event replay is installed before asynchronous client-module loading, and a
+  boundary hydrates with exactly the identifier prefix emitted by its server root.
 - A checksum failure is reported as corruption, never described as
   authentication.
 - Framework metadata follows logical ownership and never hoists SVG metadata.
@@ -140,8 +160,9 @@ framework feature therefore retains the exact default client artifact.
 Framework adapters get stable, typed primitives for server waiting, streams,
 static continuations, references, actions, head resources, and boundary
 hydration without shipping React. They must build routing, transport security,
-module loading, authorization, and progressive document patching above those
-primitives.
+manifest generation, module loading, authorization, and progressive document
+patching above those primitives. The shop example demonstrates the explicit
+manifest/loader form; automatic framework graph splitting remains adapter work.
 
 The settled-stream contract favors correctness and a compact runtime over
 React's earliest-byte behavior. A future incremental boundary protocol would
@@ -162,6 +183,9 @@ contract.
 - `packages/vite-plugin/test/compiler-client.test.ts`
 - `tests/browser/corpus/framework/FrameworkApp.browser.test.ts`
 - `tests/browser/corpus/framework-hydration/FrameworkHydrationApp.browser.test.ts`
+- `examples/shop/src/shop.server.test.ts`
+- `examples/shop/src/shop.dev.server.test.ts`
+- `examples/shop/src/ShopApp.browser.test.ts`
 - `tests/runtime-size/measure.mjs`
 - `cargo test -p vidact-compiler`
 - `pnpm --filter @vidact/runtime test`

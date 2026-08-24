@@ -1,0 +1,25 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@4.0.0/schema.json",
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "fixed": [
+    [
+      "@vidact/compiler",
+      "@vidact/runtime",
+      "@vidact/test-support",
+      "@vidact/vite",
+      "@vidact/react-types"
+    ]
+  ],
+  "linked": [],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": [],
+  "bumpVersionsWithWorkspaceProtocolOnly": true,
+  "format": "oxfmt",
+  "privatePackages": {
+    "version": false,
+    "tag": false
+  }
+}

@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Require release intent
+        if: github.event_name == 'pull_request' && (github.head_ref != 'changeset-release/main' || github.event.pull_request.head.repo.full_name != github.repository)
+        env:
+          CHANGESET_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: pnpm changeset:check
+      - name: Validate changeset semantics
+        if: github.event_name == 'pull_request' && (github.head_ref != 'changeset-release/main' || github.event.pull_request.head.repo.full_name != github.repository)
+        run: pnpm changeset:status
+      - uses: dtolnay/rust-toolchain@01ba1edad32c6f80dbcce879d3e0fa5a00b2a84e # 1.96.0
+        with:
+          components: clippy,rustfmt
+      - name: Prepare patched Oxc checkout
+        run: scripts/prepare-oxc.sh
+      - run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - run: pnpm check

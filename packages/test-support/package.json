@@ -1,8 +1,25 @@
 {
   "name": "@vidact/test-support",
-  "version": "0.1.0",
+  "version": "0.0.0",
+  "description": "Testing helpers for compiled Vidact applications",
+  "keywords": [
+    "react",
+    "testing",
+    "vidact",
+    "vitest"
+  ],
+  "homepage": "https://github.com/mohebifar/vidact#readme",
+  "bugs": "https://github.com/mohebifar/vidact/issues",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mohebifar/vidact.git",
+    "directory": "packages/test-support"
+  },
   "files": [
+    "CHANGELOG.md",
     "dist",
+    "LICENSE",
     "README.md"
   ],
   "type": "module",

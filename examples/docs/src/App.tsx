@@ -4,6 +4,8 @@ import CompilerPost from './content/blog/compiler-not-runtime.mdx'
 import GettingStarted from './content/getting-started.mdx'
 import MentalModel from './content/mental-model.mdx'
 
+// Design direction: an editorial compiler notebook with warm paper, ink, marginalia, and real code.
+// Copy stays literal and technical; visual proof replaces invented testimonials or vanity metrics.
 type Navigate = (event: MouseEvent) => void
 
 export function App() {
@@ -36,7 +38,7 @@ export function App() {
       {path === '/docs/mental-model' ? (
         <DocsPage path={path} onNavigate={navigate} content="mental-model" />
       ) : null}
-      {path === '/examples' ? <ExamplesPage onNavigate={navigate} /> : null}
+      {path === '/examples' ? <ExamplesPage /> : null}
       {path === '/blog' ? <BlogPage onNavigate={navigate} /> : null}
       {path === '/blog/compiler-not-runtime' ? <BlogArticle onNavigate={navigate} /> : null}
       <SiteFooter onNavigate={navigate} />
@@ -46,13 +48,13 @@ export function App() {
 
 function SiteHeader({ path, onNavigate }: { path: string; onNavigate: Navigate }) {
   return (
-    <header className="sticky top-0 z-50 border-b border-ink/10 bg-canvas/90 backdrop-blur-xl">
-      <div className="mx-auto flex h-17 max-w-7xl items-center justify-between px-5 lg:px-8">
+    <header className="sticky top-0 z-50 border-b border-ink/20 bg-canvas/94 backdrop-blur-xl">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 lg:px-8">
         <a className="group flex items-center gap-3" href="/" onClick={onNavigate}>
           <span className="brand-mark">V</span>
-          <span className="text-base font-black tracking-[-0.04em]">vidact</span>
-          <span className="hidden rounded-full border border-ink/15 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted sm:inline">
-            experimental
+          <span className="font-display text-xl font-semibold tracking-[-0.03em]">Vidact</span>
+          <span className="hidden border-l border-ink/20 pl-3 font-mono text-[9px] uppercase tracking-[0.16em] text-muted sm:inline">
+            compiler project
           </span>
         </a>
         <nav aria-label="Main navigation" className="flex items-center gap-1 text-sm font-semibold">
@@ -66,7 +68,7 @@ function SiteHeader({ path, onNavigate }: { path: string; onNavigate: Navigate }
             Blog
           </HeaderLink>
           <a
-            className="ml-2 hidden rounded-full bg-ink px-4 py-2 text-canvas transition hover:-translate-y-0.5 hover:bg-ink/85 sm:inline-flex"
+            className="ml-3 hidden border-b border-ink pb-0.5 font-mono text-[11px] uppercase tracking-[0.08em] transition hover:border-accent sm:inline-flex"
             href="https://github.com/mohebifar/vidact"
           >
             GitHub ↗
@@ -92,8 +94,8 @@ function HeaderLink({
     <a
       className={
         active
-          ? 'rounded-full bg-ink/8 px-3 py-2 text-ink'
-          : 'rounded-full px-3 py-2 text-muted transition hover:bg-ink/5 hover:text-ink'
+          ? 'border-b-2 border-ink px-3 py-2 text-ink'
+          : 'border-b-2 border-transparent px-3 py-2 text-muted transition hover:border-ink/25 hover:text-ink'
       }
       href={href}
       onClick={onNavigate}
@@ -106,42 +108,38 @@ function HeaderLink({
 function LandingPage({ onNavigate }: { onNavigate: Navigate }) {
   return (
     <main>
-      <section className="relative overflow-hidden border-b border-ink/10">
-        <div className="hero-grid pointer-events-none absolute inset-0 opacity-55" />
-        <div className="relative mx-auto grid max-w-7xl gap-14 px-5 py-18 lg:grid-cols-[1.08fr_0.92fr] lg:px-8 lg:py-28">
-          <div className="self-center">
-            <div className="mb-7 flex items-center gap-3 font-mono text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-              <span className="h-2 w-2 rounded-full bg-accent shadow-[0_0_0_5px_rgba(183,243,75,0.2)]" />
-              React-shaped · compiler-driven
-            </div>
-            <h1 className="max-w-4xl text-[clamp(3.8rem,9.2vw,8.4rem)] font-black leading-[0.82] tracking-[-0.075em]">
-              Render once.
-              <span className="block text-stroke">Update exactly.</span>
-            </h1>
-            <p className="mt-8 max-w-2xl text-lg leading-8 text-muted sm:text-xl">
-              Vidact compiles familiar function components into direct DOM construction and a static
-              update plan. No Virtual DOM. No runtime dependency graph. No component replay.
+      <section className="relative overflow-hidden border-b border-ink/20">
+        <div className="hero-grid pointer-events-none absolute inset-0" />
+        <div className="relative mx-auto grid max-w-7xl gap-16 px-5 py-16 lg:grid-cols-[1.12fr_0.88fr] lg:px-8 lg:py-24">
+          <div>
+            <p className="mb-8 font-mono text-[11px] uppercase tracking-[0.16em] text-muted">
+              Rust compiler · React-shaped TSX · Experimental
             </p>
-            <div className="mt-9 flex flex-wrap gap-3">
+            <h1 className="font-display max-w-4xl text-[clamp(4.2rem,9.5vw,8.8rem)] font-medium leading-[0.78] tracking-[-0.065em]">
+              Your component runs once.
+              <span className="mt-3 block font-normal italic">State updates the DOM.</span>
+            </h1>
+            <p className="mt-10 max-w-xl border-l-2 border-accent pl-5 text-lg leading-8 text-muted sm:text-xl">
+              Vidact compiles supported React-shaped components into DOM construction and
+              source-specific updates. A setter changes the nodes that read that source. It does not
+              call the component again or diff a virtual tree.
+            </p>
+            <div className="mt-10 flex flex-col items-start gap-5 sm:flex-row sm:flex-wrap sm:items-center">
               <a className="button-primary" href="/docs" onClick={onNavigate}>
-                Start building <span>→</span>
+                Build the counter <span>→</span>
               </a>
-              <a className="button-secondary" href="/docs/mental-model" onClick={onNavigate}>
-                Read the mental model
+              <a className="text-link" href="https://github.com/mohebifar/vidact">
+                Inspect the compiler source ↗
               </a>
             </div>
           </div>
 
-          <div className="relative mx-auto w-full max-w-xl lg:self-center">
-            <div className="code-window rotate-[-1.25deg]">
-              <div className="window-bar">
-                <span className="window-dot bg-[#ff6b6b]" />
-                <span className="window-dot bg-[#ffd43b]" />
-                <span className="window-dot bg-accent" />
-                <span className="ml-auto font-mono text-[10px] uppercase tracking-[0.18em] text-white/35">
-                  Counter.tsx
-                </span>
-              </div>
+          <figure className="relative mx-auto w-full max-w-xl border-t-4 border-ink pt-3 lg:mt-16">
+            <figcaption className="mb-3 flex justify-between font-mono text-[10px] uppercase tracking-[0.14em] text-muted">
+              <span>Input / Counter.tsx</span>
+              <span>01</span>
+            </figcaption>
+            <div className="code-window">
               <pre className="overflow-x-auto p-6 text-[13px] leading-7 sm:p-8 sm:text-sm">
                 <code>
                   <span className="code-dim">import</span> {'{ useState }'}{' '}
@@ -161,145 +159,217 @@ function LandingPage({ onNavigate }: { onNavigate: Navigate }) {
                 </code>
               </pre>
             </div>
-            <div className="absolute -bottom-8 -right-2 w-[88%] rounded-2xl border border-ink/15 bg-white p-5 shadow-[0_24px_70px_rgba(13,17,23,0.16)] sm:-right-8 sm:w-[75%]">
-              <div className="mb-4 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-muted">
-                <span>Compiler output</span>
-                <span className="rounded-full bg-accent/30 px-2 py-1 text-ink">static</span>
-              </div>
-              <div className="flex items-center gap-2 font-mono text-xs sm:text-sm">
-                <span className="rounded-md bg-ink px-2.5 py-1.5 text-white">state:0</span>
-                <span className="text-muted">→</span>
-                <span className="rounded-md border border-ink/15 px-2.5 py-1.5">text binding</span>
-                <span className="text-muted">→</span>
-                <span className="font-bold">DOM</span>
-              </div>
+            <div className="compiler-note">
+              <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted">
+                Emitted relationship
+              </span>
+              <p className="mt-2 font-mono text-sm">
+                state:count <span className="text-muted">→</span> button.firstChild.data
+              </p>
             </div>
-          </div>
+          </figure>
         </div>
       </section>
 
-      <section className="border-b border-ink/10 bg-ink text-white">
-        <div className="mx-auto grid max-w-7xl grid-cols-2 divide-x divide-white/12 px-5 sm:grid-cols-4 lg:px-8">
-          <Metric value="0" label="virtual trees" />
-          <Metric value="0" label="runtime subscriptions" />
-          <Metric value="1×" label="component construction" />
-          <Metric value="DOM" label="the actual target" />
+      <section className="border-b border-ink/20 bg-ink text-white">
+        <div className="mx-auto grid max-w-7xl divide-y divide-white/15 px-5 sm:grid-cols-3 sm:divide-x sm:divide-y-0 lg:px-8">
+          <ProofPoint label="Compiler input" value="React-shaped TSX" />
+          <ProofPoint label="Runtime work" value="Static source masks" />
+          <ProofPoint label="Tested in" value="Chromium · Firefox · WebKit" />
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-5 py-24 lg:px-8 lg:py-32">
-        <div className="mb-14 grid gap-6 lg:grid-cols-[0.8fr_1.2fr] lg:items-end">
-          <p className="eyebrow">The difference</p>
-          <h2 className="text-4xl font-black leading-[0.95] tracking-[-0.055em] sm:text-6xl">
-            Same component shape.
-            <br />A different execution model.
-          </h2>
-        </div>
-        <div className="grid overflow-hidden rounded-3xl border border-ink/15 lg:grid-cols-4">
-          <CompareCard
-            name="React"
-            note="Rerender + reconcile"
-            body="State schedules component work. A new element tree is compared with the previous one at runtime."
-          />
-          <CompareCard
-            name="Preact"
-            note="Smaller VDOM runtime"
-            body="A compact implementation with familiar semantics, still centered on rerendering and tree diffing."
-          />
-          <CompareCard
-            name="Solid"
-            note="Runtime signal graph"
-            body="Fine-grained updates without a Virtual DOM. Dependencies are tracked through signals as code runs."
-          />
-          <CompareCard
-            name="Svelte"
-            note="Compiler + own syntax"
-            body="Compiler-generated updates with a framework-specific component language and reactivity model."
-          />
-        </div>
-        <div className="mt-4 rounded-3xl bg-accent p-7 sm:p-10">
-          <div className="grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-center">
-            <div>
-              <p className="font-mono text-xs font-bold uppercase tracking-[0.18em]">Vidact</p>
-              <h3 className="mt-3 text-3xl font-black tracking-[-0.045em] sm:text-4xl">
-                Static updater plan
-              </h3>
-            </div>
-            <p className="text-lg leading-8 text-ink/75">
-              React-compatible authoring is analyzed ahead of time. The browser stores values,
-              batches writes, and runs compiler-selected DOM operations—without rediscovering the
-              dependency graph.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section className="border-y border-ink/10 bg-white">
-        <div className="mx-auto grid max-w-7xl lg:grid-cols-2">
-          <div className="border-b border-ink/10 p-7 sm:p-12 lg:border-b-0 lg:border-r">
-            <p className="eyebrow">At build time</p>
-            <h2 className="mt-5 text-4xl font-black tracking-[-0.05em]">Vidact finds the edges.</h2>
-            <p className="mt-5 max-w-xl text-lg leading-8 text-muted">
-              State, props, derivations, text, properties, owned conditional ranges, and keyed lists
-              become an ordered graph of static reads and writes.
-            </p>
-            <ol className="mt-10 space-y-4 font-mono text-sm">
-              <Step number="01" text="Parse React-shaped TSX" />
-              <Step number="02" text="Lower analysis into updater IR" />
-              <Step number="03" text="Emit DOM construction + masks" />
-            </ol>
-          </div>
-          <div className="p-7 sm:p-12">
-            <p className="eyebrow">In the browser</p>
-            <h2 className="mt-5 text-4xl font-black tracking-[-0.05em]">
-              The runtime stays boring.
+      <section className="mx-auto max-w-7xl px-5 py-20 lg:px-8 lg:py-28">
+        <div className="grid gap-8 lg:grid-cols-[0.42fr_1fr]">
+          <div>
+            <p className="eyebrow">Not React with a smaller runtime</p>
+            <h2 className="font-display mt-5 text-5xl font-medium leading-[0.9] tracking-[-0.045em] sm:text-6xl">
+              The difference is when the work gets decided.
             </h2>
-            <p className="mt-5 max-w-xl text-lg leading-8 text-muted">
-              A state write marks a source dirty. Only updaters whose masks intersect that source
-              run, in the order already proven by the compiler.
+            <p className="mt-6 max-w-sm leading-7 text-muted">
+              React and Preact compare render output at runtime. Solid connects signals to
+              computations as the app runs. Svelte compiles its own component language and uses
+              generated reactive effects. Vidact emits ordered DOM updaters from React-shaped TSX.
             </p>
-            <ol className="mt-10 space-y-4 font-mono text-sm">
-              <Step number="01" text="Write an ordinary value" />
-              <Step number="02" text="Select affected static masks" />
-              <Step number="03" text="Mutate the existing DOM" />
-            </ol>
+          </div>
+          <div className="overflow-x-auto border-t-2 border-ink">
+            <table className="comparison-table w-full min-w-[720px] border-collapse text-left">
+              <thead>
+                <tr>
+                  <th>System</th>
+                  <th>You write</th>
+                  <th>How updates connect</th>
+                  <th>Browser runs</th>
+                </tr>
+              </thead>
+              <tbody>
+                <ComparisonRow
+                  system="React"
+                  authoring="Components + JSX"
+                  decision="Render output at runtime"
+                  browser="Render and commit"
+                />
+                <ComparisonRow
+                  system="Preact"
+                  authoring="React-like JSX"
+                  decision="VNode tree at runtime"
+                  browser="Diff and commit"
+                />
+                <ComparisonRow
+                  system="Solid"
+                  authoring="JSX + signals"
+                  decision="Signal subscriptions"
+                  browser="Subscribed computations"
+                />
+                <ComparisonRow
+                  system="Svelte"
+                  authoring="Svelte + runes"
+                  decision="Compiler + runtime signals"
+                  browser="Generated reactive effects"
+                />
+                <ComparisonRow
+                  system="Vidact"
+                  authoring="React-shaped TSX"
+                  decision="Compiler source masks"
+                  browser="Matching DOM updaters"
+                  highlight
+                />
+              </tbody>
+            </table>
           </div>
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-5 py-24 lg:px-8 lg:py-32">
-        <div className="rounded-[2rem] bg-ink px-6 py-14 text-white sm:px-12 lg:px-16 lg:py-18">
-          <div className="grid gap-12 lg:grid-cols-[1.15fr_0.85fr] lg:items-center">
-            <div>
-              <p className="font-mono text-xs font-bold uppercase tracking-[0.18em] text-accent">
-                MDX, compiled by Vidact
-              </p>
-              <h2 className="mt-5 text-4xl font-black leading-[0.95] tracking-[-0.055em] sm:text-6xl">
-                These docs are the example.
-              </h2>
-              <p className="mt-6 max-w-2xl text-lg leading-8 text-white/60">
-                Markdown content becomes JSX first, then passes through the same Vidact compiler as
-                the application shell. The page you are reading proves the pipeline works.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-white/12 bg-white/5 p-5 font-mono text-sm leading-7 text-white/75">
-              <p>
-                <span className="text-accent">01</span> MDX → preserved JSX
-              </p>
-              <p>
-                <span className="text-accent">02</span> JSX → Vidact updater IR
-              </p>
-              <p>
-                <span className="text-accent">03</span> IR → direct DOM program
-              </p>
-              <a
-                className="mt-7 inline-flex font-sans font-bold text-white hover:text-accent"
-                href="/docs"
-                onClick={onNavigate}
-              >
-                Read the MDX docs →
-              </a>
-            </div>
+      <section className="border-y border-ink/20 bg-paper-dark">
+        <div className="mx-auto max-w-7xl px-5 py-20 lg:px-8 lg:py-28">
+          <div className="grid gap-8 border-b border-ink/20 pb-12 lg:grid-cols-[0.42fr_1fr]">
+            <p className="eyebrow">One state write, end to end</p>
+            <h2 className="font-display text-5xl font-medium leading-[0.92] tracking-[-0.045em] sm:text-6xl">
+              The compiler does the bookkeeping.
+            </h2>
+          </div>
+          <ol className="divide-y divide-ink/20">
+            <ProcessRow
+              number="01"
+              title="Create the owned DOM"
+              body="The component runs once to create elements, text nodes, listeners, and the dynamic ranges that it owns."
+            />
+            <ProcessRow
+              number="02"
+              title="Record every read"
+              body="The compiler connects state and props to derived values and DOM bindings. Each connection becomes a bit in an updater's read mask."
+            />
+            <ProcessRow
+              number="03"
+              title="Run the matching updater"
+              body="setCount marks count dirty. During the next batch, the runtime runs only the updaters whose masks read count."
+            />
+          </ol>
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-7xl px-5 py-20 lg:px-8 lg:py-28">
+        <div className="grid gap-12 lg:grid-cols-[0.75fr_1.25fr]">
+          <div>
+            <p className="eyebrow">How we keep the claim honest</p>
+            <h2 className="font-display mt-5 text-5xl font-medium leading-[0.92] tracking-[-0.045em] sm:text-6xl">
+              Do not take "surgical" on faith.
+            </h2>
+          </div>
+          <div className="grid gap-px bg-ink/20 sm:grid-cols-2">
+            <EvidenceItem
+              number="A"
+              title="Record every mutation"
+              body="MutationObserver records what changed. A test fails if an update reaches a node outside its allowed range."
+            />
+            <EvidenceItem
+              number="B"
+              title="Keep the same nodes"
+              body="Tests hold DOM references before an update. Untouched elements must be the same objects afterward."
+            />
+            <EvidenceItem
+              number="C"
+              title="Use real browser engines"
+              body="Tested in Chromium, Firefox, and WebKit. The corpus does not rely on a simulated DOM."
+            />
+            <EvidenceItem
+              number="D"
+              title="Fail where the source fails"
+              body="Unsupported syntax gets a source-located compiler error. Vidact does not switch to a fallback renderer."
+            />
+          </div>
+        </div>
+        <div className="mt-8 flex flex-wrap gap-6 border-t border-ink/20 pt-6 font-mono text-[11px] uppercase tracking-[0.1em]">
+          <a className="text-link" href="/examples" onClick={onNavigate}>
+            Open the examples →
+          </a>
+          <a
+            className="text-link"
+            href="https://github.com/mohebifar/vidact/tree/main/tests/browser"
+          >
+            Read the browser corpus ↗
+          </a>
+        </div>
+      </section>
+
+      <section className="border-t border-ink/20">
+        <div className="mx-auto grid max-w-7xl gap-12 px-5 py-20 lg:grid-cols-[0.42fr_1fr] lg:px-8 lg:py-28">
+          <div>
+            <p className="eyebrow">The awkward questions</p>
+            <h2 className="font-display mt-5 text-5xl font-medium tracking-[-0.045em]">
+              What Vidact does not hide
+            </h2>
+          </div>
+          <div className="border-t-2 border-ink">
+            <FaqItem
+              question="Is Vidact React?"
+              answer="No. Vidact accepts a defined React-shaped subset and provides compatible authoring types. The Rust React Compiler fork supplies analysis. Vidact owns the updater IR, code generation, and runtime."
+            />
+            <FaqItem
+              question="Why not use Solid or Svelte?"
+              answer="Use them if their authoring models fit your project today. Vidact is testing a narrower idea: React-shaped components can compile into direct DOM programs without component rerenders or runtime subscription discovery."
+            />
+            <FaqItem
+              question="What happens when syntax is unsupported?"
+              answer="Compilation stops with a source-located error. Vidact has no uncompiled component replay or fallback renderer behind the generated output."
+            />
+            <FaqItem
+              question="Does Vidact have a runtime?"
+              answer="Yes. The runtime stores state, batches writes, owns dynamic DOM ranges, and runs the compiled updater plan. It does not reconcile virtual trees or discover subscriptions."
+            />
+            <FaqItem
+              question="Is it ready for production?"
+              answer="No. Vidact is experimental. Use the examples and browser corpus to evaluate the model, find unsupported patterns, and contribute compiler cases."
+            />
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-accent">
+        <div className="mx-auto grid max-w-7xl gap-10 px-5 py-16 lg:grid-cols-[1fr_0.7fr] lg:items-end lg:px-8 lg:py-20">
+          <div>
+            <p className="font-mono text-[11px] uppercase tracking-[0.16em]">
+              The quickest useful test
+            </p>
+            <h2 className="font-display mt-5 max-w-3xl text-5xl font-medium leading-[0.88] tracking-[-0.05em] sm:text-7xl">
+              Run TodoMVC with DevTools open.
+            </h2>
+          </div>
+          <div>
+            <p className="mb-6 max-w-md leading-7 text-ink/75">
+              Add, edit, filter, and delete a row. The browser tests verify that untouched rows keep
+              the same DOM nodes.
+            </p>
+            <pre className="border-l-2 border-ink pl-5 font-mono text-sm leading-7">
+              <code>pnpm dev:todomvc</code>
+            </pre>
+            <a
+              className="mt-7 inline-flex border-b-2 border-ink pb-1 font-semibold"
+              href="/docs"
+              onClick={onNavigate}
+            >
+              Follow the quick start →
+            </a>
           </div>
         </div>
       </section>
@@ -307,38 +377,69 @@ function LandingPage({ onNavigate }: { onNavigate: Navigate }) {
   )
 }
 
-function Metric({ value, label }: { value: string; label: string }) {
+function ProofPoint({ value, label }: { value: string; label: string }) {
   return (
-    <div className="py-8 text-center sm:py-10">
-      <div className="text-3xl font-black tracking-[-0.04em] text-accent sm:text-4xl">{value}</div>
-      <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.16em] text-white/45 sm:text-[10px]">
-        {label}
-      </div>
+    <div className="py-7 sm:px-6 sm:py-9 first:sm:pl-0">
+      <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-white/45">{label}</p>
+      <p className="mt-2 text-base text-white sm:text-lg">{value}</p>
     </div>
   )
 }
 
-function CompareCard({ name, note, body }: { name: string; note: string; body: string }) {
+function ComparisonRow({
+  system,
+  authoring,
+  decision,
+  browser,
+  highlight = false,
+}: {
+  system: string
+  authoring: string
+  decision: string
+  browser: string
+  highlight?: boolean
+}) {
   return (
-    <article className="border-b border-ink/15 p-6 last:border-b-0 lg:min-h-72 lg:border-b-0 lg:border-r lg:last:border-r-0">
-      <div className="flex items-start justify-between gap-3">
-        <h3 className="text-2xl font-black tracking-[-0.04em]">{name}</h3>
-        <span className="mt-1 h-2 w-2 rounded-full bg-ink/20" />
-      </div>
-      <p className="mt-5 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-muted">
-        {note}
-      </p>
-      <p className="mt-5 leading-7 text-muted">{body}</p>
+    <tr className={highlight ? 'bg-accent' : ''}>
+      <th>{system}</th>
+      <td>{authoring}</td>
+      <td>{decision}</td>
+      <td>{browser}</td>
+    </tr>
+  )
+}
+
+function ProcessRow({ number, title, body }: { number: string; title: string; body: string }) {
+  return (
+    <li className="grid gap-4 py-8 sm:grid-cols-[80px_0.72fr_1fr] sm:items-baseline">
+      <span className="font-mono text-xs text-muted">{number}</span>
+      <h3 className="font-display text-3xl font-medium tracking-[-0.025em]">{title}</h3>
+      <p className="leading-7 text-muted">{body}</p>
+    </li>
+  )
+}
+
+function EvidenceItem({ number, title, body }: { number: string; title: string; body: string }) {
+  return (
+    <article className="bg-canvas p-6 sm:p-8">
+      <p className="font-mono text-xs text-muted">{number}</p>
+      <h3 className="font-display mt-10 text-3xl font-medium tracking-[-0.03em]">{title}</h3>
+      <p className="mt-4 leading-7 text-muted">{body}</p>
     </article>
   )
 }
 
-function Step({ number, text }: { number: string; text: string }) {
+function FaqItem({ question, answer }: { question: string; answer: string }) {
   return (
-    <li className="flex items-center gap-4 rounded-xl border border-ink/10 p-4">
-      <span className="font-bold text-muted">{number}</span>
-      <span>{text}</span>
-    </li>
+    <details className="faq-item border-b border-ink/20">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-6 py-6 text-lg font-semibold">
+        {question}
+        <span aria-hidden="true" className="faq-plus font-mono text-2xl font-normal">
+          +
+        </span>
+      </summary>
+      <p className="max-w-3xl pb-7 pr-12 leading-7 text-muted">{answer}</p>
+    </details>
   )
 }
 
@@ -373,13 +474,13 @@ function DocsPage({
           </DocsLink>
           <a
             className="docs-link whitespace-nowrap"
-            href="https://github.com/mohebifar/vidact/tree/master/docs/migration"
+            href="https://github.com/mohebifar/vidact/tree/main/docs/migration"
           >
             React migration ↗
           </a>
           <a
             className="docs-link whitespace-nowrap"
-            href="https://github.com/mohebifar/vidact/tree/master/docs/architecture"
+            href="https://github.com/mohebifar/vidact/tree/main/docs/architecture"
           >
             Architecture ↗
           </a>
@@ -396,16 +497,17 @@ function DocsPage({
           {content === 'mental-model' ? (
             <div className="space-y-3 text-xs text-muted">
               <a href="#construction">Construct once</a>
-              <a href="#sources">Dirty sources</a>
-              <a href="#updaters">Static masks</a>
+              <a href="#sources">State sources</a>
+              <a href="#updaters">Read masks</a>
               <a href="#identity">DOM identity</a>
             </div>
           ) : (
             <div className="space-y-3 text-xs text-muted">
-              <a href="#install">Install</a>
-              <a href="#configure">Configure</a>
-              <a href="#component">Component</a>
-              <a href="#mount">Mount</a>
+              <a href="#install">Install packages</a>
+              <a href="#configure">Configure Vite</a>
+              <a href="#component">Write the counter</a>
+              <a href="#mount">Mount the root</a>
+              <a href="#verify">Check the update</a>
             </div>
           )}
         </div>
@@ -438,18 +540,19 @@ function DocsLink({
   )
 }
 
-function ExamplesPage({ onNavigate }: { onNavigate: Navigate }) {
+function ExamplesPage() {
   return (
     <main>
       <section className="border-b border-ink/10">
         <div className="mx-auto max-w-7xl px-5 py-18 lg:px-8 lg:py-24">
-          <p className="eyebrow">Example applications</p>
-          <h1 className="mt-6 max-w-5xl text-5xl font-black leading-[0.9] tracking-[-0.065em] sm:text-7xl lg:text-8xl">
-            See surgical updates in real interfaces.
+          <p className="eyebrow">Runnable compiler cases</p>
+          <h1 className="font-display mt-6 max-w-5xl text-5xl font-medium leading-[0.9] tracking-[-0.055em] sm:text-7xl lg:text-8xl">
+            Run the cases that are hard to fake.
           </h1>
           <p className="mt-7 max-w-2xl text-lg leading-8 text-muted">
-            Each app is React-shaped TSX compiled into direct DOM operations. Open the source, run
-            it locally, then watch node identity stay put.
+            These are not component galleries. Each app exercises a compiler contract that can fail
+            in the DOM: keyed identity, controlled input state, hydration, streaming, or hot
+            replacement.
           </p>
         </div>
       </section>
@@ -458,15 +561,15 @@ function ExamplesPage({ onNavigate }: { onNavigate: Navigate }) {
           kind="todo"
           title="TodoMVC"
           number="01"
-          description="Keyed array updates, filters, editing, controlled inputs, and DOM identity assertions in a familiar test bed."
-          href="https://github.com/mohebifar/vidact/tree/master/examples/todomvc"
+          description="Add, edit, filter, reorder, and delete todos. The tests keep references to untouched rows and verify that each update preserves them."
+          href="https://github.com/mohebifar/vidact/tree/main/examples/todomvc"
         />
         <ExampleCard
           kind="shop"
           title="Async shop"
           number="02"
-          description="A product catalog with Suspense, streaming server output, hydration, cart state, and owner-safe hot replacement."
-          href="https://github.com/mohebifar/vidact/tree/master/examples/shop"
+          description="Stream the product page, hydrate it, change the cart, and replace code during development. The example checks ownership and cleanup across every step."
+          href="https://github.com/mohebifar/vidact/tree/main/examples/shop"
         />
         <article className="rounded-3xl border border-dashed border-ink/25 p-8 lg:col-span-2">
           <div className="flex flex-col justify-between gap-8 sm:flex-row sm:items-end">
@@ -476,12 +579,15 @@ function ExamplesPage({ onNavigate }: { onNavigate: Navigate }) {
                 Vidact + Tailwind + MDX
               </h2>
               <p className="mt-3 max-w-2xl leading-7 text-muted">
-                A multi-page documentation shell whose MDX modules preserve JSX and pass through the
-                Vidact compiler.
+                You are looking at the third example. Its MDX stays as JSX long enough for the
+                Vidact Vite plugin to compile it. Tailwind handles the CSS.
               </p>
             </div>
-            <a className="button-secondary shrink-0" href="/docs" onClick={onNavigate}>
-              Open the docs →
+            <a
+              className="button-secondary shrink-0"
+              href="https://github.com/mohebifar/vidact/tree/main/examples/docs"
+            >
+              Browse this site's source ↗
             </a>
           </div>
         </article>
@@ -535,10 +641,10 @@ function ExampleCard({
           <p className="eyebrow">{number} · Application</p>
           <span className="transition group-hover:translate-x-1">↗</span>
         </div>
-        <h2 className="mt-4 text-3xl font-black tracking-[-0.045em]">{title}</h2>
+        <h2 className="font-display mt-4 text-3xl font-semibold tracking-[-0.035em]">{title}</h2>
         <p className="mt-4 leading-7 text-muted">{description}</p>
         <a className="mt-6 inline-flex font-bold" href={href}>
-          Browse source →
+          Open the source ↗
         </a>
       </div>
     </article>
@@ -548,10 +654,14 @@ function ExampleCard({
 function BlogPage({ onNavigate }: { onNavigate: Navigate }) {
   return (
     <main className="mx-auto max-w-7xl px-5 py-18 lg:px-8 lg:py-24">
-      <p className="eyebrow">Dispatches from the compiler</p>
-      <h1 className="mt-6 text-6xl font-black tracking-[-0.065em] sm:text-8xl">
-        Notes on doing less.
+      <p className="eyebrow">Compiler notes</p>
+      <h1 className="font-display mt-6 max-w-5xl text-6xl font-medium leading-[0.9] tracking-[-0.055em] sm:text-8xl">
+        What Vidact learns before your code reaches the browser
       </h1>
+      <p className="mt-8 max-w-2xl text-lg leading-8 text-muted">
+        Short essays about code generation, DOM ownership, and the React behaviors that become
+        explicit when component rerenders disappear.
+      </p>
       <div className="mt-16 grid gap-7 lg:grid-cols-[1.35fr_0.65fr]">
         <a
           className="group rounded-3xl bg-ink p-8 text-white sm:p-10"
@@ -559,36 +669,38 @@ function BlogPage({ onNavigate }: { onNavigate: Navigate }) {
           onClick={onNavigate}
         >
           <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-accent">
-            August 23, 2026 · Engineering
+            August 24, 2026 · Engineering
           </p>
-          <h2 className="mt-20 max-w-2xl text-4xl font-black leading-[0.95] tracking-[-0.05em] sm:text-6xl">
-            The compiler is the reactivity system
+          <h2 className="font-display mt-20 max-w-2xl text-4xl font-medium leading-[0.95] tracking-[-0.04em] sm:text-6xl">
+            Why Vidact puts reactivity in the compiler
           </h2>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-white/60">
-            Why Vidact treats static dependency edges as the product—not an optimization.
+            A setter names what changed. The compiler can name every reader before the app runs.
           </p>
           <span className="mt-10 inline-flex font-bold transition group-hover:translate-x-1">
             Read article →
           </span>
         </a>
-        <div className="space-y-7">
-          <BlogStub title="Why there is no fallback renderer" label="Compiler contract" />
-          <BlogStub title="DOM identity as a performance test" label="Testing" />
-        </div>
+        <aside className="border-t-2 border-ink pt-5">
+          <p className="eyebrow">Read next in the repository</p>
+          <p className="mt-5 leading-7 text-muted">
+            Architecture records hold the decisions that need more detail than a blog post.
+          </p>
+          <a
+            className="mt-8 block border-t border-ink/20 py-5 font-semibold hover:bg-accent"
+            href="https://github.com/mohebifar/vidact/blob/main/docs/architecture/react-analysis-boundary.md"
+          >
+            React analysis boundary ↗
+          </a>
+          <a
+            className="block border-y border-ink/20 py-5 font-semibold hover:bg-accent"
+            href="https://github.com/mohebifar/vidact/blob/main/docs/architecture/owner-safe-root-replacement-and-hmr.md"
+          >
+            Root replacement and HMR ↗
+          </a>
+        </aside>
       </div>
     </main>
-  )
-}
-
-function BlogStub({ title, label }: { title: string; label: string }) {
-  return (
-    <article className="rounded-3xl border border-ink/15 bg-white p-7">
-      <p className="eyebrow">Coming soon · {label}</p>
-      <h2 className="mt-10 text-2xl font-black leading-tight tracking-[-0.04em]">{title}</h2>
-      <p className="mt-4 text-sm leading-6 text-muted">
-        Notes from the Rust rebuild and the contracts it made explicit.
-      </p>
-    </article>
   )
 }
 
@@ -611,21 +723,45 @@ function BlogArticle({ onNavigate }: { onNavigate: Navigate }) {
 
 function SiteFooter({ onNavigate }: { onNavigate: Navigate }) {
   return (
-    <footer className="border-t border-ink/10">
-      <div className="mx-auto flex max-w-7xl flex-col justify-between gap-6 px-5 py-10 text-sm text-muted sm:flex-row sm:items-center lg:px-8">
-        <div className="flex items-center gap-3">
-          <span className="brand-mark brand-mark-small">V</span>
-          <span>Vidact is an experimental React-to-Vanilla compiler.</span>
+    <footer className="bg-ink text-white">
+      <div className="mx-auto grid max-w-7xl gap-12 px-5 py-14 sm:grid-cols-2 lg:grid-cols-[1.4fr_0.6fr_0.6fr] lg:px-8">
+        <div>
+          <div className="flex items-center gap-3">
+            <span className="brand-mark brand-mark-small">V</span>
+            <span className="font-display text-2xl">Vidact</span>
+          </div>
+          <p className="mt-5 max-w-md text-sm leading-6 text-white/55">
+            Vidact is an experimental compiler, not a production React replacement. Use it to
+            inspect direct DOM output and contribute compiler cases.
+          </p>
         </div>
-        <div className="flex gap-5 font-semibold">
-          <a href="/docs" onClick={onNavigate}>
-            Docs
+        <div className="space-y-3 text-sm">
+          <p className="font-mono text-[9px] uppercase tracking-[0.15em] text-white/35">Read</p>
+          <a className="block hover:text-accent" href="/docs" onClick={onNavigate}>
+            Documentation
           </a>
-          <a href="/examples" onClick={onNavigate}>
+          <a className="block hover:text-accent" href="/examples" onClick={onNavigate}>
             Examples
           </a>
-          <a href="https://github.com/mohebifar/vidact">GitHub ↗</a>
+          <a className="block hover:text-accent" href="/blog" onClick={onNavigate}>
+            Notes
+          </a>
         </div>
+        <div className="space-y-3 text-sm">
+          <p className="font-mono text-[9px] uppercase tracking-[0.15em] text-white/35">Project</p>
+          <a className="block hover:text-accent" href="https://github.com/mohebifar/vidact">
+            GitHub ↗
+          </a>
+          <a
+            className="block hover:text-accent"
+            href="https://github.com/mohebifar/vidact/blob/main/LICENSE"
+          >
+            License ↗
+          </a>
+        </div>
+      </div>
+      <div className="mx-auto max-w-7xl border-t border-white/15 px-5 py-5 font-mono text-[9px] uppercase tracking-[0.12em] text-white/35 lg:px-8">
+        The source, tests, and unsupported cases are public.
       </div>
     </footer>
   )

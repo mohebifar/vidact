@@ -688,24 +688,174 @@ fn rejects_user_bindings_that_collide_with_generated_names() {
 }
 
 #[test]
-fn rejects_reactive_structures_that_do_not_have_surgical_range_semantics() {
-    let diagnostics = compile_surgical_module(ModuleInput {
+fn compiles_nested_divergent_ternaries_into_one_owned_choice() {
+    let output = compile_surgical_module(ModuleInput {
         filename: "Conditional.tsx",
         source: r#"
             import { useState } from 'react';
             export function Conditional(): Node {
                 const [visible, setVisible] = useState(true);
-                return <main>{visible ? <p>yes</p> : <p>no</p>}</main>;
+                return <main>{visible ? <div>yes</div> : <ul><li>no</li></ul>}</main>;
             }
         "#,
     })
-    .expect_err("unsupported structural JSX must not become a text binding");
+    .expect("divergent nested JSX alternatives should use an owned choice");
+
+    assert_eq!(
+        output.matches("__vidactChoose(__vidactScope").count(),
+        1,
+        "{output}"
+    );
+    assert!(!output.contains("__vidactWhen"), "{output}");
+    assert_eq!(output.matches("<div>").count(), 1, "{output}");
+    assert_eq!(output.matches("<ul>").count(), 1, "{output}");
+}
+
+#[test]
+fn keeps_reactive_scalar_ternary_branches_live() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "Conditional.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function Conditional({ label }): Node {
+                const [visible, setVisible] = useState(true);
+                return <main>{visible ? <p>yes</p> : label}</main>;
+            }
+        "#,
+    })
+    .expect("a selected scalar branch should retain its own reactive binding");
+
+    assert!(
+        output.contains("__vidactChoose(__vidactScope, 2"),
+        "{output}"
+    );
+    assert!(
+        output.contains("() => __vidactBinding(__vidactScope, 1, () => label.get())"),
+        "{output}"
+    );
+}
+
+#[test]
+fn recursively_lowers_nested_structural_ternaries() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "Conditional.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function Conditional(): Node {
+                const [primary, setPrimary] = useState(true);
+                const [secondary, setSecondary] = useState(false);
+                return <main>{primary ? <p>primary</p> : (
+                    secondary ? <div>secondary</div> : <ul><li>fallback</li></ul>
+                )}</main>;
+            }
+        "#,
+    })
+    .expect("nested structural ternaries should each own a reactive choice");
+
+    assert_eq!(
+        output.matches("__vidactChoose(__vidactScope").count(),
+        2,
+        "{output}"
+    );
+}
+
+#[test]
+fn rejects_unmodeled_jsx_expressions_inside_ternary_branches() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "Conditional.tsx",
+        source: r#"
+            import { useState } from 'react';
+            function render(value, child) { return value ? child : null; }
+            export function Conditional({ label }): Node {
+                const [visible, setVisible] = useState(true);
+                return <main>{visible ? <p>yes</p> : render(label, <span>no</span>)}</main>;
+            }
+        "#,
+    })
+    .expect_err("unsupported JSX-producing calls must not hide inside ternary branches");
 
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic.code == DiagnosticCode::UnsupportedSyntax
             && diagnostic
                 .message
-                .contains("keyed map or an && conditional")
+                .contains("ternary branches containing JSX")
+    }));
+}
+
+#[test]
+fn rejects_reactive_keys_in_nested_ternaries_until_identity_dispatch_is_available() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "Conditional.tsx",
+        source: r#"
+            import { useState } from 'react';
+            function Child() { return <p>child</p>; }
+            export function Conditional({ itemKey }): Node {
+                const [visible, setVisible] = useState(true);
+                return <main>{visible
+                    ? <Child key={itemKey} />
+                    : <Child key={itemKey} />
+                }</main>;
+            }
+        "#,
+    })
+    .expect_err("nested dynamic keys require identity-aware dispatch");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic.message.contains("nested identity dispatch")
+    }));
+}
+
+#[test]
+fn aligns_nested_ternaries_with_matching_type_and_key() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "Conditional.tsx",
+        source: r#"
+            import { useState } from 'react';
+            function Child({ label }) {
+                const [count, setCount] = useState(0);
+                return <button>{label}:{count}</button>;
+            }
+            export function Conditional(): Node {
+                const [visible, setVisible] = useState(true);
+                return <main>{visible ? (
+                    <section key="stable" data-mode="yes"><Child label="yes" /></section>
+                ) : (
+                    <section key="stable" data-mode="no"><Child label="no" /></section>
+                )}</main>;
+            }
+        "#,
+    })
+    .expect("matching nested JSX alternatives should retain their shared identity");
+
+    assert_eq!(output.matches("<section").count(), 1, "{output}");
+    assert_eq!(output.matches("<Child").count(), 1, "{output}");
+    assert!(
+        output.contains("visible.get() ? \"yes\" : \"no\""),
+        "{output}"
+    );
+}
+
+#[test]
+fn rejects_unmodeled_reactive_jsx_expressions() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "Conditional.tsx",
+        source: r#"
+            import { useState } from 'react';
+            function render(value, child) { return value ? child : null; }
+            export function Conditional(): Node {
+                const [visible, setVisible] = useState(true);
+                return <main>{render(visible, <p>yes</p>)}</main>;
+            }
+        "#,
+    })
+    .expect_err("unmodeled reactive JSX expressions must continue to fail closed");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic
+                .message
+                .contains("supported list or conditional expression")
     }));
 }
 

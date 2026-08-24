@@ -4,6 +4,14 @@ Updated: 2026-08-22
 Audited implementation: component/prop/range/ref bridge on
 `feat/rust-compiler-rebuild`
 
+> **Historical implementation snapshot.** Commits later on 2026-08-23 added
+> early-return and render-flow lowering, owned component ranges, indexed lists,
+> structured synchronous regions, transactional publication, raw HTML, broader
+> DOM semantics, and measured size gates. Use
+> [React parity gap audit](react-parity-gap-audit.md) for the current canonical
+> baseline and default/opt-in classification. This file remains as evidence of
+> the earlier bridge milestone.
+
 ## Bottom line
 
 The current branch is a successful vertical slice, not yet a safe React-shaped
