@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "preserve",
+    "jsxImportSource": "@vidact/react-types",
+    "skipLibCheck": true,
+    "types": ["node", "vitest/globals", "vitest/importMeta", "@vidact/react-types"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.mdx", "vite.config.ts"]
+}

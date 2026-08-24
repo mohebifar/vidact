@@ -1,0 +1,21 @@
+<p className="eyebrow">Engineering · 6 min read</p>
+
+<h1>The compiler is the reactivity system</h1>
+
+<p className="lede">Most UI systems ask the browser to discover or compare work. Vidact arrives with the update plan already written.</p>
+
+<p>React made component functions a remarkably productive unit of composition. The tradeoff is that a state update normally schedules component work and reconciles a new tree. Signal systems narrow that work by discovering dependencies at runtime. Vidact takes a third route: keep the React-shaped authoring model, then lower it to static source and updater relationships.</p>
+
+<h2>Why static edges matter</h2>
+
+<p>A static dependency edge is inspectable before the app ships. It can participate in diagnostics, source maps, updater ordering, capability selection, and performance budgets. The browser receives a smaller job: store values, batch invalidations, and execute known DOM operations.</p>
+
+<blockquote>Compilation is not a build optimization bolted onto the model. In Vidact, compilation is the model.</blockquote>
+
+<h2>What this costs</h2>
+
+<p>Static knowledge requires a defined language contract. Dynamic patterns that hide dependencies from analysis need a compiler feature, a deliberate escape hatch, or a diagnostic. Vidact chooses explicit boundaries over a broad runtime fallback that would silently change semantics.</p>
+
+<h2>What we are testing</h2>
+
+<p>The project is testing whether React-compatible components can become a portable source language for direct DOM programs: surgical client updates, deterministic server output, hydration, and feature-gated runtime capabilities from one compiler-owned representation.</p>

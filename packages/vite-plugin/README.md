@@ -26,7 +26,7 @@ MDX when the MDX plugin runs before Vidact and preserves JSX output:
 
 ```ts
 plugins: [
-  mdx({ jsx: true }),
+  { ...mdx({ jsx: true }), enforce: 'pre' },
   vidact({ extensions: ['.tsx', '.mdx'] }),
 ]
 ```

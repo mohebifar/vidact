@@ -1,0 +1,47 @@
+<p className="eyebrow">Quick start</p>
+
+<h1>Build your first Vidact app</h1>
+
+<p className="lede">Write the function component you already know. Vidact turns it into a one-time DOM construction pass and a static update plan.</p>
+
+<div className="callout">
+  <strong>Experimental software.</strong> Vidact is an early compiler project. Use it to explore the model, measure the output, and help shape the contract.
+</div>
+
+<h2 id="install">Install the workspace packages</h2>
+
+<p>Start with Vite, the Vidact compiler plugin, the tiny runtime, and React-compatible authoring types.</p>
+
+<pre><code>{`pnpm add @vidact/runtime
+pnpm add -D @vidact/vite @vidact/react-types`}</code></pre>
+
+<h2 id="configure">Configure Vite</h2>
+
+<pre><code>{`import { vidact } from '@vidact/vite'
+
+export default {
+  plugins: [vidact()],
+}`}</code></pre>
+
+<h2 id="component">Write a component</h2>
+
+<pre><code>{`import { useState } from 'react'
+
+export function Counter() {
+  const [count, setCount] = useState(0)
+
+  return (
+    <button onClick={() => setCount(count + 1)}>
+      Count: {count}
+    </button>
+  )
+}`}</code></pre>
+
+<h2 id="mount">Mount the compiled root</h2>
+
+<pre><code>{`import { mountCompiled } from '@vidact/runtime'
+import { Counter } from './Counter.tsx'
+
+mountCompiled(Counter, document.querySelector('#app'))`}</code></pre>
+
+<p>The component executes once. Clicking the button invalidates the compiler-assigned state source, then runs only the text binding that reads it.</p>

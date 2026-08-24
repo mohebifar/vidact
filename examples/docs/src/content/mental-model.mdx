@@ -1,0 +1,30 @@
+<p className="eyebrow">Core concept</p>
+
+<h1>The static updater model</h1>
+
+<p className="lede">Vidact moves the question “what changed?” out of your browser and into the compiler.</p>
+
+<h2 id="construction">Components construct once</h2>
+
+<p>A compiled component creates its DOM and owned ranges during its initial execution. State slots hold ordinary values; there is no component replay loop waiting behind every update.</p>
+
+<h2 id="sources">Writes mark sources dirty</h2>
+
+<p>During compilation, Vidact assigns stable source IDs to state and props. A setter marks its source dirty and schedules a flush.</p>
+
+<h2 id="updaters">Static masks select work</h2>
+
+<p>Each derived value, text binding, property binding, conditional range, and keyed list carries a compiler-produced read mask. The runtime intersects masks and executes affected updaters in order.</p>
+
+<pre><code>{`state write
+  → dirty source mask
+  → selected static updaters
+  → direct DOM mutation`}</code></pre>
+
+<h2 id="identity">Identity is the proof</h2>
+
+<p>Unrelated elements remain the same DOM nodes. Keyed records move without remounting, controlled inputs retain browser state, and conditional ranges dispose only what they own.</p>
+
+<div className="callout">
+  <strong>No runtime graph.</strong> Unlike signal systems, the browser does not discover subscriptions while your code runs. The compiler already emitted the dependency edges.
+</div>

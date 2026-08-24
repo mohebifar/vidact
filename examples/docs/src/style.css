@@ -1,0 +1,184 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-canvas: #f4f3ed;
+  --color-ink: #0d1117;
+  --color-muted: #646b70;
+  --color-accent: #b7f34b;
+  --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: var(--color-accent);
+    color: var(--color-ink);
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  button,
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  :focus-visible {
+    outline: 3px solid var(--color-accent);
+    outline-offset: 3px;
+  }
+}
+
+@layer components {
+  .brand-mark {
+    @apply grid h-8 w-8 place-items-center rounded-lg bg-ink font-mono text-sm font-black text-accent shadow-[3px_3px_0_#b7f34b] transition group-hover:-translate-y-0.5;
+  }
+
+  .brand-mark-small {
+    @apply h-7 w-7 text-xs shadow-[2px_2px_0_#b7f34b];
+  }
+
+  .eyebrow {
+    @apply font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-muted;
+  }
+
+  .button-primary {
+    @apply inline-flex items-center gap-5 rounded-full bg-ink px-6 py-3.5 text-sm font-bold text-white transition hover:-translate-y-0.5 hover:shadow-[0_10px_30px_rgba(13,17,23,0.2)];
+  }
+
+  .button-primary span {
+    @apply text-accent;
+  }
+
+  .button-secondary {
+    @apply inline-flex items-center rounded-full border border-ink/20 bg-white/50 px-6 py-3.5 text-sm font-bold transition hover:-translate-y-0.5 hover:border-ink/40 hover:bg-white;
+  }
+
+  .code-window {
+    @apply overflow-hidden rounded-2xl bg-ink text-white shadow-[0_30px_80px_rgba(13,17,23,0.25)];
+  }
+
+  .window-bar {
+    @apply flex items-center gap-2 border-b border-white/10 px-5 py-4;
+  }
+
+  .window-dot {
+    @apply h-2.5 w-2.5 rounded-full;
+  }
+
+  .code-dim {
+    color: #8b949e;
+  }
+
+  .code-string,
+  .code-accent {
+    color: var(--color-accent);
+  }
+
+  .code-number {
+    color: #79c0ff;
+  }
+
+  .docs-link {
+    @apply block rounded-lg px-3 py-2 text-sm font-semibold text-muted transition hover:bg-ink/5 hover:text-ink;
+  }
+
+  .docs-link-active {
+    @apply bg-ink text-white hover:bg-ink hover:text-white;
+  }
+
+  .example-preview {
+    @apply grid min-h-80 place-items-center overflow-hidden p-6;
+  }
+
+  .example-todo {
+    background: linear-gradient(rgba(255, 255, 255, 0.5) 1px, transparent 1px), #e9ddd9;
+    background-size: 100% 28px;
+  }
+
+  .example-shop {
+    background: #cfe2d0;
+  }
+
+  .mdx-content {
+    @apply pb-16;
+  }
+
+  .mdx-content > h1 {
+    @apply max-w-4xl text-5xl font-black leading-[0.92] tracking-[-0.06em] sm:text-7xl;
+  }
+
+  .mdx-content > .eyebrow + h1 {
+    @apply mt-5;
+  }
+
+  .mdx-content > .lede {
+    @apply mt-7 max-w-3xl text-xl leading-9 text-muted;
+  }
+
+  .mdx-content > h2 {
+    @apply mt-14 scroll-mt-28 border-t border-ink/10 pt-10 text-2xl font-black tracking-[-0.035em] sm:text-3xl;
+  }
+
+  .mdx-content > p:not(.eyebrow):not(.lede) {
+    @apply mt-5 max-w-3xl text-[17px] leading-8 text-muted;
+  }
+
+  .mdx-content > pre {
+    @apply mt-6 overflow-x-auto rounded-2xl bg-ink p-5 font-mono text-[13px] leading-7 text-white shadow-[0_18px_50px_rgba(13,17,23,0.13)] sm:p-7 sm:text-sm;
+  }
+
+  .mdx-content > .callout {
+    @apply mt-8 max-w-3xl rounded-2xl border border-ink/15 bg-accent/35 p-5 leading-7 text-ink;
+  }
+
+  .mdx-content > blockquote {
+    @apply my-10 border-l-4 border-accent bg-white py-6 pr-6 pl-7 text-2xl font-bold leading-9 tracking-[-0.025em];
+  }
+}
+
+.hero-grid {
+  background-image:
+    linear-gradient(rgba(13, 17, 23, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(13, 17, 23, 0.055) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: linear-gradient(to right, transparent 4%, black 42%, black 100%);
+}
+
+.text-stroke {
+  color: transparent;
+  -webkit-text-stroke: 2px var(--color-ink);
+}
+
+@media (max-width: 640px) {
+  .text-stroke {
+    -webkit-text-stroke-width: 1.25px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
