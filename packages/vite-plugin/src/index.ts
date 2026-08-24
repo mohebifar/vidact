@@ -12,6 +12,7 @@ import {
   type VidactFeature,
   type VidactTarget,
 } from './compiler-client.ts'
+import { createDependencyQualifier, isDependencyModuleId } from './dependency-qualification.ts'
 
 const REACT_MODULE = '\0vidact:react'
 const REACT_DOM_MODULE = '\0vidact:react-dom'
@@ -23,7 +24,7 @@ export interface VidactPluginOptions {
   readonly target?: VidactTarget
   /** Opt-in semantic feature families. */
   readonly features?: readonly VidactFeature[]
-  /** Compatible TSX dependency sources to compile inside node_modules. */
+  /** Additional dependency sources to consider when React metadata is absent. */
   readonly includeDependencies?: FilterPattern
   /** Source files to leave untouched even when they otherwise match. */
   readonly exclude?: FilterPattern
@@ -74,6 +75,7 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       : createFilter(options.includeDependencies)
   const includeSource = createFilter(undefined, options.exclude)
   const extensions = options.extensions ?? ['.tsx']
+  const dependencyQualifier = createDependencyQualifier()
 
   return {
     name: 'vidact',
@@ -184,10 +186,15 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       const filename = id.split('?', 1)[0] ?? id
       if (
         !extensions.some((extension) => filename.endsWith(extension)) ||
-        !includeSource(filename) ||
-        (filename.includes('/node_modules/') && !includeDependency(filename))
+        !includeSource(filename)
       ) {
         return null
+      }
+      if (isDependencyModuleId(filename)) {
+        const qualification = await dependencyQualifier.qualify(filename, {
+          includeOverride: includeDependency(filename),
+        })
+        if (qualification?.status !== 'candidate') return null
       }
 
       const cacheKey = compilationCacheKey({

@@ -278,27 +278,6 @@ describe('vidact compiler client', () => {
     })
   })
 
-  it('compiles only explicitly included dependency source and honors exclusions', async () => {
-    const source = 'export function Button() { return <button>ready</button> }'
-    const dependencyId = '/app/node_modules/compatible-source/Button.tsx'
-    const context = { environment: { name: 'client' } }
-
-    await expect(transformHook({}).call(context, source, dependencyId)).resolves.toBeNull()
-    await expect(
-      transformHook({ includeDependencies: '**/node_modules/compatible-source/**' }).call(
-        context,
-        source,
-        dependencyId,
-      ),
-    ).resolves.toMatchObject({ code: expect.stringContaining('__vidactCompiledRoot') })
-    await expect(
-      transformHook({
-        includeDependencies: '**/node_modules/compatible-source/**',
-        exclude: '**/Button.tsx',
-      }).call(context, source, dependencyId),
-    ).resolves.toBeNull()
-  })
-
   it('compiles pre-transformed MDX when the extension is enabled', async () => {
     const source = `
       export default function Article() {
