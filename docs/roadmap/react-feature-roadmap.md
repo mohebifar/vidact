@@ -3,6 +3,9 @@
 Updated: 2026-08-23
 Decision state: Proposed
 
+Dependency-compilation update: 2026-08-24. Unrelated phase baselines remain a
+historical sequencing document rather than a fresh repository-wide audit.
+
 > The canonical default/opt-in product boundary now lives in
 > [React parity gap audit](react-parity-gap-audit.md) and
 > [React Parity Contract](../plans/2026-08-23-0213-feat-react-parity-contract-plan.md).
@@ -40,7 +43,7 @@ See the official [React API overview](https://react.dev/reference/react),
 | **Required target** | Production requirement isolated from the client-only entry point | deterministic SSR and whole-root hydration |
 | **Opt-in feature** | Uncommon behavior with cross-cutting runtime machinery | async/Suspense, concurrent scheduling, Actions, insertion effects, retained UI, profiling, framework protocols |
 | **Adapted** | Same application intent with documented semantics that preserve Vidact's identity | function error boundaries, `memo`, native events, development checks |
-| **Diagnosed** | Conflicts with the no-element-tree identity or is legacy | class components, `Children`, `cloneElement`, arbitrary React elements |
+| **Diagnosed** | Conflicts with the no-element-tree identity or is legacy | class components, arbitrary element traversal, opaque React elements |
 | **Track upstream** | Canary/experimental; do not stabilize Vidact around it yet | `<ViewTransition>`, experimental server/resource APIs |
 
 Usage-local capabilities remain default-compatible but must be imported only
@@ -51,7 +54,9 @@ lifecycles, caches, or protocols create global carrying cost.
 
 ```mermaid
 flowchart LR
-  A["Sound compiler subset"] --> B["Owned component and prop ABI"]
+  Q["Reachable dependency qualification"] --> P["Provenance-preserving capsules"]
+  P --> A["Sound compiler subset"]
+  A --> B["Owned component and prop ABI"]
   B --> C["Ranges, dynamic values, arrays, DOM"]
   B --> D["Refs and commit phases"]
   B --> E["Effects, context, errors"]
@@ -84,8 +89,10 @@ maps are classified from OXC AST and semantic symbols. The first versioned
 compatibility manifest and source-located fallback diagnostics exist. Typed
 React Compiler CFG terminals now reach Vidact's stable IR, and multiple render
 returns reject at an exact terminal span without nested-callback or source-text
-false positives. DOM-range lowering of that graph, other narrow feature-site
-spans, arrow/default lowering, and composed source maps remain.
+false positives. Lowered automatic, development, and classic React factories
+normalize by import identity, including minified aliases, while lost provenance
+fails closed. Application and dependency-capsule source maps compose to original
+source. Other narrow feature-site spans and supported arrow/default forms remain.
 
 Build:
 
@@ -100,6 +107,9 @@ Build:
   order validation.
 - Negative corpora for every P0 case in
   `docs/roadmap/current-support-gap-audit.md`.
+- Reachable dependency qualification and a single target-specific capsule that
+  retains React import provenance, contributor watching, and published-source
+  maps.
 
 Exit criteria:
 
@@ -137,8 +147,9 @@ Build:
   moves.
 - React 19-style `ref` as a function-component prop. React documents that
   `forwardRef` is no longer necessary for new React 19 components, so Vidact
-  should prefer ref-as-prop and offer `forwardRef` only as a migration shim if
-  demanded. See [React 19 ref changes](https://react.dev/blog/2024/12/05/react-19#ref-as-a-prop).
+  should prefer ref-as-prop. A bounded compile-time `forwardRef` migration shim
+  now normalizes inline component functions without adding a legacy runtime.
+  See [React 19 ref changes](https://react.dev/blog/2024/12/05/react-19#ref-as-a-prop).
 - `useImperativeHandle` after refs and layout commit exist. It customizes the
   value exposed to the parent and re-creates it when dependencies change, as
   specified by the official
@@ -180,6 +191,9 @@ Build dynamic content:
 - Ternaries, `&&`, nullish branches, and modeled control flow over owned ranges.
 - A deliberate DOM-node escape hatch; reject foreign React elements and
   promises outside resource APIs.
+- A bounded compiled-renderable capability for compiler-known element-valued
+  render props and callback render paths, without public element-tree traversal
+  or reconciliation.
 
 Build DOM correctness:
 
@@ -402,6 +416,9 @@ Candidates:
   [`<ViewTransition>`](https://react.dev/reference/react/ViewTransition).
 - State-preserving HMR, compiler daemon/native binding, persistent cache,
   DevTools, source-level updater inspection, and a modern compiler playground.
+- TanStack Start integration after its server-module conditions, routing/data
+  lifecycle, streaming, and continuation ownership can be mapped onto the
+  `framework` protocol. Dependency capsules alone are not framework support.
 
 ## API inventory and recommendation
 
@@ -460,16 +477,20 @@ with Vidact's no-runtime-element-tree design. See the official
 
 Recommended policy:
 
-- **Diagnose:** `Children`, `cloneElement`, `isValidElement`, class components,
-  and `PureComponent`.
-- **Prefer JSX:** diagnose or statically lower bounded `createElement` calls;
-  never expose a general React element object.
+- **Diagnose:** arbitrary `Children` traversal, arbitrary `cloneElement` /
+  `isValidElement`, class components, and `PureComponent`.
+- **Adapt bounded renderables:** compiler-known element-valued render props may
+  use props inspection, cloning, validation, and single-value `Children.toArray`
+  through a branded site constructor, never a general React element object.
+- **Prefer JSX:** statically lower bounded `createElement` calls and diagnose
+  values that escape supported provenance.
 - **Prefer `useRef`:** a tiny `createRef` compatibility helper is possible but
   low value.
-- **Prefer ref-as-prop:** offer a compile-time `forwardRef` migration shim only
-  if adoption data justifies it.
-- **Diagnose third-party React components** unless their source is compiled
-  against the Vidact subset; do not embed React as a fallback.
+- **Prefer ref-as-prop:** retain the bounded compile-time `forwardRef` shim only
+  for migration and published-package compatibility.
+- **Compile reachable third-party React components** when their owning metadata
+  and lowered source satisfy the Vidact subset; diagnose opaque entries and do
+  not embed React as a fallback.
 
 ## Cross-cutting release gates
 

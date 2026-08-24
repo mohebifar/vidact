@@ -4,6 +4,10 @@ Updated: 2026-08-23
 Audited revision: `6b0cc55` (`feat/rust-compiler-rebuild`)  
 React reference target: 19.2 web APIs
 
+Dependency-compilation update: 2026-08-24. This is a focused addendum; the
+historical baseline counts and unrelated gap classifications below have not
+been re-audited.
+
 ## Executive decision
 
 Vidact should target **source compatibility for modern React 19.2 web
@@ -20,8 +24,9 @@ points so client-only applications do not ship server code.
 
 Suspense/resources, interruptible scheduling, Actions, insertion effects,
 retained hidden UI, profiling, unsafe raw HTML, and framework protocols are
-opt-in. Legacy React element inspection, class components, Fiber semantics, and
-arbitrary precompiled React packages remain diagnosed incompatibilities.
+opt-in. Legacy arbitrary React element inspection, class components, Fiber
+semantics, and opaque precompiled React packages remain diagnosed
+incompatibilities.
 
 ## Audit baseline
 
@@ -91,9 +96,9 @@ unsupported.
 | Event-name semantics | Most `onX` names are lowercased. Common React events such as mouse/pointer enter/leave and several animation, transition, media, composition, and selection events are not mapped or rejected. | Implement a complete event policy or reject every unimplemented event at compile time. Never attach a plausible but nonexistent native event. |
 | Accepted-syntax coverage | The compatibility manifest contains only 16 fixtures while the compiler accepts a much broader TSX surface. | Manifest every supported, rejected, and intentionally different syntax family, including negative fixtures at the feature span. |
 | Whole-component fallback diagnostics | Several prop, spread, list, and control-flow errors still inherit a component span. | All known unsupported forms reject at the narrow original TSX site. |
-| Source maps | OXC maps already-generated Rust output; there is no composed original-TSX transformation map. | Map generated DOM/update code and runtime failures back to original TSX. |
+| Source maps | Compiler and dependency-capsule maps compose back to original application or published package source. | Extend mapped runtime diagnostics and keep every new transform in the composed chain. |
 | Reactive escape analysis | The compiler supports a bounded set of derived/control-flow forms and rejects known gaps, but the negative corpus is not exhaustive. | Prove every accepted state/prop read and write enters the updater graph or rejects. |
-| Runtime values | Foreign element-like objects, functions, symbols, and promises can reach generic render boundaries without a compile-time contract. | Normalize supported values and issue stable diagnostics for every unsupported category. Promises require `async`. |
+| Runtime values | A bounded branded renderable capability covers compiler-known element-valued render props without exposing a React element tree. | Complete diagnostics for foreign objects/functions/symbols and keep promises behind `async`; do not widen the capability into a reconciler. |
 | Failure recovery | Transactional DOM publication is proven for several cases, but state, retained-row updates, nested cleanup failures, and root recovery do not have a complete boundary model. | Define compute, commit, rollback, error routing, and owner disposal for construction and every update path. |
 | Compiler/runtime skew | Protocol strings exist, but build caches and package entry points do not fingerprint all ABI/config inputs. | Refuse incompatible compiler/runtime combinations and invalidate every affected cache. |
 
@@ -113,8 +118,8 @@ unsupported.
 | Keys | Runtime accepts string, number, and bigint; compiler keys are limited to item identity or one static property. | Define the React-shaped public key domain and coercion policy; support stable expressions the compiler can prove, reject the rest. |
 | JSX values | Scalars, empties, nodes, arrays, bindings, and owned blocks normalize. | Complete diagnostics for invalid objects/functions/symbols/promises and define the deliberate DOM-node escape hatch. |
 | JSX namespace/type surface | HTML, SVG, MathML, custom elements, and a React-shaped type package exist. | Keep type acceptance synchronized with compiler/runtime behavior and add package-level conformance fixtures for every supported intrinsic family. |
-| Module boundaries | Several same-module components compile. Vite skips `node_modules`. | Compile opted-in dependency source, preserve package boundaries, and diagnose opaque third-party React components before runtime. |
-| React imports | The Vite virtual `react` module exports only `useRef`; `useState` is erased by compilation. | Provide compile-time classification and runtime/module exports for every supported core API, including namespace and alias imports. |
+| Module boundaries | Vite automatically qualifies reachable React-bearing package entries, builds target-specific capsules, composes published-source maps, and diagnoses opaque constructs. Base UI Button/Input/Toggle Group are certified. | Expand the real-package corpus and make reactive body-local destructuring sound before broad library compatibility claims. TanStack Start remains separate framework work. |
+| React imports | Supported APIs and lowered factories are classified through named, aliased, namespace, and bounded default/clone provenance. | Extend classification only with semantic provenance and precise negative fixtures; never infer from minified identifier spelling. |
 | Rules of Hooks | `useState` is recognized only in direct component state declarations; `useRef` is an ordinary construct-once helper. | Validate supported hook call sites and make custom hooks compose under one owner without relying on component reruns. |
 
 ## Default-core hooks and lifecycle
@@ -209,12 +214,12 @@ semantic difference and is therefore diagnosed.
 
 | Area | Current state | Must-have outcome |
 | --- | --- | --- |
-| Third-party libraries | `node_modules` TSX is skipped and opaque React elements are unsupported. | Compile libraries that publish compatible source/conditions; provide explicit include/exclude controls and early diagnostics for renderer-dependent packages. |
+| Third-party libraries | Reachable React-bearing JavaScript/TSX entries compile automatically through deterministic capsules; `includeDependencies` and `exclude` are explicit overrides. Base UI is the first published proof. | Add package/version fixtures and reactive body-local support; keep opaque renderer-dependent packages diagnosed. |
 | Router/state interop | Context, effects, portals, external-store hooks, and errors are absent. | Complete the default hooks needed by mainstream routers and stores before claiming application parity. |
 | Testing | Runtime and app browser corpora are strong but Chromium-only; no `act`/testing-library adapter. | Add Firefox/WebKit, deterministic lifecycle draining, user-event/form coverage, and an integration path for DOM testing tools. |
-| HMR | No state-preserving HMR or disposal protocol. | Define safe replacement, owner disposal, state preservation boundaries, and compiler cache invalidation. |
+| HMR | Root replacement disposes prior owners, while dependency capsules watch and invalidate only contributing modules/manifests. | Define any future state-preservation boundary without weakening disposal or cache correctness. |
 | Compiler distribution | Every uncached transform spawns `cargo run`; no production binary/native binding/daemon. | Ship a versioned compiler artifact or persistent service with deterministic startup and incremental caching. |
-| Cache correctness | Vite memory cache keys filename and source only. | Include target, feature flags, compiler/runtime ABI, environment, dependency conditions, and relevant config. |
+| Cache correctness | Compiler keys include protocols, target, features, source, filename, and environment; capsule fingerprints also include mapped code, manifests, defines, and contributors. | Add persistent-cache and cross-process invalidation coverage if compilation moves out of process. |
 | Bundler integrations | Vite exists; no stable generic Node or Babel adapter. | Publish one compiler core API and at least one production-grade integration. Other adapters must not fork semantics. |
 | Packages | Packages are private and export TypeScript source. | Publish built ESM/types/source maps with conditions, side-effects declarations, clean-install tests, provenance, and semver policy. |
 | Diagnostics | Stable codes and CLI locations exist. | Publish a complete catalog, original TSX maps, migration suggestions, and production/dev error lookup. |
@@ -243,7 +248,7 @@ typed, and covered as `different` compatibility fixtures:
   ownership remains logical.
 - The default client scheduler is synchronous. Interruptible/deferred semantics
   require `concurrent`; they are never approximated with a timeout.
-- Third-party components must be compiled against Vidact's supported source
+- Third-party components must compile through Vidact's supported lowered/source
   subset or use an explicit adapter; embedding React as a fallback is excluded.
 
 ## Explicitly diagnosed React surfaces
@@ -252,16 +257,17 @@ Do not add these to the browser runtime merely for API-count parity:
 
 - class `Component` and `PureComponent`;
 - `Children`, `cloneElement`, and `isValidElement` over arbitrary element
-  objects;
+  objects (bounded compiler-known renderable patterns are adapted);
 - general `createElement` values outside statically lowerable calls;
-- arbitrary precompiled React component libraries or renderer integrations;
+- opaque precompiled React component libraries or renderer integrations whose
+  import provenance or behavior falls outside dependency capsules;
 - Fiber/concurrent renderer internals and React DevTools protocol equivalence;
 - removed React DOM APIs such as legacy `render`, `hydrate`, and
   `findDOMNode`.
 
-`createRef` and `forwardRef` may exist as compile-time migration shims if real
-adoption data justifies them. They should not establish a legacy element or
-class runtime. Prefer `useRef` and React 19 ref-as-prop.
+`forwardRef` is now a bounded compile-time migration shim and does not establish
+a legacy element or class runtime. `createRef` remains low priority. Prefer
+`useRef` and React 19 ref-as-prop.
 
 ## Delivery order
 
@@ -273,7 +279,7 @@ class runtime. Prefer `useRef` and React 19 ref-as-prop.
    hooks, and state semantics.
 3. **Add default lifecycle and interoperability.** Reducers, context, effects,
    commit phases, errors, external stores, IDs, refs, portals, testing APIs,
-   and third-party source compilation.
+   and broader third-party dependency coverage.
 4. **Finish browser and package production gates.** Complete DOM/events/forms,
    capability reachability, Firefox/WebKit, HMR, compiler distribution,
    published packages, performance, memory, and security.
@@ -307,6 +313,7 @@ Local implementation and contracts:
 - `docs/roadmap/current-support-gap-audit.md`
 - `docs/roadmap/react-feature-roadmap.md`
 - `docs/architecture/compact-compiler-runtime-abi.md`
+- `docs/architecture/lowered-react-dependency-capsules.md`
 - `crates/vidact-compiler/src/react_bindings.rs`
 - `crates/vidact-compiler/src/oxc_react/classifier.rs`
 - `crates/vidact-compiler/src/surgical_codegen/`

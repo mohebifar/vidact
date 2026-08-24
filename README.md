@@ -110,9 +110,13 @@ diff a tree.
 The compiler parses once, preserves source expressions as OXC AST, lowers React
 Compiler control-flow facts into Vidact's owned-range IR, and composes source
 maps back to original TSX. The Vite integration fingerprints target, features,
-environment, compiler artifact, and compiler/runtime protocols; compatible
-dependency source can be opted in explicitly. Production packages contain
-built ESM, declarations, maps, isolated entry points, and clean-install gates.
+environment, compiler artifact, and compiler/runtime protocols. It also
+automatically compiles reachable package entries whose owning metadata declares
+React, including supported minified automatic/classic JSX output, while failing
+closed when React import provenance has been erased. Dependency capsules retain
+published-source maps and never fall back to a React runtime. Production
+packages contain built ESM, declarations, maps, isolated entry points, and
+clean-install gates.
 
 See [the React migration guide](docs/migration/from-react.md),
 [release policy](docs/release-policy.md), and
