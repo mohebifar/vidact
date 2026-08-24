@@ -49,11 +49,14 @@ function transformHook(
   environment = 'client',
 ): (source: string, id: string) => Promise<unknown> {
   const transform = Reflect.get(vidact(options), 'transform') as (
-    this: { readonly environment: { readonly name: string } },
+    this: {
+      readonly environment: { readonly name: string }
+      addWatchFile(filename: string): void
+    },
     source: string,
     id: string,
   ) => Promise<unknown>
-  return transform.bind({ environment: { name: environment } })
+  return transform.bind({ environment: { name: environment }, addWatchFile() {} })
 }
 
 describe('dependency qualification', () => {
@@ -231,5 +234,26 @@ describe('dependency qualification', () => {
       packageName: 'missing-manifest',
       modulePath,
     })
+  })
+
+  it('adds package, version, entry, and target context to semantic rejection', async () => {
+    const root = await temporaryProject()
+    const modulePath = await packageModule(root, 'opaque-react-package', {
+      name: 'opaque-react-package',
+      version: '4.5.6',
+      peerDependencies: { react: '^19.0.0' },
+    })
+    const source = `
+      import { jsx } from 'react/jsx-runtime'
+      const lost = jsx
+      export function Broken() { return lost('main', { children: 'opaque' }) }
+    `
+    await writeFile(modulePath, source)
+
+    await expect(transformHook({ target: 'server' }, 'ssr')(source, modulePath)).rejects.toThrow(
+      new RegExp(
+        `Cannot compile React dependency opaque-react-package@4\\.5\\.6 for server from .*index\\.mjs:.*provenance`,
+      ),
+    )
   })
 })

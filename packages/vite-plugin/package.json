@@ -41,8 +41,11 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@jridgewell/remapping": "2.3.5",
+    "@jridgewell/trace-mapping": "0.3.31",
     "@vidact/compiler": "workspace:*",
-    "@vidact/runtime": "workspace:*"
+    "@vidact/runtime": "workspace:*",
+    "rolldown": "1.2.5"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

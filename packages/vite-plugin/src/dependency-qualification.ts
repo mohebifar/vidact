@@ -54,7 +54,7 @@ export class DependencyQualificationError extends Error {
     this.name = 'DependencyQualificationError'
     this.packageName = options.packageName
     this.modulePath = options.modulePath
-    this.manifestPath = options.manifestPath
+    if (options.manifestPath !== undefined) this.manifestPath = options.manifestPath
   }
 }
 
@@ -69,12 +69,16 @@ export interface DependencyQualifier {
     moduleId: string,
     overrides?: DependencyQualificationOverrides,
   ): Promise<DependencyQualification | null>
+  invalidate(filename: string): Promise<void>
 }
 
 export function createDependencyQualifier(): DependencyQualifier {
   const manifestCache = new Map<string, Promise<PackageManifest>>()
 
   return {
+    async invalidate(filename) {
+      manifestCache.delete(await realpath(filename).catch(() => filename))
+    },
     async qualify(moduleId, overrides = {}) {
       const modulePath = cleanModuleId(moduleId)
       const packageName = packageNameFromNodeModulesPath(modulePath)

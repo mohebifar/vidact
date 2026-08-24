@@ -1,5 +1,7 @@
 /* oxlint-disable no-underscore-dangle -- Runtime build constants intentionally use reserved global names. */
 
+import remapping, { type SourceMapInput } from '@jridgewell/remapping'
+import { originalPositionFor, TraceMap } from '@jridgewell/trace-mapping'
 import { createFilter, transformWithOxc, type FilterPattern, type Plugin } from 'vite'
 
 import {
@@ -12,6 +14,11 @@ import {
   type VidactFeature,
   type VidactTarget,
 } from './compiler-client.ts'
+import {
+  createDependencyCapsuleBuilder,
+  isDependencyCapsuleModule,
+  type DependencyCapsule,
+} from './dependency-capsule.ts'
 import { createDependencyQualifier, isDependencyModuleId } from './dependency-qualification.ts'
 
 const REACT_MODULE = '\0vidact:react'
@@ -76,6 +83,8 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
   const includeSource = createFilter(undefined, options.exclude)
   const extensions = options.extensions ?? ['.tsx']
   const dependencyQualifier = createDependencyQualifier()
+  const dependencyCapsules = createDependencyCapsuleBuilder()
+  let capsuleDefines: Record<string, string> = {}
 
   return {
     name: 'vidact',
@@ -93,10 +102,21 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       if (config.define?.__VIDACT_RETAINED_UI__ === undefined) {
         define.__VIDACT_RETAINED_UI__ = 'false'
       }
+      capsuleDefines = {
+        ...config.define,
+        ...define,
+        'process.env.NODE_ENV': JSON.stringify(environment.mode),
+      }
       if (Object.keys(define).length === 0) return
       return {
         define,
       }
+    },
+    async handleHotUpdate(context) {
+      await Promise.all([
+        dependencyCapsules.invalidate(context.file),
+        dependencyQualifier.invalidate(context.file),
+      ])
     },
     resolveId(source) {
       if (source === 'react') return REACT_MODULE
@@ -184,31 +204,71 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
     },
     async transform(source, id) {
       const filename = id.split('?', 1)[0] ?? id
+      if (!includeSource(filename)) return null
+      const dependencyModule = isDependencyModuleId(filename)
       if (
-        !extensions.some((extension) => filename.endsWith(extension)) ||
-        !includeSource(filename)
+        dependencyModule
+          ? !isDependencyCapsuleModule(filename)
+          : !extensions.some((extension) => filename.endsWith(extension))
       ) {
         return null
       }
-      if (isDependencyModuleId(filename)) {
+
+      let capsule: DependencyCapsule | undefined
+      if (dependencyModule) {
         const qualification = await dependencyQualifier.qualify(filename, {
           includeOverride: includeDependency(filename),
         })
         if (qualification?.status !== 'candidate') return null
+        if (
+          qualification.realModulePath === undefined ||
+          qualification.manifestPath === undefined ||
+          qualification.packageRoot === undefined
+        ) {
+          throw new Error(
+            `React dependency ${qualification.packageName} is missing capsule metadata`,
+          )
+        }
+        capsule = await dependencyCapsules.build({
+          source,
+          environment: this.environment.name,
+          defines: capsuleDefines,
+          qualification: {
+            ...qualification,
+            status: 'candidate',
+            realModulePath: qualification.realModulePath,
+            manifestPath: qualification.manifestPath,
+            packageRoot: qualification.packageRoot,
+            packageName: qualification.packageName ?? 'unknown-package',
+          },
+          ...configuration,
+        })
+        for (const contributor of capsule.contributors) this.addWatchFile(contributor)
       }
 
+      const compilationSource = capsule?.code ?? source
+
       const cacheKey = compilationCacheKey({
-        source,
+        source: capsule?.fingerprint ?? compilationSource,
         filename,
         environment: this.environment.name,
         ...configuration,
       })
       let compilation = compilationCache.get(cacheKey)
       if (compilation === undefined) {
-        const result = await compileWithCompiler(source, filename, configuration)
+        let result
+        try {
+          result = await compileWithCompiler(compilationSource, filename, configuration)
+        } catch (error) {
+          if (capsule === undefined) throw error
+          throw dependencyCompilationError(capsule, configuration.target, error)
+        }
         compilation = {
           code: result.code,
-          sourceMap: result.sourceMap,
+          sourceMap:
+            capsule === undefined
+              ? result.sourceMap
+              : composeSourceMaps(result.sourceMap, capsule.sourceMap),
           analysis: result.analysis,
         }
         compilationCache.set(cacheKey, compilation)
@@ -240,6 +300,45 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       }
     },
   }
+}
+
+function composeSourceMaps(
+  generated: Record<string, unknown>,
+  original: Record<string, unknown>,
+): Record<string, unknown> {
+  return remapping(
+    [generated, original] as unknown as SourceMapInput[],
+    () => null,
+  ) as unknown as Record<string, unknown>
+}
+
+function dependencyCompilationError(
+  capsule: DependencyCapsule,
+  target: VidactTarget,
+  cause: unknown,
+): Error {
+  const identity = `${capsule.packageName}${capsule.packageVersion === undefined ? '' : `@${capsule.packageVersion}`}`
+  const detail = cause instanceof Error ? cause.message : String(cause)
+  const originalLocation = dependencyOriginalLocation(detail, capsule.sourceMap)
+  return new Error(
+    `Cannot compile React dependency ${identity} for ${target} from ${capsule.entry}${originalLocation === undefined ? '' : ` (original ${originalLocation})`}: ${detail}`,
+    { cause },
+  )
+}
+
+function dependencyOriginalLocation(
+  message: string,
+  sourceMap: Record<string, unknown>,
+): string | undefined {
+  const generated = message.match(/:(\d+):(\d+):/)
+  if (generated === null) return undefined
+  const position = originalPositionFor(new TraceMap(sourceMap as never), {
+    line: Number(generated[1]),
+    column: Number(generated[2]) - 1,
+  })
+  return position.source === null || position.line === null || position.column === null
+    ? undefined
+    : `${position.source}:${String(position.line)}:${String(position.column + 1)}`
 }
 
 function clientRuntimeEntry(

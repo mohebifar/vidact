@@ -204,12 +204,21 @@ importers:
 
   packages/vite-plugin:
     dependencies:
+      '@jridgewell/remapping':
+        specifier: 2.3.5
+        version: 2.3.5
+      '@jridgewell/trace-mapping':
+        specifier: 0.3.31
+        version: 0.3.31
       '@vidact/compiler':
         specifier: workspace:*
         version: link:../compiler
       '@vidact/runtime':
         specifier: workspace:*
         version: link:../runtime
+      rolldown:
+        specifier: 1.2.5
+        version: 1.2.5
     devDependencies:
       '@types/node':
         specifier: ^24.13.3
