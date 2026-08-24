@@ -1,5 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { fileURLToPath } from 'node:url'
 
+import tailwindcss from '@tailwindcss/vite'
 import { vidact, type VidactPluginOptions } from '@vidact/vite'
 import { NodeRequest, sendNodeResponse } from 'srvx/node'
 import { defineConfig, isRunnableDevEnvironment, type Plugin, type ViteDevServer } from 'vite'
@@ -8,22 +10,25 @@ const DEVELOPMENT_ASSETS = {
   clientEntry: '/src/client.ts',
   stylesheet: '/src/style.css',
 } as const
+const sourceDirectory = fileURLToPath(new URL('./src', import.meta.url))
 
 export default defineConfig({
   appType: 'custom',
+  resolve: { alias: { '@': sourceDirectory } },
   publicDir: 'public',
   server: {
     host: '127.0.0.1',
     port: Number(process.env.PORT ?? 5173),
   },
   plugins: [
+    tailwindcss(),
     vidactForEnvironment('client', {
       target: 'hydrate',
-      features: ['async', 'framework'],
+      features: ['async', 'framework', 'css-insertion', 'profiling'],
     }),
     vidactForEnvironment('ssr', {
       target: 'server',
-      features: ['async', 'framework'],
+      features: ['async', 'framework', 'css-insertion', 'profiling'],
     }),
     shopDevelopmentServer(),
   ],

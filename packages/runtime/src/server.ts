@@ -6,7 +6,7 @@ const SERVER_NODE_KIND = Symbol.for('vidact.v1.ServerNodeKind')
 const SERVER_CONTEXT = Symbol('Vidact.ServerContext')
 const SERVER_ASYNC_RESOURCE = Symbol('Vidact.ServerAsyncResource')
 const SERVER_SUSPENSION = Symbol('Vidact.ServerSuspension')
-const SERVER_RENDERABLE = Symbol('Vidact.ServerRenderable')
+const SERVER_RENDERABLE = Symbol.for('vidact.v1.ServerRenderable')
 
 export interface ServerNode {
   readonly [SERVER_NODE]: (context: RenderContext) => string
@@ -24,7 +24,7 @@ export type ServerChild =
   | readonly ServerChild[]
 
 export type ServerComponent = (props: Record<string, unknown>) => ServerChild
-export type ServerElementType = string | typeof Fragment | ServerComponent
+export type ServerElementType = string | typeof Fragment | ServerComponent | ServerRenderable
 export type ServerProps = Record<string, unknown> | null
 
 type ServerRenderable = {
@@ -414,7 +414,7 @@ export function createElement(
   props: ServerProps,
   ...children: ServerChild[]
 ): ServerNode {
-  const nextProps = { ...(props ?? {}) }
+  const nextProps: Record<string, unknown> = { ...props }
   if (children.length === 1) nextProps.children = children[0]
   else if (children.length > 1) nextProps.children = children
   return createServerElement(type, nextProps, children.length > 1)
@@ -461,6 +461,12 @@ function createServerElement(
             : serializeSlot(props?.children as ServerChild, context)
           : '',
       'transparent',
+    )
+  }
+  if (isRenderable(type)) {
+    return serverNode(
+      (context) => serializeSlot(cloneRenderable(type, props ?? {}), context),
+      'component',
     )
   }
   if (typeof type === 'function') {

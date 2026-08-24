@@ -107,9 +107,12 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
         ...define,
         'process.env.NODE_ENV': JSON.stringify(environment.mode),
       }
-      if (Object.keys(define).length === 0) return
       return {
-        define,
+        ...(Object.keys(define).length === 0 ? {} : { define }),
+        ...(config.optimizeDeps?.noDiscovery === undefined
+          ? { optimizeDeps: { noDiscovery: true } }
+          : {}),
+        ...(config.ssr?.noExternal === undefined ? { ssr: { noExternal: true } } : {}),
       }
     },
     async handleHotUpdate(context) {
@@ -145,9 +148,9 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
         const actionExports = actionsEnabled ? 'useActionState, useOptimistic, ' : ''
         const core =
           configuration.target === 'server'
-            ? `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}${frameworkEnabled ? 'cache, cacheSignal, ' : ''}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "${frameworkEnabled ? '@vidact/runtime/framework/server' : serverRuntime}"`
-            : `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}createContext, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "${clientRuntime}"`
-        const exports = [core]
+            ? `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}${frameworkEnabled ? 'cache, cacheSignal, ' : ''}cloneRenderable as cloneElement, createContext, createElement, isRenderable as isValidElement, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "${frameworkEnabled ? '@vidact/runtime/framework/server' : serverRuntime}"`
+            : `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}cloneRenderable as cloneElement, createContext, createElement, isRenderable as isValidElement, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "${clientRuntime}"`
+        const exports = [core, 'export const version = "19.2.0"']
         if (retainedUiEnabled) {
           const retainedRuntime =
             configuration.target === 'server'

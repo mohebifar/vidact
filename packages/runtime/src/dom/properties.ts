@@ -253,7 +253,18 @@ export function applyBaseDomProp(element: Element, name: string, value: unknown)
 function applyStringAttribute(element: Element, name: string, value: unknown): void {
   if (value === null || value === undefined) element.removeAttribute(name)
   else {
-    const serialized = String(value)
+    if (typeof value === 'symbol') {
+      throw new TypeError(`cannot apply a Symbol value to DOM attribute ${name}`)
+    }
+    let serialized: string
+    try {
+      serialized = String(value)
+    } catch (cause) {
+      const detail = Array.isArray(value)
+        ? value.map((item) => (typeof item === 'symbol' ? String(item) : typeof item)).join(',')
+        : typeof value
+      throw new TypeError(`cannot serialize DOM attribute ${name} from ${detail}`, { cause })
+    }
     if (element.getAttribute(name) !== serialized) element.setAttribute(name, serialized)
   }
 }

@@ -83,6 +83,16 @@ describe('server rendering', () => {
     ).toBe('<a class="merged" href="/original">Element</a>')
   })
 
+  it('constructs server renderable capabilities used as residual JSX element types', () => {
+    const component = createRenderable({ className: 'base', children: 'Base' }, (input) => (
+      <button {...renderableProps(input)}>{renderableChildren(input)}</button>
+    ))
+
+    expect(
+      renderToStaticMarkup(retainedJsx(component, { className: 'override', children: 'Save' })),
+    ).toBe('<button class="override">Save</button>')
+  })
+
   it('evaluates initial state and produces request-deterministic ids', () => {
     function Greeting(): ServerChild {
       const [count] = useState(() => 2)

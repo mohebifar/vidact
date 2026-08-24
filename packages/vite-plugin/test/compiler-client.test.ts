@@ -35,7 +35,29 @@ function virtualModule(source: string, options: Parameters<typeof vidact>[0]): s
   return load(resolve(source)!)!
 }
 
+function pluginConfig(initial: Record<string, unknown> = {}): Record<string, unknown> {
+  const plugin = vidact()
+  const config = Reflect.get(plugin, 'config') as unknown as (
+    config: Record<string, unknown>,
+    environment: { readonly mode: string },
+  ) => Record<string, unknown>
+  return config(initial, { mode: 'development' })
+}
+
 describe('vidact compiler client', () => {
+  it('keeps reachable dependencies in the transform pipeline by default', () => {
+    expect(pluginConfig()).toMatchObject({
+      optimizeDeps: { noDiscovery: true },
+      ssr: { noExternal: true },
+    })
+    const configured = pluginConfig({
+      optimizeDeps: { noDiscovery: false },
+      ssr: { noExternal: ['owned-package'] },
+    })
+    expect(configured).not.toHaveProperty('optimizeDeps')
+    expect(configured).not.toHaveProperty('ssr')
+  })
+
   it('rejects removed compiler process options with a migration error', () => {
     expect(() => vidact({ compilerPath: '/tmp/vidactc' } as never)).toThrow(
       '`compilerPath` and `manifestPath` were removed; install @vidact/compiler for the current platform',
@@ -142,6 +164,18 @@ describe('vidact compiler client', () => {
     )
     expect(virtualReactModule({ features: ['async'] })).toContain('Suspense, lazy')
     expect(virtualReactModule({})).not.toContain('Suspense, lazy')
+  })
+
+  it('keeps residual published React probes on the compiled runtime facade', () => {
+    const client = virtualReactModule({ target: 'hydrate' })
+    const server = virtualReactModule({ target: 'server' })
+
+    for (const facade of [client, server]) {
+      expect(facade).toContain('createElement')
+      expect(facade).toContain('isRenderable as isValidElement')
+      expect(facade).toContain('cloneRenderable as cloneElement')
+      expect(facade).toContain('export const version = "19.2.0"')
+    }
   })
 
   it('selects isolated concurrent facades and exposes scheduler APIs only when enabled', () => {

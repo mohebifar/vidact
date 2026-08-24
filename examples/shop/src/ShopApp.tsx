@@ -2,6 +2,9 @@ import { useState } from 'react'
 
 import { CartPanel } from './CartPanel.tsx'
 import { CatalogPanel } from './CatalogPanel.tsx'
+import { Badge } from './components/ui/badge.tsx'
+import { Button } from './components/ui/button.tsx'
+import { Card, CardContent } from './components/ui/card.tsx'
 import {
   cartQuantity,
   type CartLine,
@@ -85,9 +88,14 @@ export function ShopApp({
           <a href="#catalog">Shop</a>
           <a href="#story">Our story</a>
         </nav>
-        <a className="cart-link" href="#cart" aria-label={`Cart with ${itemCount} items`}>
-          Cart <span>{itemCount}</span>
-        </a>
+        <Button
+          className="cart-link"
+          variant="ghost"
+          nativeButton={false}
+          render={<a href="#cart" aria-label={`Cart with ${itemCount} items`} />}
+        >
+          Cart <Badge>{itemCount}</Badge>
+        </Button>
       </header>
 
       <main id="top">
@@ -100,9 +108,14 @@ export function ShopApp({
               Useful objects with honest materials, calm colors, and enough character to keep
               around.
             </p>
-            <a className="primary-link" href="#catalog">
+            <Button
+              className="primary-link"
+              size="lg"
+              nativeButton={false}
+              render={<a href="#catalog" />}
+            >
               Explore the collection <span aria-hidden="true">→</span>
-            </a>
+            </Button>
           </div>
           <p className="hero-note">Free shipping on orders over $75</p>
         </section>
@@ -131,19 +144,25 @@ export function ShopApp({
               avoiding trend cycles and unnecessary packaging.
             </p>
           </div>
-          <dl>
-            <div>
-              <dt>01</dt>
-              <dd>Useful by design</dd>
-            </div>
-            <div>
-              <dt>02</dt>
-              <dd>Lower-impact materials</dd>
-            </div>
-            <div>
-              <dt>03</dt>
-              <dd>Made to be kept</dd>
-            </div>
+          <dl className="story-values">
+            <Card size="sm">
+              <CardContent>
+                <dt>01</dt>
+                <dd>Useful by design</dd>
+              </CardContent>
+            </Card>
+            <Card size="sm">
+              <CardContent>
+                <dt>02</dt>
+                <dd>Lower-impact materials</dd>
+              </CardContent>
+            </Card>
+            <Card size="sm">
+              <CardContent>
+                <dt>03</dt>
+                <dd>Made to be kept</dd>
+              </CardContent>
+            </Card>
           </dl>
         </section>
       </main>

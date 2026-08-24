@@ -33,8 +33,9 @@ export function attachEventProp(element: Element, name: string, value: unknown):
     element.addEventListener(eventName, dispatch, capture)
     return () => element.removeEventListener(eventName, dispatch, capture)
   }
-  element.addEventListener(eventName, value as EventListener, capture)
-  return () => element.removeEventListener(eventName, value as EventListener, capture)
+  const dispatch = (event: Event): void => (value as EventListener)(reactShapedEvent(event))
+  element.addEventListener(eventName, dispatch, capture)
+  return () => element.removeEventListener(eventName, dispatch, capture)
 }
 
 export function isEventProp(name: string): boolean {
@@ -61,13 +62,27 @@ function attachReactChangeEvent(
 
 function invokeFormListener(element: Element, listener: EventListener, event: Event): void {
   try {
-    listener(event)
+    listener(reactShapedEvent(event))
   } finally {
     const target = event.target as Element
     if (isReactFormChangeEvent(target, event.type) && (target === element || event.cancelBubble)) {
       restoreControlledFormState(target)
     }
   }
+}
+
+function reactShapedEvent(event: Event): Event {
+  const shaped = event as Event & {
+    nativeEvent?: Event
+    isDefaultPrevented?: () => boolean
+    isPropagationStopped?: () => boolean
+    persist?: () => void
+  }
+  shaped.nativeEvent ??= event
+  shaped.isDefaultPrevented ??= () => event.defaultPrevented
+  shaped.isPropagationStopped ??= () => event.cancelBubble
+  shaped.persist ??= () => {}
+  return shaped
 }
 
 function nativeEventName(reactEventName: string): string {

@@ -157,6 +157,28 @@ fn normalizes_react_hook_compatibility_aliases_before_hook_analysis() {
 }
 
 #[test]
+fn normalizes_react_hook_compatibility_aliases_with_named_fallbacks() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "iso-layout-effect.tsx",
+        source: r#"
+            import * as React from 'react';
+            const noop = () => {};
+            const useIsoLayoutEffect = typeof document !== 'undefined'
+                ? React.useLayoutEffect
+                : noop;
+            export function App() {
+                useIsoLayoutEffect(() => undefined, []);
+                return <p>stable</p>;
+            }
+        "#,
+    })
+    .expect("a React hook alias with a named inline fallback should canonicalize");
+
+    assert!(!output.contains("useIsoLayoutEffect"), "{output}");
+    assert!(output.contains("__vidactLayoutEffect"), "{output}");
+}
+
+#[test]
 fn normalizes_classic_create_element_named_namespace_and_default_imports() {
     for (filename, source) in [
         (

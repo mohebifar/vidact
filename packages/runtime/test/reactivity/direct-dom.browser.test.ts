@@ -1,15 +1,38 @@
 import {
   binding,
+  createRenderable,
   createCompiledScope,
   createCompiledState,
+  createElement,
   Fragment,
   h,
+  renderableChildren,
+  renderableProps,
   source,
 } from '@vidact/runtime'
-import { jsxs } from '@vidact/runtime/jsx-runtime'
+import { jsx, jsxs } from '@vidact/runtime/jsx-runtime'
 import { describe, expect, it } from 'vitest'
 
 describe('direct DOM construction', () => {
+  it('constructs compiled renderable capabilities used as residual JSX element types', () => {
+    const component = createRenderable({ className: 'base', children: 'Base' }, (input) =>
+      h('button', renderableProps(input), renderableChildren(input)),
+    )
+
+    const result = jsx(component as never, { className: 'override', children: 'Save' })
+
+    expect((result as HTMLButtonElement).outerHTML).toBe('<button class="override">Save</button>')
+  })
+
+  it('supports residual classic element factories without materializing an element tree', () => {
+    const fromProps = createElement('button', { type: 'button', children: 'Save' })
+    const fromArguments = createElement('a', { href: '/shop', children: 'ignored' }, 'Shop')
+
+    expect(fromProps).toBeInstanceOf(HTMLButtonElement)
+    expect((fromProps as HTMLButtonElement).outerHTML).toBe('<button type="button">Save</button>')
+    expect((fromArguments as HTMLAnchorElement).outerHTML).toBe('<a href="/shop">Shop</a>')
+  })
+
   it('flattens array children without constructing a virtual tree', () => {
     const list = h(
       'ul',
@@ -41,6 +64,17 @@ describe('direct DOM construction', () => {
     expect((result as HTMLElement).textContent).toBe('firstsecond')
   })
 
+  it('does not synthesize children for a childless function component', () => {
+    let received: Record<string, unknown> | undefined
+
+    h((props) => {
+      received = props
+      return h('input', null)
+    }, null)
+
+    expect(received).toEqual({})
+  })
+
   it('maps React double-click handlers to the native dblclick event', () => {
     let calls = 0
     const button = h(
@@ -56,6 +90,19 @@ describe('direct DOM construction', () => {
     button.dispatchEvent(new MouseEvent('dblclick'))
 
     expect(calls).toBe(1)
+  })
+
+  it('supplies React event metadata over the native event object', () => {
+    let received: (Event & { nativeEvent?: Event }) | undefined
+    const button = h('button', {
+      onClick: (event: Event & { nativeEvent?: Event }) => {
+        received = event
+      },
+    })
+
+    button.click()
+
+    expect(received?.nativeEvent).toBe(received)
   })
 
   it.each([

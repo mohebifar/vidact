@@ -46,7 +46,8 @@ export function createComponentProps(
   props: Record<string, unknown> | null,
   children: readonly unknown[],
 ): Record<string, unknown> {
-  const publicProps: Record<string, unknown> = { ...props, children }
+  const publicProps: Record<string, unknown> = { ...props }
+  if (children.length > 0) publicProps.children = children
   delete publicProps[INTERNAL_NAMESPACE_PROP]
   const propsWithDirective = publicProps as Record<PropertyKey, unknown>
   const directive = propsWithDirective[INTERNAL_COMPONENT_SPREAD_PROP]

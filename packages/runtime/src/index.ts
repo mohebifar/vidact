@@ -3,6 +3,7 @@
 export { combineSources, intersectsSources, source, type SourceMask } from './source-mask.ts'
 export type { StateUpdate } from './state-slot.ts'
 export {
+  createElement,
   Fragment,
   h,
   type DirectChild,

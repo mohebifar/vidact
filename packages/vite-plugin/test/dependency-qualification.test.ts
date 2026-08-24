@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   DependencyQualificationError,
   createDependencyQualifier,
+  isDependencyModuleId,
 } from '../src/dependency-qualification.ts'
 import { vidact } from '../src/index.ts'
 
@@ -60,6 +61,13 @@ function transformHook(
 }
 
 describe('dependency qualification', () => {
+  it('ignores Vite implementation caches nested under node_modules', async () => {
+    expect(isDependencyModuleId('/app/node_modules/.vite-temp/config.mjs')).toBe(false)
+    await expect(
+      createDependencyQualifier().qualify('/app/node_modules/.vite-temp/config.mjs'),
+    ).resolves.toBeNull()
+  })
+
   it.each([
     ['peer dependency', { peerDependencies: { react: '^19.0.0' } }],
     ['ordinary dependency', { dependencies: { react: '^19.0.0' } }],

@@ -137,6 +137,17 @@ export function h(
   return element
 }
 
+export function createElement(
+  type: string | typeof Fragment | DirectComponent,
+  props: DirectProps,
+  ...children: DirectChild[]
+): DirectChild {
+  if (children.length === 0 && props !== null && Object.hasOwn(props, 'children')) {
+    return h(type, props, props.children as DirectChild)
+  }
+  return h(type, props, ...children)
+}
+
 function matchesHydrationElement(
   element: Element,
   props: DirectProps,

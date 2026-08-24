@@ -143,7 +143,7 @@ function packageNameFromNodeModulesPath(modulePath: string): string | undefined 
   if (markerIndex === -1) return undefined
   const segments = normalized.slice(markerIndex + marker.length).split('/')
   const first = segments[0]
-  if (first === undefined || first.length === 0 || first === '.pnpm') return undefined
+  if (first === undefined || first.length === 0 || first.startsWith('.')) return undefined
   if (!first.startsWith('@')) return first
   const second = segments[1]
   return second === undefined || second.length === 0 ? undefined : `${first}/${second}`

@@ -4,6 +4,9 @@
     "jsx": "preserve",
     "jsxImportSource": "@vidact/react-types",
     "lib": ["ES2024", "ESNext.Disposable", "DOM", "DOM.Iterable"],
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "types": ["node", "vitest/globals", "vitest/importMeta", "@vidact/react-types"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "vite.*.config.ts"]

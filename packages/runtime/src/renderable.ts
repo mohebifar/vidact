@@ -5,13 +5,13 @@ import {
   type CompiledRenderValue,
   type CompiledScope,
 } from './compiled.ts'
+import { h } from './direct-dom.ts'
 import type { SourceMask } from './source-mask.ts'
 import { unionSources } from './source-mask.ts'
 import { compiledSpread } from './spread.ts'
-import { h } from './direct-dom.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
-const RENDERABLE = Symbol(DEV ? 'Vidact.Renderable' : undefined)
+const RENDERABLE = Symbol.for('vidact.v1.Renderable')
 const SPECIAL_PROPS = new Set(['children', 'key', 'ref'])
 
 type Props = Record<string, unknown>
@@ -54,14 +54,18 @@ export function isRenderable(value: unknown): value is CompiledRenderable {
 
 export function renderableToArray(value: unknown): [CompiledRenderable] {
   if (!isRenderable(value)) {
-    throw new TypeError(DEV ? 'Children.toArray requires one compiled renderable capability' : 'V107')
+    throw new TypeError(
+      DEV ? 'Children.toArray requires one compiled renderable capability' : 'V107',
+    )
   }
   return [value]
 }
 
 export function renderableMarker(value: unknown): undefined {
   if (!isRenderable(value)) {
-    throw new TypeError(DEV ? 'React element metadata requires a compiled renderable capability' : 'V107')
+    throw new TypeError(
+      DEV ? 'React element metadata requires a compiled renderable capability' : 'V107',
+    )
   }
   return undefined
 }
@@ -82,9 +86,7 @@ export function cloneRenderableComponent(props: Record<string, unknown>): Compil
   return cloneRenderable(value, props.overrides as RenderablePropsInput | undefined)
 }
 
-export function renderableProps(
-  input: RenderablePropsInput,
-): Record<string, unknown> {
+export function renderableProps(input: RenderablePropsInput): Record<string, unknown> {
   const ordinary = projectInput(input, (props) =>
     Object.fromEntries(Object.entries(props).filter(([name]) => !SPECIAL_PROPS.has(name))),
   )
@@ -109,11 +111,7 @@ export function dynamicIntrinsicComponent(props: Record<string, unknown>): Compi
     throw new TypeError(DEV ? 'dynamic intrinsic construction requires a string tag' : 'V107')
   }
   const input = props.props as RenderablePropsInput
-  return h(
-    tag,
-    { ...renderableProps(input), ref: renderableRef(input) },
-    renderableChildren(input),
-  )
+  return h(tag, { ...renderableProps(input), ref: renderableRef(input) }, renderableChildren(input))
 }
 
 function propsView(input: RenderablePropsInput): Props {

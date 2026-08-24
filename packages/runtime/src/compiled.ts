@@ -41,12 +41,12 @@ let retainedUiEnabled = typeof __VIDACT_RETAINED_UI__ !== 'undefined' && __VIDAC
 let profilingEnabled = false
 let activeOwnerCount = 0
 let createdOwnerCount = 0
-const BINDING = Symbol(DEV ? 'Vidact.Binding' : undefined)
-const STRUCTURAL = Symbol(DEV ? 'Vidact.StructuralBinding' : undefined)
-const CONTEXT = Symbol(DEV ? 'Vidact.Context' : undefined)
-const ASYNC_RESOURCE = Symbol(DEV ? 'Vidact.AsyncResource' : undefined)
-const SUSPENSION = Symbol(DEV ? 'Vidact.Suspension' : undefined)
-export const COMPONENT_SPREAD_SOURCE = Symbol(DEV ? 'Vidact.ComponentSpreadSource' : undefined)
+const BINDING = Symbol.for('vidact.v1.Binding')
+const STRUCTURAL = Symbol.for('vidact.v1.StructuralBinding')
+const CONTEXT = Symbol.for('vidact.v1.Context')
+const ASYNC_RESOURCE = Symbol.for('vidact.v1.AsyncResource')
+const SUSPENSION = Symbol.for('vidact.v1.Suspension')
+export const COMPONENT_SPREAD_SOURCE = Symbol.for('vidact.v1.ComponentSpreadSource')
 const noop = (): void => {}
 
 type ContextFrame = {
@@ -3557,6 +3557,10 @@ function commitPendingRefs(root: Node): void {
 }
 
 function commitPublishedNodes(nodes: readonly Node[]): void {
+  const publicationRoot = nodes[0]?.getRootNode()
+  if (publicationRoot instanceof DocumentFragment && !(publicationRoot instanceof ShadowRoot)) {
+    return
+  }
   for (const node of nodes) commitNodeInsertions(node)
   for (const node of nodes) commitNodeRefs(node)
   for (const node of nodes) commitNodeResources(node)

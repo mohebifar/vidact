@@ -481,6 +481,34 @@ fn normalize_react_hook_aliases<'a>(
         return false;
     }
 
+    let mut inline_fallbacks = BTreeSet::new();
+    for statement in &program.body {
+        let declaration = match statement {
+            Statement::VariableDeclaration(declaration) => Some(declaration.as_ref()),
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::VariableDeclaration(declaration) => Some(declaration.as_ref()),
+                _ => None,
+            },
+            _ => None,
+        };
+        let Some(declaration) = declaration else {
+            continue;
+        };
+        for declarator in &declaration.declarations {
+            let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+                continue;
+            };
+            let Some(initializer) = declarator.init.as_ref() else {
+                continue;
+            };
+            if is_inline_hook_fallback(initializer, scoping, &BTreeSet::new()) {
+                if let Some(symbol) = identifier.symbol_id.get() {
+                    inline_fallbacks.insert(symbol);
+                }
+            }
+        }
+    }
+
     let mut aliases = BTreeMap::new();
     loop {
         let previous = aliases.len();
@@ -506,9 +534,13 @@ fn normalize_react_hook_aliases<'a>(
                 let Some(initializer) = declarator.init.as_ref() else {
                     continue;
                 };
-                if let Some(alias) =
-                    canonical_react_hook(initializer, scoping, &namespaces, &aliases)
-                {
+                if let Some(alias) = canonical_react_hook(
+                    initializer,
+                    scoping,
+                    &namespaces,
+                    &aliases,
+                    &inline_fallbacks,
+                ) {
                     aliases.insert(symbol, alias);
                 }
             }
@@ -562,6 +594,7 @@ fn canonical_react_hook<'a>(
     scoping: &Scoping,
     namespaces: &BTreeMap<SymbolId, &'a str>,
     aliases: &BTreeMap<SymbolId, ReactHookAlias<'a>>,
+    inline_fallbacks: &BTreeSet<SymbolId>,
 ) -> Option<ReactHookAlias<'a>> {
     match expression.without_parentheses() {
         Expression::StaticMemberExpression(member) if member.property.name.starts_with("use") => {
@@ -579,16 +612,38 @@ fn canonical_react_hook<'a>(
             .get(&reference_symbol(identifier, scoping)?)
             .copied(),
         Expression::ConditionalExpression(conditional) => {
-            let consequent =
-                canonical_react_hook(&conditional.consequent, scoping, namespaces, aliases);
-            let alternate =
-                canonical_react_hook(&conditional.alternate, scoping, namespaces, aliases);
+            let consequent = canonical_react_hook(
+                &conditional.consequent,
+                scoping,
+                namespaces,
+                aliases,
+                inline_fallbacks,
+            );
+            let alternate = canonical_react_hook(
+                &conditional.alternate,
+                scoping,
+                namespaces,
+                aliases,
+                inline_fallbacks,
+            );
             match (consequent, alternate) {
                 (Some(left), Some(right)) if left == right => Some(left),
-                (Some(alias), None) if is_inline_hook_fallback(&conditional.alternate) => {
+                (Some(alias), None)
+                    if is_inline_hook_fallback(
+                        &conditional.alternate,
+                        scoping,
+                        inline_fallbacks,
+                    ) =>
+                {
                     Some(alias)
                 }
-                (None, Some(alias)) if is_inline_hook_fallback(&conditional.consequent) => {
+                (None, Some(alias))
+                    if is_inline_hook_fallback(
+                        &conditional.consequent,
+                        scoping,
+                        inline_fallbacks,
+                    ) =>
+                {
                     Some(alias)
                 }
                 _ => None,
@@ -598,11 +653,17 @@ fn canonical_react_hook<'a>(
     }
 }
 
-fn is_inline_hook_fallback(expression: &Expression<'_>) -> bool {
-    matches!(
-        expression.without_parentheses(),
-        Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
-    )
+fn is_inline_hook_fallback(
+    expression: &Expression<'_>,
+    scoping: &Scoping,
+    inline_fallbacks: &BTreeSet<SymbolId>,
+) -> bool {
+    match expression.without_parentheses() {
+        Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_) => true,
+        Expression::Identifier(identifier) => reference_symbol(identifier, scoping)
+            .is_some_and(|symbol| inline_fallbacks.contains(&symbol)),
+        _ => false,
+    }
 }
 
 struct ReactHookAliasRewriter<'a, 's> {

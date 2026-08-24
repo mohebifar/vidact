@@ -1,5 +1,9 @@
 import { use } from 'react'
 
+import { Badge } from './components/ui/badge.tsx'
+import { Button } from './components/ui/button.tsx'
+import { Card, CardContent, CardFooter } from './components/ui/card.tsx'
+import { Skeleton } from './components/ui/skeleton.tsx'
 import { formatMoney, type Product } from './model.ts'
 
 interface ProductResultsProps {
@@ -37,27 +41,37 @@ export function ProductResults({
         <ul className="product-grid">
           {visibleProducts.map((product) => (
             <li key={product.id} className="product-card">
-              <div className={`product-art tone-${product.tone}`}>
-                <span className="product-badge">{product.badge}</span>
-                <span className="product-icon" aria-hidden="true">
-                  {product.icon}
-                </span>
-                <button
-                  className="quick-add"
-                  aria-label={`Add ${product.name} to cart`}
-                  onClick={() => onAdd(product)}
-                >
-                  +
-                </button>
-              </div>
-              <div className="product-copy">
-                <div>
-                  <h3>{product.name}</h3>
-                  <strong>{formatMoney(product.priceCents)}</strong>
+              <Card>
+                <div className={`product-art tone-${product.tone}`}>
+                  <Badge className="product-badge" variant="secondary">
+                    {product.badge}
+                  </Badge>
+                  <span className="product-icon" aria-hidden="true">
+                    {product.icon}
+                  </span>
+                  <Button
+                    className="quick-add"
+                    size="icon"
+                    variant="secondary"
+                    aria-label={`Add ${product.name} to cart`}
+                    onClick={() => onAdd(product)}
+                  >
+                    +
+                  </Button>
                 </div>
-                <p>{product.description}</p>
-                <button onClick={() => onAdd(product)}>Add to cart</button>
-              </div>
+                <CardContent className="product-copy">
+                  <div>
+                    <h3>{product.name}</h3>
+                    <strong>{formatMoney(product.priceCents)}</strong>
+                  </div>
+                  <p>{product.description}</p>
+                </CardContent>
+                <CardFooter>
+                  <Button className="add-to-cart" onClick={() => onAdd(product)}>
+                    Add to cart
+                  </Button>
+                </CardFooter>
+              </Card>
             </li>
           ))}
         </ul>
@@ -73,12 +87,14 @@ export function ProductGridFallback(): JSX.Element {
       <ul className="product-grid">
         {[0, 1, 2, 3].map((index) => (
           <li key={index} className="product-card skeleton-card">
-            <div className="skeleton skeleton-art" />
-            <div className="product-copy">
-              <span className="skeleton skeleton-title" />
-              <span className="skeleton skeleton-line" />
-              <span className="skeleton skeleton-line short" />
-            </div>
+            <Card>
+              <Skeleton className="skeleton-art" />
+              <CardContent className="product-copy">
+                <Skeleton className="skeleton-title" />
+                <Skeleton className="skeleton-line" />
+                <Skeleton className="skeleton-line short" />
+              </CardContent>
+            </Card>
           </li>
         ))}
       </ul>

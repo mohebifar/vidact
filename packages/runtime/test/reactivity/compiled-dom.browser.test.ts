@@ -12,6 +12,7 @@ import {
   compiledComponentSpread,
   compiledEvent,
   compiledImperativeHandle,
+  compiledInsertionEffect,
   compiledRoot,
   createCompiledProp,
   createCompiledScope,
@@ -40,6 +41,31 @@ interface Item {
 }
 
 describe('compiled DOM corpus', () => {
+  it('runs insertion effects before callback refs in a staged binding', () => {
+    const host = document.createElement('div')
+    let insertionCommitted = false
+    let refSawInsertion = false
+
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      compiledInsertionEffect(scope, source(0), () => () => {
+        insertionCommitted = true
+      })
+      return compiledRoot(scope, () =>
+        binding(scope, source(0), () =>
+          h('button', {
+            ref: () => {
+              refSawInsertion = insertionCommitted
+            },
+          }),
+        ),
+      )
+    }, host)
+
+    expect(refSawInsertion).toBe(true)
+    mounted.dispose()
+  })
+
   it('constructs an opaque renderable with reactive merged props without replacing its node', async () => {
     const authoredSource = source(0)
     const overridesSource = source(1)
@@ -70,17 +96,15 @@ describe('compiled DOM corpus', () => {
       })
       updateAuthored = authored.set
       updateOverrides = overrides.set
-      const render = createRenderable(
-        binding(scope, authoredSource, authored.get),
-        (props) =>
-          h(
-            'a',
-            {
-              ...renderableProps(props),
-              ref: renderableRef(props),
-            },
-            renderableChildren(props),
-          ),
+      const render = createRenderable(binding(scope, authoredSource, authored.get), (props) =>
+        h(
+          'a',
+          {
+            ...renderableProps(props),
+            ref: renderableRef(props),
+          },
+          renderableChildren(props),
+        ),
       )
       expect(isRenderable(render)).toBe(true)
       expect(Object.keys(render)).toEqual(['props'])
