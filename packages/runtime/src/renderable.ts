@@ -5,13 +5,13 @@ import {
   type CompiledRenderValue,
   type CompiledScope,
 } from './compiled.ts'
-import { h } from './direct-dom.ts'
+import { Fragment, h, type DirectComponent } from './direct-dom.ts'
+import { isRenderableProtocol, RENDERABLE } from './renderable-protocol.ts'
 import type { SourceMask } from './source-mask.ts'
 import { unionSources } from './source-mask.ts'
 import { compiledSpread } from './spread.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
-const RENDERABLE = Symbol.for('vidact.v1.Renderable')
 const SPECIAL_PROPS = new Set(['children', 'key', 'ref'])
 
 type Props = Record<string, unknown>
@@ -44,12 +44,26 @@ export function createRenderable(
 }
 
 export function isRenderable(value: unknown): value is CompiledRenderable {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    Object.hasOwn(value, RENDERABLE) &&
-    typeof (value as CompiledRenderable)[RENDERABLE]?.construct === 'function'
-  )
+  return isRenderableProtocol(value)
+}
+
+export function createReactElement(
+  type: string | typeof Fragment | DirectComponent | CompiledRenderable,
+  props: Props | null,
+  ...children: CompiledRenderValue[]
+): CompiledRenderable {
+  const input: Props = { ...props }
+  if (children.length === 1) input.children = children[0]
+  else if (children.length > 1) input.children = children
+
+  return createRenderable(input, (currentInput) => {
+    if (isRenderable(type)) return cloneRenderable(type, currentInput)
+    const resolved = readPropsInput(currentInput)
+    const { children: currentChildren, key: _key, ...currentProps } = resolved
+    return Object.hasOwn(resolved, 'children')
+      ? h(type, currentProps, currentChildren as CompiledRenderValue)
+      : h(type, currentProps)
+  })
 }
 
 export function renderableToArray(value: unknown): [CompiledRenderable] {
@@ -119,7 +133,8 @@ function propsView(input: RenderablePropsInput): Props {
     {},
     {
       get(_target, property) {
-        return Reflect.get(readPropsInput(input), property)
+        const value = Reflect.get(readPropsInput(input), property)
+        return isCompiledBinding(value) ? value[1]() : value
       },
       getOwnPropertyDescriptor(_target, property) {
         return Object.hasOwn(readPropsInput(input), property)

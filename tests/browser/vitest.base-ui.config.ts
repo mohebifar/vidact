@@ -3,10 +3,9 @@ import { playwright } from '@vitest/browser-playwright'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
-  plugins: [vidact({ features: ['css-insertion', 'unsafe-html'] })],
+  plugins: [vidact({ features: ['css-insertion', 'profiling'] })],
   test: {
-    include: ['corpus/apps/**/*.browser.test.ts'],
-    exclude: ['corpus/apps/base-ui-dependency/**/*.browser.test.ts'],
+    include: ['corpus/apps/base-ui-dependency/**/*.browser.test.ts'],
     browser: {
       enabled: true,
       headless: true,

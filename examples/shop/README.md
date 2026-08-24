@@ -11,8 +11,11 @@ client-only demo:
 - fulfilled catalog markup claimed without replacement while input events are replayable;
 - owner-safe Vite HMR that replaces the hydrated client boundary;
 - category refetches that reveal a skeleton grid through `Suspense` and `use(promise)`;
+- application-owned shadcn components using the Lyra preset, Neutral tokens, and published Base UI
+  primitives compiled from `node_modules` without a package include list;
 - client-side search, category filters, cart quantities, totals, and mock checkout;
-- separate browser and server tests.
+- browser assertions for surgical mutations and retained node identity, plus separate server, HMR,
+  production-artifact, and production-start tests.
 
 ## Run it
 
@@ -33,8 +36,15 @@ The example's gates can also run directly:
 pnpm --filter @vidact/example-shop typecheck
 pnpm --filter @vidact/example-shop test
 pnpm --filter @vidact/example-shop build
+pnpm --filter @vidact/example-shop verify:bundle
+pnpm --filter @vidact/example-shop test:start
 pnpm --filter @vidact/example-shop start
 ```
+
+`verify:bundle` checks every emitted JavaScript chunk for React runtime paths, generic element-tree
+interpretation, structural reconciliation, and dependency-specific adapters. `test:start` launches
+the built server on an isolated port, checks health, HTML, and assets, then hydrates and exercises
+the production shop while proving representative server nodes retain identity.
 
 ## Request flow
 

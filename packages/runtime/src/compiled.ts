@@ -31,6 +31,7 @@ import {
 } from './hydration-bridge.ts'
 import { createIndexedList } from './indexed-list.ts'
 import { createKeyedList } from './keyed-list.ts'
+import { isRenderableProtocol, materializeRenderable } from './renderable-protocol.ts'
 import { scheduleDeferredTask, scheduleTask, type CancelScheduledTask } from './scheduler.ts'
 import { intersectsSources, isEmptySources, unionSources, type SourceMask } from './source-mask.ts'
 import { createStateSlot, type StateSlot } from './state-slot.ts'
@@ -225,7 +226,9 @@ type RenderValue = CompiledRenderValue
 
 export function hasInvalidChild(children: readonly unknown[]): boolean {
   for (const child of children) {
-    if (isStructuralBinding(child) || isCompiledBinding(child)) continue
+    if (isStructuralBinding(child) || isCompiledBinding(child) || isRenderableProtocol(child)) {
+      continue
+    }
     if (Array.isArray(child)) {
       if (hasInvalidChild(child)) return true
       continue
@@ -3251,21 +3254,30 @@ function mountCompiledBindingBefore(
 ): void {
   const unset = Symbol(DEV ? 'Vidact.UnsetBinding' : undefined)
   const initial = value[1]()
-  if (isHydrating() && !isScalarRenderValue(initial)) {
-    throw new HydrationMismatch('non-scalar compiled bindings require structural hydration markers')
-  }
-  const hydratedRange = isScalarRenderValue(initial)
+  const scalarInitial = isScalarRenderValue(initial)
+  const hydratedTextRange = scalarInitial
     ? claimHydrationTextRange(parent, toText(initial))
     : undefined
+  const borrowedHydrationRange =
+    isHydrating() && !scalarInitial
+      ? isStructuralBinding(initial) && initial[2] === 'slot'
+        ? borrowCurrentHydrationSlot(parent)
+        : borrowActiveHydrationSlot(parent)
+      : undefined
+  const hydratedStructuralRange =
+    isHydrating() && !scalarInitial
+      ? (borrowedHydrationRange ?? claimHydrationSlotRange(parent))
+      : undefined
+  const hydratedRange = hydratedTextRange ?? hydratedStructuralRange
   const start = hydratedRange?.[0] ?? document.createComment(DEV ? 'vidact:binding' : '')
   const end = hydratedRange?.[1] ?? document.createComment(DEV ? '/vidact:binding' : '')
   if (hydratedRange === undefined) {
     parent.insertBefore(start, before)
     parent.insertBefore(end, before)
   }
-  let current: unknown = hydratedRange === undefined ? unset : initial
+  let current: unknown = hydratedTextRange === undefined ? unset : initial
   let currentOwner: Owner | null = null
-  let text: Text | null = hydratedRange?.[2] ?? null
+  let text: Text | null = hydratedTextRange?.[2] ?? null
 
   const clear = (): void => {
     const owner = currentOwner
@@ -3317,14 +3329,67 @@ function mountCompiledBindingBefore(
     current = next
   }
 
-  if (hydratedRange === undefined) update()
+  if (hydratedStructuralRange !== undefined) {
+    const nextOwner = createOwner()
+    const [fragment, staged] = withHydrationInsertion(parent, end, () =>
+      stageRender(() => initial as RenderValue, nextOwner),
+    )
+    parent.insertBefore(fragment, end)
+    commitPublishedNodes(staged)
+    currentOwner = nextOwner
+    current = initial
+  } else if (hydratedRange === undefined) {
+    update()
+  }
   const removeUpdater = subscribeBinding(value, update)
   onCleanup(() => {
     removeUpdater()
     clear()
-    start.remove()
-    end.remove()
+    if (borrowedHydrationRange === undefined) {
+      start.remove()
+      end.remove()
+    }
   })
+}
+
+function borrowActiveHydrationSlot(parent: Node): readonly [Comment, Comment] | undefined {
+  const start = hydrationCursor(parent)?.previousSibling
+  if (!(start instanceof Comment) || start.data !== 'vidact:v1:b') return undefined
+
+  const insertion = hydrationInsertionPoint()
+  if (
+    insertion !== undefined &&
+    insertion[0] === parent &&
+    insertion[1] instanceof Comment &&
+    insertion[1].data === '/vidact:v1:b'
+  ) {
+    return [start, insertion[1]]
+  }
+
+  const end = closingHydrationSlot(start)
+  return end === undefined ? undefined : [start, end]
+}
+
+function borrowCurrentHydrationSlot(parent: Node): readonly [Comment, Comment] | undefined {
+  const start = hydrationCursor(parent)
+  if (!(start instanceof Comment) || start.data !== 'vidact:v1:b') return undefined
+  const end = closingHydrationSlot(start)
+  return end === undefined ? undefined : [start, end]
+}
+
+function closingHydrationSlot(start: Comment): Comment | undefined {
+  let depth = 0
+  for (let node = start.nextSibling; node !== null; node = node.nextSibling) {
+    if (!(node instanceof Comment)) continue
+    if (node.data === 'vidact:v1:b') {
+      depth += 1
+      continue
+    }
+    if (node.data !== '/vidact:v1:b') continue
+    if (depth === 0) return node
+    depth -= 1
+  }
+  return undefined
 }
 
 function materialize(value: RenderValue): Node[] {
@@ -3420,6 +3485,10 @@ function insertValue(
   }
   if (isCompiledBinding(value)) {
     mountCompiledBindingBefore(parent, value, before)
+    return
+  }
+  if (isRenderableProtocol(value)) {
+    insertValue(parent, materializeRenderable(value) as RenderValue, before, moves)
     return
   }
   if (Array.isArray(value)) {

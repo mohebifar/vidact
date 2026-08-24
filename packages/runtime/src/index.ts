@@ -18,6 +18,7 @@ export { compiledComponentSpread } from './component-spread.ts'
 export {
   cloneRenderable,
   cloneRenderableComponent,
+  createReactElement,
   createRenderable,
   dynamicIntrinsicComponent,
   forwardedRef,

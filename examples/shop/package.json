@@ -10,7 +10,9 @@
     "dev": "vite --config vite.dev.config.ts",
     "start": "node dist/server/server.js",
     "test": "vitest run --config vite.server.test.config.ts && vitest run --config vite.test.config.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "test:start": "node scripts/smoke-start.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "verify:bundle": "node scripts/verify-production-bundle.mjs"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
@@ -29,6 +31,7 @@
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@vidact/react-types": "workspace:*",
+    "@vidact/test-support": "workspace:*",
     "@vidact/vite": "workspace:*",
     "@vitest/browser-playwright": "4.1.11",
     "playwright": "1.62.1",

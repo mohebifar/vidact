@@ -121,6 +121,9 @@ importers:
       '@vidact/react-types':
         specifier: workspace:*
         version: link:../../packages/react-types
+      '@vidact/test-support':
+        specifier: workspace:*
+        version: link:../../packages/test-support
       '@vidact/vite':
         specifier: workspace:*
         version: link:../../packages/vite-plugin
@@ -265,6 +268,9 @@ importers:
 
   tests/browser:
     dependencies:
+      '@base-ui/react':
+        specifier: 1.7.0
+        version: 1.7.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@vidact/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime

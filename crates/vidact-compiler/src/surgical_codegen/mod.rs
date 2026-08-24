@@ -1174,6 +1174,11 @@ fn transform_component<'a>(
         }
     }
     let prop_bindings = prop_binding_symbols(params, &source_ids, &prop_sources, allocator)?;
+    let renderable_child_symbols = prop_bindings
+        .iter()
+        .filter(|binding| binding.public_name.as_deref() == Some("children"))
+        .map(|binding| binding.symbol)
+        .collect::<BTreeSet<_>>();
     rewrite_component_props_parameter(&ast, params, &prop_bindings);
     let mut render_start = render_suffix_start(body)?;
     let mut source_symbols = BTreeMap::<SymbolId, SourceId>::new();
@@ -1785,6 +1790,7 @@ fn transform_component<'a>(
         item_source_symbols: &item_source_symbols,
         options,
         react: &react,
+        renderable_depth: 0,
         reactive_spread_overrides: BTreeMap::new(),
         diagnostic: None,
     };
@@ -1792,7 +1798,7 @@ fn transform_component<'a>(
     if let Some(diagnostic) = jsx_transformer.diagnostic {
         return Err(diagnostic);
     }
-    namespace::annotate(&ast, body)?;
+    namespace::annotate(&ast, body, scoping, &renderable_child_symbols)?;
     MultiStateReferenceRewriter {
         ast: &ast,
         scoping,
@@ -2940,6 +2946,7 @@ struct JsxBindingTransformer<'a, 'b, 's> {
     item_source_symbols: &'s BTreeMap<SymbolId, SourceId>,
     options: &'s CompilationOptions,
     react: &'s ReactBindings<'s>,
+    renderable_depth: usize,
     reactive_spread_overrides: BTreeMap<u32, (ReactiveSpreadKind, Vec<String>)>,
     diagnostic: Option<Diagnostic>,
 }
@@ -2953,26 +2960,15 @@ enum ReactiveSpreadKind {
 impl<'a> JsxBindingTransformer<'a, '_, '_> {
     fn lower_renderable_attribute(
         &mut self,
-        element: oxc_allocator::Box<'a, JSXElement<'a>>,
+        mut element: oxc_allocator::Box<'a, JSXElement<'a>>,
     ) -> Result<Expression<'a>, Diagnostic> {
-        let element_expression =
-            Expression::JSXElement(element.clone_in_with_semantic_ids(self.ast.allocator()));
-        let reads = dependencies(
-            &element_expression,
-            self.scoping,
-            self.source_symbols,
-            self.item_source_symbols,
-        );
-        let (mut input, constructor) = renderable_parts(self.ast, element)?;
-        if !reads.is_empty() {
-            let mut arguments = vec![
-                ident(self.ast, SCOPE),
-                dependency_mask(self.ast, &reads.parent),
-                arrow_expression(self.ast, [], input),
-            ];
-            append_item_dependency(self.ast, &mut arguments, &reads);
-            input = call_name(self.ast, BINDING, arguments);
+        self.renderable_depth += 1;
+        self.visit_jsx_element(&mut element);
+        self.renderable_depth -= 1;
+        if let Some(diagnostic) = self.diagnostic.take() {
+            return Err(diagnostic);
         }
+        let (input, constructor) = renderable_parts(self.ast, element)?;
         Ok(call_name(
             self.ast,
             CREATE_RENDERABLE,
@@ -3712,6 +3708,36 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             return;
         }
         let intrinsic = raw_html::intrinsic_jsx_name(&element.opening_element.name).is_some();
+        if !intrinsic || self.renderable_depth > 0 {
+            for child in &mut element.children {
+                let nested = match child {
+                    JSXChild::Element(value) => {
+                        Some(value.clone_in_with_semantic_ids(self.ast.allocator()))
+                    }
+                    JSXChild::ExpressionContainer(container) => match &container.expression {
+                        JSXExpression::JSXElement(value) => {
+                            Some(value.clone_in_with_semantic_ids(self.ast.allocator()))
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let Some(nested) = nested else { continue };
+                match self.lower_renderable_attribute(nested) {
+                    Ok(expression) => {
+                        *child = JSXChild::new_expression_container(
+                            child.span(),
+                            JSXExpression::from(expression),
+                            self.ast,
+                        );
+                    }
+                    Err(diagnostic) => {
+                        self.diagnostic = Some(diagnostic);
+                        return;
+                    }
+                }
+            }
+        }
         if intrinsic {
             for item in &element.opening_element.attributes {
                 let JSXAttributeItem::Attribute(attribute) = item else {
@@ -4149,11 +4175,6 @@ fn renderable_parts<'a>(
                     Some(JSXAttributeValue::Fragment(value)) => {
                         Expression::JSXFragment(value.clone_in_with_semantic_ids(ast.allocator()))
                     }
-                };
-                let value = if is_event_attribute(name.name.as_str()) {
-                    call_name(ast, COMPILED_EVENT, [ident(ast, SCOPE), value])
-                } else {
-                    value
                 };
                 properties.push(ObjectPropertyKind::new_object_property(
                     attribute.span,

@@ -8,7 +8,7 @@ interface CartPanelProps {
   readonly cart: readonly CartLine[]
   readonly checkoutState: CheckoutState
   readonly onChangeQuantity: (productId: string, change: number) => void
-  readonly onCheckout: () => void
+  readonly onCheckout: () => void | Promise<void>
 }
 
 export function CartPanel({
@@ -90,7 +90,18 @@ export function CartPanel({
             Placing order…
           </Button>
         ) : (
-          <Button className="checkout-button" size="lg" onClick={onCheckout}>
+          <Button
+            className="checkout-button"
+            size="lg"
+            onClick={async (event) => {
+              const button = event.currentTarget
+              button.disabled = true
+              await onCheckout()
+              if (button.isConnected && button.closest('.cart-panel')?.querySelector('.error')) {
+                button.disabled = false
+              }
+            }}
+          >
             Checkout
           </Button>
         )}

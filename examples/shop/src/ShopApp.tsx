@@ -3,8 +3,9 @@ import { useState } from 'react'
 import { CartPanel } from './CartPanel.tsx'
 import { CatalogPanel } from './CatalogPanel.tsx'
 import { Badge } from './components/ui/badge.tsx'
-import { Button } from './components/ui/button.tsx'
+import { buttonVariants } from './components/ui/button.tsx'
 import { Card, CardContent } from './components/ui/card.tsx'
+import { cn } from './lib/utils.ts'
 import {
   cartQuantity,
   type CartLine,
@@ -88,14 +89,13 @@ export function ShopApp({
           <a href="#catalog">Shop</a>
           <a href="#story">Our story</a>
         </nav>
-        <Button
-          className="cart-link"
-          variant="ghost"
-          nativeButton={false}
-          render={<a href="#cart" aria-label={`Cart with ${itemCount} items`} />}
+        <a
+          className={cn(buttonVariants({ variant: 'ghost' }), 'cart-link')}
+          href="#cart"
+          aria-label="Cart"
         >
           Cart <Badge>{itemCount}</Badge>
-        </Button>
+        </a>
       </header>
 
       <main id="top">
@@ -108,14 +108,9 @@ export function ShopApp({
               Useful objects with honest materials, calm colors, and enough character to keep
               around.
             </p>
-            <Button
-              className="primary-link"
-              size="lg"
-              nativeButton={false}
-              render={<a href="#catalog" />}
-            >
+            <a className={cn(buttonVariants({ size: 'lg' }), 'primary-link')} href="#catalog">
               Explore the collection <span aria-hidden="true">→</span>
-            </Button>
+            </a>
           </div>
           <p className="hero-note">Free shipping on orders over $75</p>
         </section>

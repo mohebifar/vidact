@@ -14,12 +14,9 @@ interface PreparedShopClient {
   readonly productsPromise: PromiseLike<readonly Product[]>
 }
 
-function ShopClient(props: PreparedShopClient): JSX.Element {
-  return <ShopApp productsPromise={props.productsPromise} />
-}
-
 export const shop = defineClientBoundary(
-  (_props: ShopClientProps, prepared: PreparedShopClient) => ShopClient(prepared),
+  (_props: ShopClientProps, prepared: PreparedShopClient) =>
+    ShopApp({ productsPromise: prepared.productsPromise }),
   async (props) => {
     if (!Array.isArray(props.products))
       throw new TypeError('Shop client products must be an array.')

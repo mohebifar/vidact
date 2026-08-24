@@ -179,6 +179,9 @@ export function installDomPropHandler(handler: DomPropHandler): void {
 
 /** @internal Specialized capabilities may own a prop while reusing the base policy. */
 export function applyBaseDomProp(element: Element, name: string, value: unknown): void {
+  if (typeof value === 'symbol') {
+    throw new TypeError(DEV ? `DOM prop ${name} cannot receive a symbol value` : 'V105')
+  }
   if (name === 'dangerouslySetInnerHTML') {
     throw new Error(
       DEV ? 'dangerouslySetInnerHTML must be handled as an owned opaque subtree' : 'V401',
@@ -229,11 +232,16 @@ export function applyBaseDomProp(element: Element, name: string, value: unknown)
     element.removeAttribute(attribute)
     return
   }
+  const serialized = String(value)
+  if (element.getAttribute(attribute) === serialized) {
+    validateRawHtmlProp(element, name)
+    return
+  }
   if (name in element) {
     const current = Reflect.get(element, name)
     if (
       !isCustomElement(element) &&
-      (Object.is(current, value) || String(current) === String(value))
+      (Object.is(current, value) || String(current) === serialized)
     ) {
       validateRawHtmlProp(element, name)
       return
@@ -243,7 +251,6 @@ export function applyBaseDomProp(element: Element, name: string, value: unknown)
       return
     }
   }
-  const serialized = String(value)
   if (element.getAttribute(attribute) !== serialized) {
     element.setAttribute(attribute, serialized)
   }

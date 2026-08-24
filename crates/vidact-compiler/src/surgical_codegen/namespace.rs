@@ -1,10 +1,14 @@
+use std::collections::BTreeSet;
+
 use oxc_allocator::{CloneIn, GetAllocator};
 use oxc_ast::{ast::*, builder::AstBuilder};
 use oxc_ast_visit::{
     VisitMut,
     walk_mut::{walk_call_expression, walk_jsx_element},
 };
+use oxc_semantic::Scoping;
 use oxc_span::{GetSpan, SPAN};
+use oxc_syntax::symbol::SymbolId;
 
 use crate::{Diagnostic, SourceSpan};
 
@@ -23,9 +27,13 @@ enum NamespaceContext {
 pub(super) fn annotate<'a>(
     ast: &AstBuilder<'a>,
     body: &mut FunctionBody<'a>,
+    scoping: &Scoping,
+    renderable_child_symbols: &BTreeSet<SymbolId>,
 ) -> Result<(), Diagnostic> {
     let mut transformer = NamespaceTransformer {
         ast,
+        scoping,
+        renderable_child_symbols,
         context: NamespaceContext::Inherit,
         diagnostic: None,
     };
@@ -35,6 +43,8 @@ pub(super) fn annotate<'a>(
 
 struct NamespaceTransformer<'a, 'b> {
     ast: &'b AstBuilder<'a>,
+    scoping: &'b Scoping,
+    renderable_child_symbols: &'b BTreeSet<SymbolId>,
     context: NamespaceContext,
     diagnostic: Option<Diagnostic>,
 }
@@ -44,7 +54,12 @@ impl<'a> VisitMut<'a> for NamespaceTransformer<'a, '_> {
         let deferred = call
             .callee
             .get_identifier_reference()
-            .is_some_and(|identifier| identifier.name == super::DEFERRED);
+            .is_some_and(|identifier| {
+                matches!(
+                    identifier.name.as_str(),
+                    super::DEFERRED | super::CREATE_RENDERABLE
+                )
+            });
         let previous = self.context;
         if deferred {
             self.context = NamespaceContext::Inherit;
@@ -77,7 +92,7 @@ impl<'a> VisitMut<'a> for NamespaceTransformer<'a, '_> {
         let is_component = tag.is_none();
         if is_component && !is_compiler_staged_boundary(element) {
             for child in &mut element.children {
-                defer_child(self.ast, child);
+                defer_child(self.ast, self.scoping, self.renderable_child_symbols, child);
             }
         }
         let element_context = element_context(self.context, tag);
@@ -148,7 +163,12 @@ fn is_compiler_staged_boundary(element: &JSXElement<'_>) -> bool {
         )
 }
 
-fn defer_child<'a>(ast: &AstBuilder<'a>, child: &mut JSXChild<'a>) {
+fn defer_child<'a>(
+    ast: &AstBuilder<'a>,
+    scoping: &Scoping,
+    renderable_child_symbols: &BTreeSet<SymbolId>,
+    child: &mut JSXChild<'a>,
+) {
     let expression = match child {
         JSXChild::Element(element) => {
             Expression::JSXElement(element.clone_in_with_semantic_ids(ast.allocator()))
@@ -167,6 +187,22 @@ fn defer_child<'a>(ast: &AstBuilder<'a>, child: &mut JSXChild<'a>) {
             .clone_in_with_semantic_ids(ast.allocator()),
         JSXChild::Text(_) => return,
     };
+    if expression
+        .get_identifier_reference()
+        .and_then(|identifier| crate::react_bindings::reference_symbol(identifier, scoping))
+        .is_some_and(|symbol| renderable_child_symbols.contains(&symbol))
+    {
+        return;
+    }
+    if matches!(
+        expression.without_parentheses(),
+        Expression::CallExpression(call)
+            if call.callee.get_identifier_reference().is_some_and(|identifier| {
+                matches!(identifier.name.as_str(), super::BINDING | super::CREATE_RENDERABLE)
+            })
+    ) {
+        return;
+    }
     *child = JSXChild::new_expression_container(
         child.span(),
         JSXExpression::from(call_name(

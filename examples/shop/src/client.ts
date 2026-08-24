@@ -9,7 +9,7 @@ const loadClientModule: ClientModuleLoader = async (reference) => {
   if (reference.id !== 'shop/ShopClient') {
     throw new Error(`Unknown shop client module ${reference.id}.`)
   }
-  return import('./ShopClient.client.tsx')
+  return import('./ShopClient.client.ts')
 }
 
 const boundaries = await hydrateClientBoundaries(host, loadClientModule, {
@@ -18,7 +18,7 @@ const boundaries = await hydrateClientBoundaries(host, loadClientModule, {
 })
 
 if (import.meta.hot !== undefined) {
-  import.meta.hot.accept('./ShopClient.client.tsx', async () => {
+  import.meta.hot.accept('./ShopClient.client.ts', async () => {
     await boundaries.replace(loadClientModule)
   })
   import.meta.hot.dispose(() => boundaries.dispose())

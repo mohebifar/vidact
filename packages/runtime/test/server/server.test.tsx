@@ -32,6 +32,7 @@ import {
 import {
   Activity as ServerActivity,
   cloneRenderable,
+  dynamicIntrinsicComponent,
   createRenderable,
   isRenderable,
   jsx as retainedJsx,
@@ -76,6 +77,9 @@ describe('server rendering', () => {
     expect(renderable.props.href).toBe('/original')
     expect(renderableToArray(renderable)).toEqual([renderable])
     expect(renderableMarker(renderable)).toBeUndefined()
+    expect(renderToStaticMarkup(renderable)).toBe(
+      '<a class="authored" href="/original">Original</a>',
+    )
     expect(
       renderToStaticMarkup(
         cloneRenderable(renderable, { className: 'merged', children: 'Element' }),
@@ -91,6 +95,19 @@ describe('server rendering', () => {
     expect(
       renderToStaticMarkup(retainedJsx(component, { className: 'override', children: 'Save' })),
     ).toBe('<button class="override">Save</button>')
+  })
+
+  it('keeps direct runtime helpers transparent to hydration ownership', () => {
+    const html = renderRetainedToString(() =>
+      retainedJsx(dynamicIntrinsicComponent, {
+        tag: 'button',
+        props: { children: 'Save' },
+      }),
+    )
+
+    expect(html).toContain('<button>')
+    expect(html).toContain('Save')
+    expect(html).not.toContain('vidact:v1:c')
   })
 
   it('evaluates initial state and produces request-deterministic ids', () => {

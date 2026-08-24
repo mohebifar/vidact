@@ -15,6 +15,7 @@ export interface ServerNode {
 
 export type ServerChild =
   | ServerNode
+  | ServerRenderable
   | string
   | number
   | bigint
@@ -261,6 +262,8 @@ const UNSAFE_HTML = typeof __VIDACT_UNSAFE_HTML__ !== 'undefined' && __VIDACT_UN
 let activeRender: RenderContext | undefined
 let activeFrameworkRender: ServerFrameworkRenderContext | undefined
 const serverBuiltins = new WeakSet<ServerComponent>()
+serverBuiltins.add(dynamicIntrinsicComponent)
+serverBuiltins.add(cloneRenderableComponent)
 const serverPromiseResources = new WeakMap<object, ServerAsyncResource<unknown>>()
 
 const FRAMEWORK_HEAD_PLACEHOLDER = '<!--vidact-framework:v1:head-->'
@@ -889,6 +892,7 @@ function serializeChild(value: ServerChild, context: RenderContext, markScalar =
       ? hydrationRange('s', content)
       : content
   }
+  if (isRenderable(value)) return serializeChild(cloneRenderable(value), context, markScalar)
   if (Array.isArray(value)) {
     const content = value.map((child) => serializeChild(child, context, markScalar)).join('')
     return context.hydrationMarkers ? hydrationRange('a', content) : content

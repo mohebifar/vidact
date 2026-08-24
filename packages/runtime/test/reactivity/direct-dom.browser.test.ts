@@ -1,11 +1,13 @@
 import {
   binding,
   createRenderable,
+  createReactElement,
   createCompiledScope,
   createCompiledState,
   createElement,
   Fragment,
   h,
+  isRenderable,
   renderableChildren,
   renderableProps,
   source,
@@ -31,6 +33,14 @@ describe('direct DOM construction', () => {
     expect(fromProps).toBeInstanceOf(HTMLButtonElement)
     expect((fromProps as HTMLButtonElement).outerHTML).toBe('<button type="button">Save</button>')
     expect((fromArguments as HTMLAnchorElement).outerHTML).toBe('<a href="/shop">Shop</a>')
+  })
+
+  it('defers React facade element factories as renderable values', () => {
+    const element = createReactElement('button', { type: 'button' }, 'Save')
+    const host = h('main', null, element as never)
+
+    expect(isRenderable(element)).toBe(true)
+    expect((host as HTMLElement).innerHTML).toBe('<button type="button">Save</button>')
   })
 
   it('flattens array children without constructing a virtual tree', () => {
@@ -64,6 +74,19 @@ describe('direct DOM construction', () => {
     expect((result as HTMLElement).textContent).toBe('firstsecond')
   })
 
+  it('keeps key and absent refs out of function component props', () => {
+    let received: Record<string, unknown> | undefined
+    h(
+      (props) => {
+        received = props
+        return h('div', null)
+      },
+      { key: 'identity', ref: undefined, title: 'visible' },
+    )
+
+    expect(received).toEqual({ title: 'visible' })
+  })
+
   it('does not synthesize children for a childless function component', () => {
     let received: Record<string, unknown> | undefined
 
@@ -73,6 +96,22 @@ describe('direct DOM construction', () => {
     }, null)
 
     expect(received).toEqual({})
+  })
+
+  it('passes one function-component child as a scalar', () => {
+    const child = h('span', null, 'only')
+    let received: unknown
+
+    h(
+      (props) => {
+        received = props.children
+        return h('div', null, props.children as Node)
+      },
+      null,
+      child,
+    )
+
+    expect(received).toBe(child)
   })
 
   it('maps React double-click handlers to the native dblclick event', () => {

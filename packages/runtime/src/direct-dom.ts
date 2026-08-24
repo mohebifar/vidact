@@ -41,6 +41,7 @@ import {
   isHydrating,
 } from './hydration-bridge.ts'
 import { mountRawHtmlProp } from './raw-html.ts'
+import { isRenderableProtocol, materializeRenderable } from './renderable-protocol.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 const UNSAFE_HTML = typeof __VIDACT_UNSAFE_HTML__ === 'undefined' || __VIDACT_UNSAFE_HTML__
@@ -314,6 +315,10 @@ function appendChild(parent: Node, child: DirectChild): void {
   }
   if (isCompiledBinding(child)) {
     mountCompiledBinding(parent, child)
+    return
+  }
+  if (isRenderableProtocol(child)) {
+    appendChild(parent, materializeRenderable(child) as DirectChild)
     return
   }
   if (Array.isArray(child)) {

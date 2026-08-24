@@ -4,9 +4,9 @@ use oxc_allocator::{Allocator, CloneIn, GetAllocator, Vec as ArenaVec};
 use oxc_ast::{ast::*, builder::AstBuilder};
 use oxc_ast_visit::{
     Visit, VisitMut,
-    walk_mut::{walk_call_expression, walk_expression, walk_jsx_attribute},
+    walk_mut::{walk_call_expression, walk_expression, walk_jsx_attribute, walk_jsx_element},
 };
-use oxc_span::SPAN;
+use oxc_span::{GetSpan, SPAN};
 
 use crate::{Diagnostic, DiagnosticCode, SourceSpan, react_bindings::ReactBindings};
 
@@ -32,6 +32,7 @@ pub(crate) fn lower_server_renderables<'a>(
     let mut transformer = ServerRenderableTransformer {
         ast: &ast,
         react,
+        renderable_depth: 0,
         diagnostic: None,
     };
     transformer.visit_program(program);
@@ -89,6 +90,7 @@ pub(crate) fn lower_server_renderables<'a>(
 struct ServerRenderableTransformer<'a, 'r, 's> {
     ast: &'r AstBuilder<'a>,
     react: &'r ReactBindings<'s>,
+    renderable_depth: usize,
     diagnostic: Option<Diagnostic>,
 }
 
@@ -97,7 +99,12 @@ impl<'a> ServerRenderableTransformer<'a, '_, '_> {
         &mut self,
         mut element: oxc_allocator::Box<'a, JSXElement<'a>>,
     ) -> Result<Expression<'a>, Diagnostic> {
+        self.renderable_depth += 1;
         self.visit_jsx_element(&mut element);
+        self.renderable_depth -= 1;
+        if let Some(diagnostic) = self.diagnostic.take() {
+            return Err(diagnostic);
+        }
         let (input, constructor) = renderable_parts(self.ast, element)?;
         Ok(call_name(
             self.ast,
@@ -111,6 +118,46 @@ impl<'a> ServerRenderableTransformer<'a, '_, '_> {
 }
 
 impl<'a> VisitMut<'a> for ServerRenderableTransformer<'a, '_, '_> {
+    fn visit_jsx_element(&mut self, element: &mut JSXElement<'a>) {
+        let staged_boundary = ["Suspense", "Activity", "Profiler"]
+            .into_iter()
+            .any(|name| {
+                self.react
+                    .is_named_jsx_element(&element.opening_element.name, name)
+            });
+        if (is_component_element(element) || self.renderable_depth > 0) && !staged_boundary {
+            for child in &mut element.children {
+                let nested = match child {
+                    JSXChild::Element(value) => {
+                        Some(value.clone_in_with_semantic_ids(self.ast.allocator()))
+                    }
+                    JSXChild::ExpressionContainer(container) => match &container.expression {
+                        JSXExpression::JSXElement(value) => {
+                            Some(value.clone_in_with_semantic_ids(self.ast.allocator()))
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let Some(nested) = nested else { continue };
+                match self.lower_attribute_element(nested) {
+                    Ok(expression) => {
+                        *child = JSXChild::new_expression_container(
+                            child.span(),
+                            JSXExpression::from(expression),
+                            self.ast,
+                        );
+                    }
+                    Err(diagnostic) => {
+                        self.diagnostic = Some(diagnostic);
+                        return;
+                    }
+                }
+            }
+        }
+        walk_jsx_element(self, element);
+    }
+
     fn visit_expression(&mut self, expression: &mut Expression<'a>) {
         walk_expression(self, expression);
         let Expression::ChainExpression(chain) = expression else {
@@ -204,6 +251,14 @@ impl<'a> VisitMut<'a> for ServerRenderableTransformer<'a, '_, '_> {
         }
         walk_jsx_attribute(self, attribute);
     }
+}
+
+fn is_component_element(element: &JSXElement<'_>) -> bool {
+    !matches!(
+        &element.opening_element.name,
+        JSXElementName::Identifier(name)
+            if name.name.chars().next().is_some_and(char::is_lowercase)
+    )
 }
 
 fn renderable_parts<'a>(

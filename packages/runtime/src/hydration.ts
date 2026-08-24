@@ -280,7 +280,9 @@ export function claimHydrationSlotRange(parent: Node): HydrationRange | undefine
   if (state === undefined) return undefined
   const start = cursor(state, parent)
   if (!isMarker(start, `${HYDRATION_PREFIX}:b`)) {
-    throw mismatch('expected a vidact:v1 child-slot marker')
+    throw mismatch(
+      `expected a vidact:v1 child-slot marker in ${parent.nodeName}; found ${JSON.stringify(markerValue(start as Node) ?? start?.nodeName ?? null)} after ${JSON.stringify(markerValue(start?.previousSibling as Node) ?? start?.previousSibling?.nodeName ?? null)}; insertion=${JSON.stringify(markerValue(activeInsertionPoint?.[1] as Node) ?? activeInsertionPoint?.[1]?.nodeName ?? null)}`,
+    )
   }
   const end = findClosingSibling(start, `${HYDRATION_PREFIX}:b`)
   const slots = state.slots.get(parent) ?? []

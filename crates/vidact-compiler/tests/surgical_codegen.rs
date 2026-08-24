@@ -2707,7 +2707,7 @@ fn compiles_nested_prop_paths_with_container_and_leaf_defaults() {
 }
 
 #[test]
-fn defers_component_children_until_the_child_namespace_is_active() {
+fn defers_component_element_children_until_the_child_namespace_is_active() {
     let output = compile_surgical_module(ModuleInput {
         filename: "NamespaceChildren.tsx",
         source: r#"
@@ -2721,8 +2721,60 @@ fn defers_component_children_until_the_child_namespace_is_active() {
     })
     .expect("component children should defer construction to their insertion namespace");
 
-    assert!(output.contains("deferred as __vidactDeferred"), "{output}");
-    assert!(output.contains("__vidactDeferred(() => <div"), "{output}");
+    assert!(
+        output.contains("createRenderable as __vidactCreateRenderable"),
+        "{output}"
+    );
+    assert!(output.contains("__vidactCreateRenderable({},"), "{output}");
+    assert!(
+        !output.contains("<div __vidactNamespace=\"svg\""),
+        "{output}"
+    );
+}
+
+#[test]
+fn forwards_scalar_component_child_bindings_without_structural_slots() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "ScalarComponentChild.tsx",
+        source: r#"
+            function Frame({ children }) {
+                return <section>{children}</section>;
+            }
+            export function ScalarComponentChild({ label }) {
+                return <Frame>{label.toUpperCase()}</Frame>;
+            }
+        "#,
+    })
+    .expect("scalar component children should remain text bindings across wrappers");
+
+    assert!(output.contains("<Frame>{__vidactBinding("), "{output}");
+    assert!(
+        !output.contains("__vidactDeferred(() => __vidactBinding("),
+        "{output}"
+    );
+}
+
+#[test]
+fn forwards_received_children_as_live_render_value_bindings() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "ForwardedChildren.tsx",
+        source: r#"
+            function Frame({ children }) {
+                return <Layout>{children}</Layout>;
+            }
+            export function ForwardedChildren({ label }) {
+                return <Frame><strong>{label}</strong></Frame>;
+            }
+        "#,
+    })
+    .expect("received component children may carry deferred structural render values");
+
+    assert!(output.contains("<Layout>{__vidactBinding("), "{output}");
+    assert!(output.contains("() => children.get()"), "{output}");
+    assert!(
+        !output.contains("__vidactDeferred(() => __vidactBinding("),
+        "{output}"
+    );
 }
 
 #[test]

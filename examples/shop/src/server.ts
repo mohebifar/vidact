@@ -64,6 +64,10 @@ export async function handleShopRequest(
     )
   }
 
+  if (request.method === 'GET' && requestUrl.pathname === '/health') {
+    return Response.json({ status: 'ok' })
+  }
+
   if (request.method === 'GET' && requestUrl.pathname === '/') {
     return new Response(await renderShopPage(undefined, assets), {
       headers: {

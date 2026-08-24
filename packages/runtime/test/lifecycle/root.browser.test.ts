@@ -210,6 +210,52 @@ describe('compiled client roots', () => {
     expect(host.childNodes).toHaveLength(0)
   })
 
+  it('hydrates a live binding that forwards a structural child slot', async () => {
+    const host = document.createElement('div')
+    function ServerNestedChildren(): ServerChild {
+      return serverJsx('div', {
+        children: [serverJsx('span', { children: 'one' })],
+      })
+    }
+    host.innerHTML = renderToString(() => serverJsx(ServerNestedChildren, null))
+    document.body.append(host)
+    const existingDiv = host.querySelector('div')!
+    const existingSpan = host.querySelector('span')!
+    const recoveries: unknown[] = []
+
+    const hydration = await captureMutations(host, () =>
+      hydrateRoot(
+        host,
+        () => {
+          const scope = createCompiledScope()
+          const forwarded = deferred(() =>
+            keyed(
+              scope,
+              source(0),
+              () => ['one'],
+              (value) => value,
+              (value) => h('span', null, value.get()),
+            ),
+          )
+          return compiledRoot(scope, () =>
+            h(
+              'div',
+              null,
+              binding(scope, source(0), () => forwarded),
+            ),
+          )
+        },
+        { onRecoverableError: (error) => recoveries.push(error) },
+      ),
+    )
+
+    expect(recoveries).toEqual([])
+    expect(hydration.records).toHaveLength(0)
+    expect(host.querySelector('div')).toBe(existingDiv)
+    expect(host.querySelector('span')).toBe(existingSpan)
+    hydration.result.unmount()
+  })
+
   it('reports a marker mismatch and recovers at the whole-root boundary', () => {
     const host = document.createElement('div')
     host.innerHTML =
