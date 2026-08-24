@@ -3622,10 +3622,15 @@ function claimPendingRefOwners(root: Node): void {
 }
 
 function commitPendingRefs(root: Node): void {
-  commitPublishedNodes([root])
+  if (!isHydrating()) commitPublishedNodesNow([root])
 }
 
 function commitPublishedNodes(nodes: readonly Node[]): void {
+  if (isHydrating()) return
+  commitPublishedNodesNow(nodes)
+}
+
+function commitPublishedNodesNow(nodes: readonly Node[]): void {
   const publicationRoot = nodes[0]?.getRootNode()
   if (publicationRoot instanceof DocumentFragment && !(publicationRoot instanceof ShadowRoot)) {
     return
@@ -3685,7 +3690,7 @@ function commitRangeRefs(start: Node, end: Node): void {
     nodes.push(node)
     node = node.nextSibling
   }
-  commitPublishedNodes(nodes)
+  commitPublishedNodesNow(nodes)
 }
 
 function visitNodes(root: Node, visit: (node: Node) => void): void {

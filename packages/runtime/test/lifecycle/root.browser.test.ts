@@ -5,6 +5,7 @@ import { hydrateHotRoot, hydrateRoot } from '../../src/hydrate.ts'
 import {
   binding,
   choose,
+  compiledInsertionEffect,
   compiledRoot,
   createCompiledScope,
   createCompiledId,
@@ -207,6 +208,48 @@ describe('compiled client roots', () => {
     expect(existingText.data).toBe('1')
 
     root.unmount()
+    expect(host.childNodes).toHaveLength(0)
+  })
+
+  it('runs hydrated insertion effects before attaching claimed callback refs', async () => {
+    const host = document.createElement('div')
+    function ServerButton(): ServerChild {
+      return serverJsx('button', { children: 'Ready' })
+    }
+    host.innerHTML = renderToString(() => serverJsx(ServerButton, null))
+    document.body.append(host)
+    const serverButton = host.querySelector('button')!
+    let insertionCommitted = false
+    let refSawInsertion = false
+
+    const hydration = await captureMutations(host, () =>
+      hydrateRoot(host, () => {
+        const scope = createCompiledScope()
+        compiledInsertionEffect(scope, source(0), () => () => {
+          insertionCommitted = true
+        })
+        return compiledRoot(scope, () =>
+          h(
+            'button',
+            {
+              ref: () => {
+                refSawInsertion = insertionCommitted
+                if (!insertionCommitted) {
+                  throw new Error('hydrated callback ref ran before its insertion effect')
+                }
+              },
+            },
+            'Ready',
+          ),
+        )
+      }),
+    )
+
+    expect(hydration.records).toHaveLength(0)
+    expect(host.querySelector('button')).toBe(serverButton)
+    expect(refSawInsertion).toBe(true)
+
+    hydration.result.unmount()
     expect(host.childNodes).toHaveLength(0)
   })
 
