@@ -3,7 +3,7 @@ use std::{
     path::Path,
 };
 
-use oxc_allocator::{Allocator, CloneIn, GetAllocator};
+use oxc_allocator::{Allocator, CloneIn, GetAllocator, TakeIn};
 use oxc_ast::{ast::*, builder::AstBuilder};
 use oxc_ast_visit::{
     Visit, VisitMut,
@@ -81,6 +81,7 @@ const CREATE_MEMO: &str = "__vidactCreateMemo";
 const CREATE_OPTIMISTIC: &str = "__vidactCreateOptimistic";
 const DEFERRED: &str = "__vidactDeferred";
 const DISPATCH: &str = "__vidactDispatch";
+const DYNAMIC_INTRINSIC_COMPONENT: &str = "__vidactDynamicIntrinsicComponent";
 const ENABLE_FRAMEWORK_METADATA: &str = "__vidactEnableFrameworkMetadata";
 const ENABLE_DOM_FORMS: &str = "__vidactEnableDomForms";
 const ENABLE_DOM_NAMESPACE: &str = "__vidactEnableDomNamespace";
@@ -133,6 +134,8 @@ pub fn compile_surgical_module_with_ir_and_options(
     options: &CompilationOptions,
 ) -> Result<SurgicalCompilation, Vec<Diagnostic>> {
     let allocator = Allocator::default();
+    let mut canonical_maps = Vec::new();
+    let mut canonical_sources = vec![input.source.to_string()];
     let source_type =
         SourceType::from_path(Path::new(input.filename)).unwrap_or_else(|_| SourceType::tsx());
     let mut parsed = Parser::new(&allocator, input.source, source_type).parse();
@@ -185,6 +188,50 @@ pub fn compile_surgical_module_with_ir_and_options(
             .apply(&mut parsed.program)
             .map_err(|diagnostic| vec![diagnostic])?;
     }
+    if options.feature_enabled(CompilerFeature::DependencySource) {
+        let generated = Codegen::new()
+            .with_options(CodegenOptions {
+                source_map_path: Some(Path::new(input.filename).to_path_buf()),
+                ..CodegenOptions::default()
+            })
+            .build(&parsed.program);
+        canonical_maps.push(
+            generated
+                .map
+                .expect("source map is enabled for dependency canonicalization")
+                .into_owned_sourcemap(),
+        );
+        let normalized = generated.code;
+        canonical_sources.push(normalized.clone());
+        let normalized_source = allocator.alloc_str(&normalized);
+        parsed = Parser::new(&allocator, normalized_source, source_type.with_jsx(true)).parse();
+        if !parsed.diagnostics.is_empty() {
+            return Err(vec![analysis_error(format!(
+                "OXC could not parse {} after custom-hook canonicalization: {:?}",
+                input.filename, parsed.diagnostics
+            ))]);
+        }
+    }
+    if let Err(mut diagnostics) = normalize_state_elisions(&allocator, &mut parsed.program) {
+        crate::source_maps::remap_diagnostics(
+            &mut diagnostics,
+            &canonical_sources,
+            &canonical_maps,
+        );
+        return Err(diagnostics);
+    }
+    if options.feature_enabled(CompilerFeature::DependencySource) {
+        if let Err(mut diagnostics) =
+            normalize_nested_primitive_hooks(&allocator, &mut parsed.program)
+        {
+            crate::source_maps::remap_diagnostics(
+                &mut diagnostics,
+                &canonical_sources,
+                &canonical_maps,
+            );
+            return Err(diagnostics);
+        }
+    }
     let semantic = SemanticBuilder::new()
         .with_build_nodes(true)
         .with_check_syntax_error(true)
@@ -203,17 +250,45 @@ pub fn compile_surgical_module_with_ir_and_options(
     };
     class_component.visit_program(&parsed.program);
     if let Some(span) = class_component.span {
-        return Err(vec![unsupported(
+        let mut diagnostics = vec![unsupported(
             "React class components are unsupported; use a function component and Vidact errorBoundary",
         )
-        .with_span(SourceSpan::new(span.start, span.end))]);
+        .with_span(SourceSpan::new(span.start, span.end))];
+        crate::source_maps::remap_diagnostics(
+            &mut diagnostics,
+            &canonical_sources,
+            &canonical_maps,
+        );
+        return Err(diagnostics);
     }
 
-    let components = analyze_program(input, &parsed.program, &semantic.semantic, &allocator)?
-        .into_iter()
-        .map(lower_component)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|diagnostic| vec![diagnostic])?;
+    let components = analyze_program(
+        input,
+        &parsed.program,
+        &semantic.semantic,
+        &allocator,
+        options,
+    )
+    .map_err(|mut diagnostics| {
+        crate::source_maps::remap_diagnostics(
+            &mut diagnostics,
+            &canonical_sources,
+            &canonical_maps,
+        );
+        diagnostics
+    })?
+    .into_iter()
+    .map(lower_component)
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|diagnostic| {
+        let mut diagnostics = vec![diagnostic];
+        crate::source_maps::remap_diagnostics(
+            &mut diagnostics,
+            &canonical_sources,
+            &canonical_maps,
+        );
+        diagnostics
+    })?;
     if components.is_empty() {
         return Err(vec![unsupported("surgical codegen found no component")]);
     }
@@ -225,7 +300,15 @@ pub fn compile_surgical_module_with_ir_and_options(
         options,
         &mut parsed.program,
     )
-    .map_err(|diagnostic| vec![diagnostic])?;
+    .map_err(|diagnostic| {
+        let mut diagnostics = vec![diagnostic];
+        crate::source_maps::remap_diagnostics(
+            &mut diagnostics,
+            &canonical_sources,
+            &canonical_maps,
+        );
+        diagnostics
+    })?;
     restore_anonymous_default_component_names(&mut parsed.program, &anonymous_defaults);
     let generated = Codegen::new()
         .with_options(CodegenOptions {
@@ -236,7 +319,9 @@ pub fn compile_surgical_module_with_ir_and_options(
     let source_map = generated
         .map
         .expect("source map is enabled for surgical compilation")
-        .to_json_string();
+        .into_owned_sourcemap();
+    let source_map =
+        crate::source_maps::compose_chain(source_map, canonical_maps.into_iter()).to_json_string();
     Ok(SurgicalCompilation {
         code: generated.code,
         source_map,
@@ -247,6 +332,167 @@ pub fn compile_surgical_module_with_ir_and_options(
 struct ReactClassComponentFinder<'r, 's> {
     react: &'r ReactBindings<'s>,
     span: Option<Span>,
+}
+
+pub(crate) fn normalize_state_elisions<'a>(
+    allocator: &'a Allocator,
+    program: &mut Program<'a>,
+) -> Result<(), Vec<Diagnostic>> {
+    let semantic = SemanticBuilder::new()
+        .with_build_nodes(true)
+        .with_check_syntax_error(true)
+        .build(&*program);
+    if !semantic.diagnostics.is_empty() {
+        return Err(vec![analysis_error(format!(
+            "OXC semantic analysis failed before state elision normalization: {:?}",
+            semantic.diagnostics
+        ))]);
+    }
+    let scoping = semantic.semantic.into_scoping();
+    let react = ReactBindings::new(program, &scoping);
+    StateElisionNormalizer {
+        ast: AstBuilder::new(allocator),
+        react: &react,
+        ordinal: 0,
+    }
+    .visit_program(program);
+    Ok(())
+}
+
+struct StateElisionNormalizer<'a, 'r, 's> {
+    ast: AstBuilder<'a>,
+    react: &'r ReactBindings<'s>,
+    ordinal: u32,
+}
+
+fn normalize_nested_primitive_hooks<'a>(
+    allocator: &'a Allocator,
+    program: &mut Program<'a>,
+) -> Result<(), Vec<Diagnostic>> {
+    let semantic = SemanticBuilder::new()
+        .with_build_nodes(true)
+        .with_check_syntax_error(true)
+        .build(&*program);
+    if !semantic.diagnostics.is_empty() {
+        return Err(vec![analysis_error(format!(
+            "OXC semantic analysis failed before primitive-hook normalization: {:?}",
+            semantic.diagnostics
+        ))]);
+    }
+    let scoping = semantic.semantic.into_scoping();
+    let react = ReactBindings::new(program, &scoping);
+    PrimitiveHookBodyNormalizer {
+        ast: AstBuilder::new(allocator),
+        react: &react,
+        ordinal: 0,
+    }
+    .visit_program(program);
+    Ok(())
+}
+
+struct PrimitiveHookBodyNormalizer<'a, 'r, 's> {
+    ast: AstBuilder<'a>,
+    react: &'r ReactBindings<'s>,
+    ordinal: u32,
+}
+
+impl<'a> PrimitiveHookBodyNormalizer<'a, '_, '_> {
+    fn normalize_body(&mut self, body: &mut FunctionBody<'a>) {
+        let mut next = oxc_allocator::Vec::new_in(&self.ast);
+        for mut statement in body.statements.drain(..) {
+            let mut hoister = NestedPrimitiveHookCallHoister {
+                ast: &self.ast,
+                react: self.react,
+                ordinal: &mut self.ordinal,
+                statements: Vec::new(),
+            };
+            hoister.visit_statement(&mut statement);
+            next.extend(hoister.statements);
+            next.push(statement);
+        }
+        body.statements = next;
+    }
+}
+
+impl<'a> VisitMut<'a> for PrimitiveHookBodyNormalizer<'a, '_, '_> {
+    fn visit_function(&mut self, function: &mut Function<'a>, flags: ScopeFlags) {
+        if let Some(body) = &mut function.body {
+            self.normalize_body(body);
+        }
+        oxc_ast_visit::walk_mut::walk_function(self, function, flags);
+    }
+
+    fn visit_arrow_function_expression(&mut self, function: &mut ArrowFunctionExpression<'a>) {
+        if let Some(body) = function.body.as_function_body_mut() {
+            self.normalize_body(body);
+        }
+        oxc_ast_visit::walk_mut::walk_arrow_function_expression(self, function);
+    }
+}
+
+struct NestedPrimitiveHookCallHoister<'a, 'r, 's, 'o> {
+    ast: &'r AstBuilder<'a>,
+    react: &'r ReactBindings<'s>,
+    ordinal: &'o mut u32,
+    statements: Vec<Statement<'a>>,
+}
+
+impl<'a> VisitMut<'a> for NestedPrimitiveHookCallHoister<'a, '_, '_, '_> {
+    fn visit_expression(&mut self, expression: &mut Expression<'a>) {
+        if let Expression::CallExpression(call) = expression.without_parentheses()
+            && (self.react.context_hook_call(call).is_some() || self.react.is_id_call(call))
+        {
+            let name = self
+                .ast
+                .allocator()
+                .alloc_str(&format!("__vidactPrimitiveHook{}", *self.ordinal));
+            *self.ordinal += 1;
+            let initializer = expression.take_in(self.ast);
+            self.statements.push(variable_statement(
+                self.ast,
+                VariableDeclarationKind::Const,
+                name,
+                initializer,
+            ));
+            *expression = ident(self.ast, name);
+            return;
+        }
+        walk_expression_mut(self, expression);
+    }
+
+    fn visit_function(&mut self, _function: &mut Function<'a>, _flags: ScopeFlags) {}
+
+    fn visit_arrow_function_expression(&mut self, _function: &mut ArrowFunctionExpression<'a>) {}
+}
+
+impl<'a> VisitMut<'a> for StateElisionNormalizer<'a, '_, '_> {
+    fn visit_variable_declarator(&mut self, declarator: &mut VariableDeclarator<'a>) {
+        let Some(Expression::CallExpression(call)) = &declarator.init else {
+            return;
+        };
+        if self.react.state_hook_call(call).is_none() {
+            return;
+        }
+        let BindingPattern::ArrayPattern(pattern) = &mut declarator.id else {
+            return;
+        };
+        let [value, Some(_)] = pattern.elements.as_mut_slice() else {
+            return;
+        };
+        if value.is_some() {
+            return;
+        }
+        let name = self
+            .ast
+            .allocator()
+            .alloc_str(&format!("__vidactUnusedState{}", self.ordinal));
+        self.ordinal += 1;
+        *value = Some(BindingPattern::new_binding_identifier(
+            declarator.span,
+            name,
+            &self.ast,
+        ));
+    }
 }
 
 impl<'a> Visit<'a> for ReactClassComponentFinder<'_, '_> {
@@ -573,6 +819,8 @@ fn remove_lowered_react_state_imports(
         live_symbols: BTreeSet::new(),
         remaining_state_call: None,
         remaining_compiled_hook_call: None,
+        allow_runtime_memos: options.feature_enabled(CompilerFeature::DependencySource),
+        allow_runtime_ids: options.feature_enabled(CompilerFeature::DependencySource),
         async_enabled: options.feature_enabled(CompilerFeature::Async),
         concurrent_enabled: options.feature_enabled(CompilerFeature::Concurrent),
         remaining_concurrent_call: None,
@@ -697,6 +945,8 @@ struct PostTransformReactUsage<'r, 's> {
     live_symbols: BTreeSet<SymbolId>,
     remaining_state_call: Option<Span>,
     remaining_compiled_hook_call: Option<(&'static str, Span)>,
+    allow_runtime_memos: bool,
+    allow_runtime_ids: bool,
     async_enabled: bool,
     concurrent_enabled: bool,
     remaining_concurrent_call: Option<(&'static str, Span)>,
@@ -793,8 +1043,12 @@ impl<'a> Visit<'a> for PostTransformReactUsage<'_, '_> {
             return;
         }
         if let Some(hook) = self.react.memo_hook_call(call) {
-            self.remaining_compiled_hook_call
-                .get_or_insert((hook.name(), call.span));
+            if self.allow_runtime_memos {
+                walk_call_expression(self, call);
+            } else {
+                self.remaining_compiled_hook_call
+                    .get_or_insert((hook.name(), call.span));
+            }
             return;
         }
         if let Some(hook) = self.react.context_hook_call(call) {
@@ -817,8 +1071,12 @@ impl<'a> Visit<'a> for PostTransformReactUsage<'_, '_> {
             return;
         }
         if self.react.is_id_call(call) {
-            self.remaining_compiled_hook_call
-                .get_or_insert(("useId", call.span));
+            if self.allow_runtime_ids {
+                walk_call_expression(self, call);
+            } else {
+                self.remaining_compiled_hook_call
+                    .get_or_insert(("useId", call.span));
+            }
             return;
         }
         walk_call_expression(self, call);
@@ -1130,17 +1388,43 @@ fn transform_component<'a>(
                     id_sources.insert(source);
                 }
             } else if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
-                && let Some(source) = source_ids.get(identifier.name.as_str())
+                && let Some(source) = lookup_source(&source_ids, identifier.name.as_str())
                 && let Some(symbol) = identifier.symbol_id.get()
             {
-                source_symbols.insert(symbol, *source);
+                source_symbols.insert(symbol, source);
             }
         }
     }
 
     validate_effect_event_uses(body, &react, scoping, &effect_event_symbols)?;
 
-    reject_untracked_derived_bindings(body, scoping, &source_symbols, &item_source_symbols)?;
+    propagate_direct_source_aliases(body, scoping, &mut source_symbols, &mut state_symbols);
+    let synthetic_derivations = if options.feature_enabled(CompilerFeature::DependencySource) {
+        collect_missing_derivations(
+            allocator,
+            body,
+            scoping,
+            &react,
+            &mut next_source,
+            &mut source_ids,
+            &mut source_symbols,
+            &item_source_symbols,
+        )
+    } else {
+        Vec::new()
+    };
+    let synthetic_symbols = synthetic_derivations
+        .iter()
+        .map(|derivation| derivation.symbol)
+        .collect::<BTreeSet<_>>();
+
+    reject_untracked_derived_bindings(
+        body,
+        scoping,
+        &react,
+        &source_symbols,
+        &item_source_symbols,
+    )?;
     let mut render_expression = render::lower_component_render(
         &ast,
         allocator,
@@ -1228,17 +1512,21 @@ fn transform_component<'a>(
             transform_effect_event_declarator(&ast, declarator, &react)?;
             transform_id_declarator(&ast, declarator, &react)?;
             if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
-                && ir.sources.iter().any(|source| {
-                    source.kind == SourceKind::Derived
-                        && source.name == identifier.name.as_str()
-                        && !memo_sources.contains(&source.id)
-                        && !concurrent_sources.contains(&source.id)
-                        && !action_sources.contains(&source.id)
-                        && !context_sources.contains(&source.id)
-                        && !external_sources.contains(&source.id)
-                        && !effect_event_sources.contains(&source.id)
-                        && !id_sources.contains(&source.id)
-                })
+                && (identifier
+                    .symbol_id
+                    .get()
+                    .is_some_and(|symbol| synthetic_symbols.contains(&symbol))
+                    || ir.sources.iter().any(|source| {
+                        source.kind == SourceKind::Derived
+                            && source.name == identifier.name.as_str()
+                            && !memo_sources.contains(&source.id)
+                            && !concurrent_sources.contains(&source.id)
+                            && !action_sources.contains(&source.id)
+                            && !context_sources.contains(&source.id)
+                            && !external_sources.contains(&source.id)
+                            && !effect_event_sources.contains(&source.id)
+                            && !id_sources.contains(&source.id)
+                    }))
             {
                 declarator.kind = VariableDeclarationKind::Let;
                 contains_derived = true;
@@ -1447,6 +1735,31 @@ fn transform_component<'a>(
             }
         });
     }
+    for derivation in &synthetic_derivations {
+        let reads = dependencies(
+            &derivation.expression,
+            scoping,
+            &source_symbols,
+            &item_source_symbols,
+        );
+        if !reads.item.is_empty() {
+            return Err(unsupported(
+                "expanded custom-hook derivations cannot depend on keyed item slots",
+            ));
+        }
+        let reads = reads
+            .parent
+            .into_iter()
+            .filter(|source| *source != derivation.source)
+            .collect::<Vec<_>>();
+        updater_statements.push(register_derived(
+            &ast,
+            derivation.name,
+            derivation.expression.clone_in_with_semantic_ids(allocator),
+            &reads,
+            &[derivation.source],
+        ));
+    }
     let updater_count = updater_statements.len();
     for (offset, statement) in updater_statements.into_iter().enumerate() {
         body.statements.insert(render_start + offset, statement);
@@ -1515,10 +1828,20 @@ struct PropBinding<'a> {
     container_defaults: Vec<Option<Expression<'a>>>,
 }
 
+#[derive(Clone)]
 struct StateReference<'a> {
     state_name: &'a str,
     setter: bool,
     path: Vec<String>,
+}
+
+fn lookup_source(sources: &BTreeMap<&str, SourceId>, name: &str) -> Option<SourceId> {
+    sources.get(name).copied().or_else(|| {
+        let generated = name.strip_prefix("__vidactHook")?;
+        let (_, generated) = generated.split_once('_')?;
+        let (_, original) = generated.split_once('_')?;
+        sources.get(original).copied()
+    })
 }
 
 fn state_binding_symbols<'a>(
@@ -1551,7 +1874,7 @@ fn state_binding_symbols<'a>(
         ))
         .with_span(SourceSpan::new(pattern.span.start, pattern.span.end)));
     };
-    let source = sources.get(value.name.as_str()).copied().ok_or_else(|| {
+    let source = lookup_source(sources, value.name.as_str()).ok_or_else(|| {
         unsupported(format!("state {} is absent from analysis", value.name))
             .with_span(SourceSpan::new(value.span.start, value.span.end))
     })?;
@@ -1602,7 +1925,7 @@ fn transition_binding_symbols<'a>(
                 .with_span(SourceSpan::new(pattern.span.start, pattern.span.end)),
         );
     };
-    let source = sources.get(pending.name.as_str()).copied().ok_or_else(|| {
+    let source = lookup_source(sources, pending.name.as_str()).ok_or_else(|| {
         unsupported(format!(
             "transition state {} is absent from analysis",
             pending.name
@@ -1697,14 +2020,14 @@ fn action_state_binding_symbols<'a>(
                 .with_span(SourceSpan::new(pattern.span.start, pattern.span.end)),
         );
     };
-    let state_source = sources.get(state.name.as_str()).copied().ok_or_else(|| {
+    let state_source = lookup_source(sources, state.name.as_str()).ok_or_else(|| {
         unsupported(format!(
             "action state {} is absent from analysis",
             state.name
         ))
         .with_span(SourceSpan::new(state.span.start, state.span.end))
     })?;
-    let pending_source = sources.get(pending.name.as_str()).copied().ok_or_else(|| {
+    let pending_source = lookup_source(sources, pending.name.as_str()).ok_or_else(|| {
         unsupported(format!(
             "action pending state {} is absent from analysis",
             pending.name
@@ -1742,7 +2065,7 @@ fn optimistic_binding_symbols<'a>(
                 .with_span(SourceSpan::new(pattern.span.start, pattern.span.end)),
         );
     };
-    let source = sources.get(value.name.as_str()).copied().ok_or_else(|| {
+    let source = lookup_source(sources, value.name.as_str()).ok_or_else(|| {
         unsupported(format!(
             "optimistic value {} is absent from analysis",
             value.name
@@ -1815,13 +2138,9 @@ fn memo_binding_symbol<'a>(
     let Some(hook) = react.memo_hook_call(call) else {
         return Ok(None);
     };
-    let source = sources
-        .get(identifier.name.as_str())
-        .copied()
-        .ok_or_else(|| {
-            unsupported(format!("memo {} is absent from analysis", identifier.name))
-                .with_span(SourceSpan::new(identifier.span.start, identifier.span.end))
-        })?;
+    let Some(source) = lookup_source(sources, identifier.name.as_str()) else {
+        return Ok(None);
+    };
     let symbol = identifier.symbol_id.get().ok_or_else(|| {
         analysis_error(format!("memo {} has no semantic symbol", identifier.name))
     })?;
@@ -1849,16 +2168,13 @@ fn context_binding_symbol<'a>(
     let Some(hook) = react.context_hook_call(call) else {
         return Ok(None);
     };
-    let source = sources
-        .get(identifier.name.as_str())
-        .copied()
-        .ok_or_else(|| {
-            unsupported(format!(
-                "context {} is absent from analysis",
-                identifier.name
-            ))
-            .with_span(SourceSpan::new(identifier.span.start, identifier.span.end))
-        })?;
+    let source = lookup_source(sources, identifier.name.as_str()).ok_or_else(|| {
+        unsupported(format!(
+            "context {} is absent from analysis",
+            identifier.name
+        ))
+        .with_span(SourceSpan::new(identifier.span.start, identifier.span.end))
+    })?;
     let symbol = identifier.symbol_id.get().ok_or_else(|| {
         analysis_error(format!(
             "context {} has no semantic symbol",
@@ -1934,7 +2250,7 @@ fn effect_event_binding_symbol(
     })?;
     Ok(Some((
         symbol,
-        sources.get(identifier.name.as_str()).copied(),
+        lookup_source(sources, identifier.name.as_str()),
     )))
 }
 
@@ -1951,7 +2267,7 @@ fn id_binding_source(
     };
     react
         .is_id_call(call)
-        .then(|| sources.get(identifier.name.as_str()).copied())
+        .then(|| lookup_source(sources, identifier.name.as_str()))
 }
 
 fn transform_state_declarator<'a>(
@@ -4352,9 +4668,130 @@ fn contains_component_return(statement: &Statement<'_>) -> bool {
     nested.found
 }
 
+struct SyntheticDerivation<'a> {
+    name: &'a str,
+    symbol: SymbolId,
+    source: SourceId,
+    expression: Expression<'a>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_missing_derivations<'a>(
+    allocator: &'a Allocator,
+    body: &FunctionBody<'a>,
+    scoping: &Scoping,
+    react: &ReactBindings<'_>,
+    next_source: &mut u32,
+    source_ids: &mut BTreeMap<&'a str, SourceId>,
+    source_symbols: &mut BTreeMap<SymbolId, SourceId>,
+    item_source_symbols: &BTreeMap<SymbolId, SourceId>,
+) -> Vec<SyntheticDerivation<'a>> {
+    let mut derivations = Vec::new();
+    loop {
+        let previous = source_symbols.len();
+        for statement in &body.statements {
+            let Statement::VariableDeclaration(declaration) = statement else {
+                continue;
+            };
+            for declarator in &declaration.declarations {
+                let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+                    continue;
+                };
+                let Some(symbol) = identifier.symbol_id.get() else {
+                    continue;
+                };
+                if source_symbols.contains_key(&symbol) {
+                    continue;
+                }
+                let Some(initializer) = &declarator.init else {
+                    continue;
+                };
+                if matches!(initializer, Expression::CallExpression(call) if react.state_hook_call(call).is_some()
+                    || react.memo_hook_call(call).is_some()
+                    || react.context_hook_call(call).is_some()
+                    || react.effect_hook_call(call).is_some()
+                    || react.is_sync_external_store_call(call))
+                {
+                    continue;
+                }
+                let reads = immediate_dependencies(
+                    initializer,
+                    scoping,
+                    source_symbols,
+                    item_source_symbols,
+                );
+                if reads.is_empty() || !reads.item.is_empty() {
+                    continue;
+                }
+                let source = SourceId::new(*next_source);
+                *next_source += 1;
+                let name = allocator.alloc_str(identifier.name.as_str());
+                source_ids.insert(name, source);
+                source_symbols.insert(symbol, source);
+                derivations.push(SyntheticDerivation {
+                    name,
+                    symbol,
+                    source,
+                    expression: initializer.clone_in_with_semantic_ids(allocator),
+                });
+            }
+        }
+        if source_symbols.len() == previous {
+            break;
+        }
+    }
+    derivations
+}
+
+fn propagate_direct_source_aliases<'a>(
+    body: &FunctionBody<'a>,
+    scoping: &Scoping,
+    source_symbols: &mut BTreeMap<SymbolId, SourceId>,
+    state_symbols: &mut BTreeMap<SymbolId, StateReference<'a>>,
+) {
+    loop {
+        let previous = source_symbols.len();
+        for statement in &body.statements {
+            let Statement::VariableDeclaration(declaration) = statement else {
+                continue;
+            };
+            for declarator in &declaration.declarations {
+                let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+                    continue;
+                };
+                let Some(symbol) = identifier.symbol_id.get() else {
+                    continue;
+                };
+                if source_symbols.contains_key(&symbol) {
+                    continue;
+                }
+                let Some(Expression::Identifier(initializer)) = &declarator.init else {
+                    continue;
+                };
+                let Some(source_symbol) =
+                    crate::react_bindings::reference_symbol(initializer, scoping)
+                else {
+                    continue;
+                };
+                let Some(source) = source_symbols.get(&source_symbol).copied() else {
+                    continue;
+                };
+                source_symbols.insert(symbol, source);
+                if let Some(state) = state_symbols.get(&source_symbol).cloned() {
+                    state_symbols.insert(symbol, state);
+                }
+            }
+        }
+        if source_symbols.len() == previous {
+            break;
+        }
+    }
+}
+
 fn reject_untracked_derived_bindings(
     body: &FunctionBody<'_>,
     scoping: &Scoping,
+    react: &ReactBindings<'_>,
     source_symbols: &BTreeMap<SymbolId, SourceId>,
     item_source_symbols: &BTreeMap<SymbolId, SourceId>,
 ) -> Result<(), Diagnostic> {
@@ -4375,6 +4812,10 @@ fn reject_untracked_derived_bindings(
             let Some(initializer) = &declarator.init else {
                 continue;
             };
+            if matches!(initializer, Expression::CallExpression(call) if react.memo_hook_call(call).is_some())
+            {
+                continue;
+            }
             let reads =
                 immediate_dependencies(initializer, scoping, source_symbols, item_source_symbols);
             if !reads.is_empty() {
@@ -5044,6 +5485,7 @@ fn runtime_import<'a>(
         ("createRenderable", CREATE_RENDERABLE),
         ("deferred", DEFERRED),
         ("dispatch", DISPATCH),
+        ("dynamicIntrinsicComponent", DYNAMIC_INTRINSIC_COMPONENT),
         ("enableFrameworkMetadata", ENABLE_FRAMEWORK_METADATA),
         ("forwardedRef", FORWARDED_REF),
         ("indexed", INDEXED),

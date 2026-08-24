@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use oxc_allocator::{Allocator, CloneIn, GetAllocator};
+use oxc_allocator::{Allocator, CloneIn, GetAllocator, TakeIn};
 use oxc_ast::{ast::*, builder::AstBuilder};
-use oxc_ast_visit::{Visit, VisitMut, walk::walk_call_expression};
+use oxc_ast_visit::{Visit, VisitMut, walk::walk_call_expression, walk_mut::walk_expression};
 use oxc_semantic::Scoping;
 use oxc_span::{GetSpan, SPAN, Span};
-use oxc_syntax::{reference::ReferenceId, symbol::SymbolId};
+use oxc_syntax::{operator::AssignmentOperator, reference::ReferenceId, symbol::SymbolId};
 
 use crate::{
     Diagnostic, DiagnosticCode, SourceSpan,
@@ -23,14 +23,15 @@ pub(crate) struct CustomHookPlan<'a> {
 
 struct HookTemplate<'a> {
     name: String,
-    params: Vec<HookParameter>,
+    params: Vec<HookParameter<'a>>,
     statements: Vec<Statement<'a>>,
     exported: bool,
     span: Span,
 }
 
-struct HookParameter {
-    symbol: SymbolId,
+struct HookParameter<'a> {
+    pattern: BindingPattern<'a>,
+    default: Option<Expression<'a>>,
 }
 
 #[derive(Default)]
@@ -137,6 +138,7 @@ impl CustomHookPlan<'_> {
                 &mut invocation,
             )?;
         }
+        inline_generated_conditional_results(self.allocator, program);
         remove_hook_definitions(program, self.hooks.keys().copied().collect());
         normalize_expanded_binding_spans(program)?;
 
@@ -153,6 +155,126 @@ impl CustomHookPlan<'_> {
             ));
         }
         Ok(())
+    }
+}
+
+fn inline_generated_conditional_results<'a>(allocator: &'a Allocator, program: &mut Program<'a>) {
+    let mut collector = GeneratedConditionalCollector {
+        allocator,
+        values: BTreeMap::new(),
+    };
+    collector.visit_program(program);
+    if collector.values.is_empty() {
+        return;
+    }
+    let mut uses = GeneratedConditionalUses {
+        candidates: collector.values.keys().copied().collect(),
+        counts: BTreeMap::new(),
+        nested: BTreeSet::new(),
+        function_depth: 0,
+    };
+    uses.visit_program(program);
+    collector
+        .values
+        .retain(|name, _| uses.counts.get(name).copied() == Some(1) && !uses.nested.contains(name));
+    if collector.values.is_empty() {
+        return;
+    }
+    GeneratedConditionalInliner {
+        allocator,
+        values: collector.values,
+    }
+    .visit_program(program);
+}
+
+struct GeneratedConditionalCollector<'a> {
+    allocator: &'a Allocator,
+    values: BTreeMap<&'a str, Expression<'a>>,
+}
+
+impl<'a> Visit<'a> for GeneratedConditionalCollector<'a> {
+    fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
+        let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+            return;
+        };
+        if !identifier
+            .name
+            .starts_with(&format!("{GENERATED_PREFIX}Call"))
+        {
+            return;
+        }
+        let Some(Expression::ConditionalExpression(initializer)) = &declarator.init else {
+            return;
+        };
+        self.values.insert(
+            self.allocator.alloc_str(identifier.name.as_str()),
+            Expression::ConditionalExpression(initializer.clone_in(self.allocator)),
+        );
+    }
+}
+
+struct GeneratedConditionalUses<'a> {
+    candidates: BTreeSet<&'a str>,
+    counts: BTreeMap<&'a str, usize>,
+    nested: BTreeSet<&'a str>,
+    function_depth: usize,
+}
+
+impl<'a> Visit<'a> for GeneratedConditionalUses<'a> {
+    fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
+        let Some(name) = self.candidates.get(identifier.name.as_str()).copied() else {
+            return;
+        };
+        *self.counts.entry(name).or_default() += 1;
+        if self.function_depth > 1 {
+            self.nested.insert(name);
+        }
+    }
+
+    fn visit_function(&mut self, function: &Function<'a>, flags: oxc_syntax::scope::ScopeFlags) {
+        self.function_depth += 1;
+        oxc_ast_visit::walk::walk_function(self, function, flags);
+        self.function_depth -= 1;
+    }
+
+    fn visit_arrow_function_expression(&mut self, function: &ArrowFunctionExpression<'a>) {
+        self.function_depth += 1;
+        oxc_ast_visit::walk::walk_arrow_function_expression(self, function);
+        self.function_depth -= 1;
+    }
+}
+
+struct GeneratedConditionalInliner<'a> {
+    allocator: &'a Allocator,
+    values: BTreeMap<&'a str, Expression<'a>>,
+}
+
+impl<'a> VisitMut<'a> for GeneratedConditionalInliner<'a> {
+    fn visit_statements(&mut self, statements: &mut oxc_allocator::Vec<'a, Statement<'a>>) {
+        oxc_ast_visit::walk_mut::walk_statements(self, statements);
+        statements.retain(|statement| {
+            let Statement::VariableDeclaration(declaration) = statement else {
+                return true;
+            };
+            let [declarator] = declaration.declarations.as_slice() else {
+                return true;
+            };
+            let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+                return true;
+            };
+            !self.values.contains_key(identifier.name.as_str())
+        });
+    }
+
+    fn visit_expression(&mut self, expression: &mut Expression<'a>) {
+        let Expression::Identifier(identifier) = expression else {
+            walk_expression(self, expression);
+            return;
+        };
+        let Some(value) = self.values.get(identifier.name.as_str()) else {
+            return;
+        };
+        *expression = value.clone_in(self.allocator);
     }
 }
 
@@ -315,29 +437,13 @@ fn hook_template<'a>(
     }
     let mut parameters = Vec::with_capacity(params.items.len());
     for parameter in &params.items {
-        let BindingPattern::BindingIdentifier(identifier) = &parameter.pattern else {
-            return Err(unsupported_at(
-                "custom hook parameters must be identifiers",
-                parameter.pattern.span(),
-            ));
-        };
-        if parameter.initializer.is_some() || parameter.optional {
-            return Err(unsupported_at(
-                "custom hook default and optional parameters are not yet supported",
-                parameter.span,
-            ));
-        }
-        let symbol = identifier.symbol_id.get().ok_or_else(|| {
-            Diagnostic::new(
-                DiagnosticCode::AnalysisFailed,
-                format!(
-                    "custom hook parameter {} has no semantic symbol",
-                    identifier.name
-                ),
-            )
-            .with_span(SourceSpan::from_oxc(identifier.span))
-        })?;
-        parameters.push(HookParameter { symbol });
+        parameters.push(HookParameter {
+            pattern: parameter.pattern.clone_in_with_semantic_ids(allocator),
+            default: parameter
+                .initializer
+                .as_ref()
+                .map(|expression| expression.as_ref().clone_in_with_semantic_ids(allocator)),
+        });
     }
     Ok(HookTemplate {
         name: name.to_string(),
@@ -362,14 +468,28 @@ fn expand_body<'a>(
     for pass in 0..MAX_EXPANSION_PASSES {
         let mut changed = false;
         let mut next = oxc_allocator::Vec::new_in(ast);
-        for statement in body.statements.drain(..) {
+        for mut statement in body.statements.drain(..) {
             if let Some(expansion) =
                 expand_statement(ast, &statement, hooks, references, invocation)?
             {
                 next.extend(expansion);
                 changed = true;
             } else {
-                next.push(statement);
+                let mut hoister = NestedHookCallHoister {
+                    ast,
+                    hooks,
+                    references,
+                    invocation,
+                    statements: Vec::new(),
+                };
+                hoister.visit_statement(&mut statement);
+                if hoister.statements.is_empty() {
+                    next.push(statement);
+                } else {
+                    next.extend(hoister.statements);
+                    next.push(statement);
+                    changed = true;
+                }
             }
         }
         body.statements = next;
@@ -385,6 +505,57 @@ fn expand_body<'a>(
         }
     }
     unreachable!()
+}
+
+struct NestedHookCallHoister<'a, 'h, 'r, 'i> {
+    ast: &'h AstBuilder<'a>,
+    hooks: &'h BTreeMap<SymbolId, HookTemplate<'a>>,
+    references: &'r BTreeMap<ReferenceId, SymbolId>,
+    invocation: &'i mut u32,
+    statements: Vec<Statement<'a>>,
+}
+
+impl<'a> VisitMut<'a> for NestedHookCallHoister<'a, '_, '_, '_> {
+    fn visit_expression(&mut self, expression: &mut Expression<'a>) {
+        if matches!(
+            expression.without_parentheses(),
+            Expression::ConditionalExpression(_)
+                | Expression::LogicalExpression(_)
+                | Expression::ChainExpression(_)
+        ) {
+            return;
+        }
+        if let Expression::CallExpression(call) = expression.without_parentheses()
+            && direct_callee_symbol(call, self.references)
+                .is_some_and(|symbol| self.hooks.contains_key(&symbol))
+        {
+            let span = call.span;
+            let name = self
+                .ast
+                .allocator()
+                .alloc_str(&format!("{GENERATED_PREFIX}Call{}", *self.invocation));
+            *self.invocation += 1;
+            let initializer = expression.take_in(self.ast);
+            self.statements.push(generated_variable_statement(
+                self.ast,
+                name,
+                initializer,
+                span,
+            ));
+            *expression = identifier_expression(self.ast, name);
+            return;
+        }
+        walk_expression(self, expression);
+    }
+
+    fn visit_function(
+        &mut self,
+        _function: &mut Function<'a>,
+        _flags: oxc_syntax::scope::ScopeFlags,
+    ) {
+    }
+
+    fn visit_arrow_function_expression(&mut self, _function: &mut ArrowFunctionExpression<'a>) {}
 }
 
 fn expand_statement<'a>(
@@ -425,10 +596,10 @@ fn expand_statement<'a>(
             call.span,
         ));
     }
-    if call.arguments.len() != template.params.len() {
+    if call.arguments.len() > template.params.len() {
         return Err(unsupported_at(
             format!(
-                "custom hook {} expects {} arguments, received {}",
+                "custom hook {} accepts at most {} arguments, received {}",
                 template.name,
                 template.params.len(),
                 call.arguments.len()
@@ -443,6 +614,9 @@ fn expand_statement<'a>(
     let mut collector = BindingCollector {
         symbols: Vec::new(),
     };
+    for parameter in &template.params {
+        collector.visit_binding_pattern(&parameter.pattern);
+    }
     for statement in &template.statements {
         collector.visit_statement(statement);
     }
@@ -454,27 +628,70 @@ fn expand_statement<'a>(
     }
 
     let mut substitutions = BTreeMap::<SymbolId, Expression<'a>>::new();
-    for (parameter, argument) in template.params.iter().zip(&call.arguments) {
-        let expression = argument
-            .as_expression()
-            .expect("spread arguments were rejected")
-            .clone_in_with_semantic_ids(ast.allocator());
-        if !is_supported_hook_argument(&expression) {
-            return Err(unsupported_at(
-                "custom hook arguments must be identifiers or primitive literals so reactive inputs remain live without duplicating side effects",
-                expression.span(),
+    let mut argument_statements = Vec::new();
+    let mut destructuring_statements = Vec::new();
+    for (index, parameter) in template.params.iter().enumerate() {
+        let expression = if let Some(argument) = call.arguments.get(index) {
+            argument
+                .as_expression()
+                .expect("spread arguments were rejected")
+                .clone_in_with_semantic_ids(ast.allocator())
+        } else if let Some(default) = &parameter.default {
+            default.clone_in_with_semantic_ids(ast.allocator())
+        } else {
+            Expression::new_identifier(SPAN, "undefined", ast)
+        };
+        if let BindingPattern::BindingIdentifier(identifier) = &parameter.pattern
+            && let Some(symbol) = identifier.symbol_id.get()
+            && is_supported_hook_argument(&expression)
+        {
+            substitutions.insert(symbol, expression);
+        } else {
+            let name = ast
+                .allocator()
+                .alloc_str(&format!("{GENERATED_PREFIX}{id}Arg{index}"));
+            argument_statements.push(generated_variable_statement(
+                ast, name, expression, call.span,
             ));
+            if let BindingPattern::BindingIdentifier(identifier) = &parameter.pattern {
+                let symbol = identifier.symbol_id.get().ok_or_else(|| {
+                    Diagnostic::new(
+                        DiagnosticCode::AnalysisFailed,
+                        format!(
+                            "custom hook parameter {} has no semantic symbol",
+                            identifier.name
+                        ),
+                    )
+                })?;
+                substitutions.insert(symbol, identifier_expression(ast, name));
+            } else {
+                destructuring_statements.push(pattern_variable_statement(
+                    ast,
+                    parameter
+                        .pattern
+                        .clone_in_with_semantic_ids(ast.allocator()),
+                    identifier_expression(ast, name),
+                    call.span,
+                ));
+            }
         }
-        substitutions.insert(parameter.symbol, expression);
     }
 
-    let mut expanded = Vec::new();
+    let mut expanded = argument_statements;
     let mut statements = template
         .statements
         .iter()
         .map(|statement| statement.clone_in_with_semantic_ids(ast.allocator()))
         .collect::<Vec<_>>();
-    let return_expression = take_final_return(&mut statements, binding.is_some(), template.span)?;
+    statements.splice(0..0, destructuring_statements);
+    let return_expression = take_final_return(
+        ast,
+        &mut statements,
+        binding.is_some(),
+        template.span,
+        call.span,
+        id,
+    )?;
     let mut rewriter = HygieneRewriter {
         ast,
         names: &names,
@@ -513,9 +730,12 @@ fn expand_statement<'a>(
 }
 
 fn take_final_return<'a>(
+    ast: &AstBuilder<'a>,
     statements: &mut Vec<Statement<'a>>,
     required: bool,
     hook_span: Span,
+    expansion_span: Span,
+    invocation: u32,
 ) -> Result<Option<Expression<'a>>, Diagnostic> {
     let mut returns = ReturnCollector { spans: Vec::new() };
     for statement in statements.iter() {
@@ -523,6 +743,12 @@ fn take_final_return<'a>(
     }
     if returns.spans.is_empty() {
         return Ok(None);
+    }
+    if returns.spans.len() == 2
+        && let Some(expression) =
+            normalize_guarded_return(ast, statements, expansion_span, invocation)
+    {
+        return Ok(Some(expression));
     }
     let Some(Statement::ReturnStatement(statement)) = statements.last() else {
         return Err(unsupported_at(
@@ -546,6 +772,138 @@ fn take_final_return<'a>(
         unreachable!();
     };
     Ok(statement.argument.take())
+}
+
+fn normalize_guarded_return<'a>(
+    ast: &AstBuilder<'a>,
+    statements: &mut Vec<Statement<'a>>,
+    expansion_span: Span,
+    invocation: u32,
+) -> Option<Expression<'a>> {
+    let final_expression = match statements.last()? {
+        Statement::ReturnStatement(statement) => statement.argument.as_ref()?,
+        _ => return None,
+    }
+    .clone_in_with_semantic_ids(ast.allocator());
+    let (guard_index, test, guarded_statements, guarded_expression) = statements
+        .iter()
+        .enumerate()
+        .find_map(|(index, statement)| {
+            let Statement::IfStatement(statement) = statement else {
+                return None;
+            };
+            if statement.alternate.is_some() {
+                return None;
+            }
+            let (statements, expression) = guarded_return(ast, &statement.consequent)?;
+            Some((
+                index,
+                statement.test.clone_in_with_semantic_ids(ast.allocator()),
+                statements,
+                expression,
+            ))
+        })?;
+
+    let result_name = ast
+        .allocator()
+        .alloc_str(&format!("{GENERATED_PREFIX}{invocation}Return"));
+    let mut prefix = statements.drain(..guard_index).collect::<Vec<_>>();
+    statements.remove(0);
+    statements.pop();
+    let mut alternate = std::mem::take(statements);
+    alternate.push(assignment_statement(ast, result_name, final_expression));
+    let mut consequent = guarded_statements;
+    consequent.push(assignment_statement(ast, result_name, guarded_expression));
+    prefix.push(uninitialized_variable_statement(ast, result_name));
+    prefix.push(Statement::new_if_statement(
+        expansion_span,
+        test,
+        Statement::new_block_statement(
+            expansion_span,
+            oxc_allocator::Vec::from_iter_in(consequent, ast),
+            ast,
+        ),
+        Some(Statement::new_block_statement(
+            expansion_span,
+            oxc_allocator::Vec::from_iter_in(alternate, ast),
+            ast,
+        )),
+        ast,
+    ));
+    *statements = prefix;
+    Some(identifier_expression(ast, result_name))
+}
+
+fn uninitialized_variable_statement<'a>(ast: &AstBuilder<'a>, name: &str) -> Statement<'a> {
+    let declarator = VariableDeclarator::new(
+        SPAN,
+        VariableDeclarationKind::Let,
+        BindingPattern::new_binding_identifier(SPAN, ast.allocator().alloc_str(name), ast),
+        None,
+        None,
+        false,
+        ast,
+    );
+    Statement::from(Declaration::new_variable_declaration(
+        SPAN,
+        VariableDeclarationKind::Let,
+        oxc_allocator::Vec::from_array_in([declarator], ast),
+        false,
+        ast,
+    ))
+}
+
+fn assignment_statement<'a>(
+    ast: &AstBuilder<'a>,
+    name: &str,
+    value: Expression<'a>,
+) -> Statement<'a> {
+    Statement::new_expression_statement(
+        SPAN,
+        Expression::new_assignment_expression(
+            SPAN,
+            AssignmentOperator::Assign,
+            AssignmentTarget::new_assignment_target_identifier(
+                SPAN,
+                ast.allocator().alloc_str(name),
+                ast,
+            ),
+            value,
+            ast,
+        ),
+        ast,
+    )
+}
+
+fn guarded_return<'a>(
+    ast: &AstBuilder<'a>,
+    statement: &Statement<'a>,
+) -> Option<(Vec<Statement<'a>>, Expression<'a>)> {
+    match statement {
+        Statement::ReturnStatement(statement) => Some((
+            Vec::new(),
+            statement
+                .argument
+                .as_ref()?
+                .clone_in_with_semantic_ids(ast.allocator()),
+        )),
+        Statement::BlockStatement(block) => {
+            let Some(Statement::ReturnStatement(statement)) = block.body.last() else {
+                return None;
+            };
+            Some((
+                block.body[..block.body.len() - 1]
+                    .iter()
+                    .map(|statement| statement.clone_in_with_semantic_ids(ast.allocator()))
+                    .collect(),
+                statement
+                    .argument
+                    .as_ref()?
+                    .clone_in_with_semantic_ids(ast.allocator()),
+            ))
+        }
+        _ => None,
+    }
 }
 
 fn expand_return_binding<'a>(
@@ -698,6 +1056,30 @@ fn generated_variable_statement<'a>(
         span,
         VariableDeclarationKind::Const,
         BindingPattern::new_binding_identifier(span, ast.allocator().alloc_str(name), ast),
+        None,
+        Some(initializer),
+        false,
+        ast,
+    );
+    Statement::from(Declaration::new_variable_declaration(
+        span,
+        VariableDeclarationKind::Const,
+        oxc_allocator::Vec::from_array_in([declarator], ast),
+        false,
+        ast,
+    ))
+}
+
+fn pattern_variable_statement<'a>(
+    ast: &AstBuilder<'a>,
+    pattern: BindingPattern<'a>,
+    initializer: Expression<'a>,
+    span: Span,
+) -> Statement<'a> {
+    let declarator = VariableDeclarator::new(
+        span,
+        VariableDeclarationKind::Const,
+        pattern,
         None,
         Some(initializer),
         false,

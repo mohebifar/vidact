@@ -31,7 +31,15 @@ import {
 } from '../../src/server-profiling.ts'
 import {
   Activity as ServerActivity,
+  cloneRenderable,
+  createRenderable,
+  isRenderable,
   jsx as retainedJsx,
+  renderableChildren,
+  renderableMarker,
+  renderableProps,
+  renderableRef,
+  renderableToArray,
   renderToStaticMarkup as renderRetainedToStaticMarkup,
   renderToString as renderRetainedToString,
 } from '../../src/server.ts'
@@ -52,6 +60,27 @@ describe('server rendering', () => {
     ).toBe(
       '<main class="shell" data-label="a&quot;&lt;&amp;" hidden="" style="line-height:1.2;width:4px">Hello &lt;script&gt;&amp; goodbye<input disabled=""></main>',
     )
+  })
+
+  it('constructs and clones opaque server renderable capabilities', () => {
+    const renderable = createRenderable(
+      { href: '/original', className: 'authored', children: 'Original', ref: {} },
+      (input) => (
+        <a {...renderableProps(input)} ref={renderableRef(input)}>
+          {renderableChildren(input)}
+        </a>
+      ),
+    )
+
+    expect(isRenderable(renderable)).toBe(true)
+    expect(renderable.props.href).toBe('/original')
+    expect(renderableToArray(renderable)).toEqual([renderable])
+    expect(renderableMarker(renderable)).toBeUndefined()
+    expect(
+      renderToStaticMarkup(
+        cloneRenderable(renderable, { className: 'merged', children: 'Element' }),
+      ),
+    ).toBe('<a class="merged" href="/original">Element</a>')
   })
 
   it('evaluates initial state and produces request-deterministic ids', () => {

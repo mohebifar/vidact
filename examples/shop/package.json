@@ -13,6 +13,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@base-ui/react": "1.7.0",
     "@vidact/runtime": "workspace:*",
     "srvx": "^0.12.7"
   },

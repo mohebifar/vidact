@@ -8,6 +8,7 @@ import {
 import type { SourceMask } from './source-mask.ts'
 import { unionSources } from './source-mask.ts'
 import { compiledSpread } from './spread.ts'
+import { h } from './direct-dom.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 const RENDERABLE = Symbol(DEV ? 'Vidact.Renderable' : undefined)
@@ -100,6 +101,19 @@ export function renderableRef(input: RenderablePropsInput): unknown {
 
 export function forwardedRef(props: Record<string, unknown>): unknown {
   return props.ref
+}
+
+export function dynamicIntrinsicComponent(props: Record<string, unknown>): CompiledRenderValue {
+  const tag = isCompiledBinding(props.tag) ? props.tag[1]() : props.tag
+  if (typeof tag !== 'string') {
+    throw new TypeError(DEV ? 'dynamic intrinsic construction requires a string tag' : 'V107')
+  }
+  const input = props.props as RenderablePropsInput
+  return h(
+    tag,
+    { ...renderableProps(input), ref: renderableRef(input) },
+    renderableChildren(input),
+  )
 }
 
 function propsView(input: RenderablePropsInput): Props {

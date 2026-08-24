@@ -1,7 +1,7 @@
 use vidact_compiler::{
-    DiagnosticCode, OxcReactAnalysisAdapter,
+    CompilationOptions, CompilerFeature, DiagnosticCode, OxcReactAnalysisAdapter,
     analysis::{ModuleInput, ReactAnalysisAdapter},
-    compile_server_module, compile_surgical_module,
+    compile_server_module, compile_surgical_module, compile_surgical_module_with_options,
 };
 
 #[test]
@@ -103,6 +103,60 @@ fn normalizes_forward_ref_and_plain_memo_component_wrappers() {
 }
 
 #[test]
+fn normalizes_cloned_react_namespaces_before_hook_analysis() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "safe-react.tsx",
+        source: r#"
+            import * as React from 'react';
+            const SafeReact = { ...React };
+            function useStable() {
+                return SafeReact.useRef(null);
+            }
+            export function App() {
+                const stable = useStable();
+                return <p ref={stable}>stable</p>;
+            }
+        "#,
+    })
+    .expect("a pure React namespace clone should retain import provenance");
+
+    assert!(!output.contains("SafeReact"), "{output}");
+    assert!(!output.contains("...React"), "{output}");
+    assert!(output.contains("React.useRef(null)"), "{output}");
+}
+
+#[test]
+fn normalizes_react_hook_compatibility_aliases_before_hook_analysis() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "safe-insertion-effect.tsx",
+            source: r#"
+            import * as React from 'react';
+            const SafeReact = { ...React };
+            const useInsertionEffect = SafeReact.useInsertionEffect;
+            const useSafeInsertionEffect = useInsertionEffect &&
+                useInsertionEffect !== SafeReact.useLayoutEffect
+                ? useInsertionEffect
+                : callback => callback();
+            function useStable(callback) {
+                useSafeInsertionEffect(callback);
+            }
+            export function App() {
+                useStable(() => undefined);
+                return <p>stable</p>;
+            }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::CssInsertion),
+    )
+    .expect("a React hook alias with an inline compatibility fallback should canonicalize");
+
+    assert!(!output.contains("SafeReact"), "{output}");
+    assert!(!output.contains("useSafeInsertionEffect"), "{output}");
+    assert!(!output.contains("const useInsertionEffect"), "{output}");
+}
+
+#[test]
 fn normalizes_classic_create_element_named_namespace_and_default_imports() {
     for (filename, source) in [
         (
@@ -123,6 +177,48 @@ fn normalizes_classic_create_element_named_namespace_and_default_imports() {
         assert!(output.contains("<main"), "{output}");
         assert!(!output.contains("createElement(\"main\""), "{output}");
     }
+}
+
+#[test]
+fn lowers_dynamic_string_create_element_to_the_direct_intrinsic_path() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "dynamic-intrinsic.mjs",
+        source: r#"
+            import React from 'react';
+            export function DynamicIntrinsic({ Tag, props }) {
+                return React.createElement(Tag, props);
+            }
+        "#,
+    })
+    .expect("dynamic string tags should lower to the guarded direct intrinsic component");
+
+    assert!(
+        output.contains("dynamicIntrinsicComponent as __vidactDynamicIntrinsicComponent"),
+        "{output}"
+    );
+    assert!(!output.contains("React.createElement"), "{output}");
+}
+
+#[test]
+fn coalesces_classic_factory_props_before_a_reactive_spread() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "factory-spread.tsx",
+        source: r#"
+            import React from 'react';
+            export function FactorySpread({ props }) {
+                return React.createElement('button', {
+                    type: 'button',
+                    ...props,
+                    key: props.key,
+                });
+            }
+        "#,
+    })
+    .expect("classic factory property order should lower through one merged spread");
+
+    assert!(output.contains("<button"), "{output}");
+    assert!(output.contains("type: \"button\""), "{output}");
+    assert!(!output.contains("React.createElement"), "{output}");
 }
 
 #[test]

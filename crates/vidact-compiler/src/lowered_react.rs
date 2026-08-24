@@ -7,8 +7,8 @@ use oxc_ast_visit::{
     walk::walk_variable_declarator,
     walk_mut::{walk_expression, walk_statements},
 };
-use oxc_semantic::Scoping;
-use oxc_span::Span;
+use oxc_semantic::{Scoping, SemanticBuilder};
+use oxc_span::{SPAN, Span};
 use oxc_syntax::{operator::BinaryOperator, symbol::SymbolId};
 
 use crate::{Diagnostic, DiagnosticCode, SourceSpan, react_bindings::reference_symbol};
@@ -415,7 +415,390 @@ impl<'a> VisitMut<'a> for RenderableAliasRewriter<'a, '_> {
     }
 }
 
+fn normalize_react_namespace_clones<'a>(
+    allocator: &'a Allocator,
+    program: &mut Program<'a>,
+    scoping: &Scoping,
+) -> bool {
+    let namespaces = program
+        .body
+        .iter()
+        .filter_map(|statement| {
+            let Statement::ImportDeclaration(import) = statement else {
+                return None;
+            };
+            (import.source.value == "react").then_some(import)
+        })
+        .flat_map(|import| import.specifiers.iter().flatten())
+        .filter_map(|specifier| match specifier {
+            ImportDeclarationSpecifier::ImportNamespaceSpecifier(specifier) => specifier
+                .local
+                .symbol_id
+                .get()
+                .map(|symbol| (symbol, specifier.local.name.as_str())),
+            ImportDeclarationSpecifier::ImportDefaultSpecifier(specifier) => specifier
+                .local
+                .symbol_id
+                .get()
+                .map(|symbol| (symbol, specifier.local.name.as_str())),
+            ImportDeclarationSpecifier::ImportSpecifier(_) => None,
+        })
+        .collect::<BTreeMap<_, _>>();
+    if namespaces.is_empty() {
+        return false;
+    }
+    let mut collector = ReactNamespaceCloneCollector {
+        scoping,
+        namespaces: &namespaces,
+        aliases: BTreeMap::new(),
+    };
+    collector.visit_program(program);
+    if collector.aliases.is_empty() {
+        return false;
+    }
+    ReactNamespaceCloneRewriter {
+        ast: AstBuilder::new(allocator),
+        scoping,
+        aliases: collector.aliases,
+    }
+    .visit_program(program);
+    true
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ReactHookAlias<'a> {
+    namespace: &'a str,
+    hook: &'a str,
+}
+
+fn normalize_react_hook_aliases<'a>(
+    allocator: &'a Allocator,
+    program: &mut Program<'a>,
+    scoping: &Scoping,
+) -> bool {
+    let namespaces = react_namespace_imports(program);
+    if namespaces.is_empty() {
+        return false;
+    }
+
+    let mut aliases = BTreeMap::new();
+    loop {
+        let previous = aliases.len();
+        for statement in &program.body {
+            let declaration = match statement {
+                Statement::VariableDeclaration(declaration) => Some(declaration.as_ref()),
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    Declaration::VariableDeclaration(declaration) => Some(declaration.as_ref()),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let Some(declaration) = declaration else {
+                continue;
+            };
+            for declarator in &declaration.declarations {
+                let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+                    continue;
+                };
+                let Some(symbol) = identifier.symbol_id.get() else {
+                    continue;
+                };
+                let Some(initializer) = declarator.init.as_ref() else {
+                    continue;
+                };
+                if let Some(alias) =
+                    canonical_react_hook(initializer, scoping, &namespaces, &aliases)
+                {
+                    aliases.insert(symbol, alias);
+                }
+            }
+        }
+        if aliases.len() == previous {
+            break;
+        }
+    }
+    if aliases.is_empty() {
+        return false;
+    }
+
+    ReactHookAliasRewriter {
+        ast: AstBuilder::new(allocator),
+        scoping,
+        aliases,
+    }
+    .visit_program(program);
+    true
+}
+
+fn react_namespace_imports<'a>(program: &Program<'a>) -> BTreeMap<SymbolId, &'a str> {
+    program
+        .body
+        .iter()
+        .filter_map(|statement| {
+            let Statement::ImportDeclaration(import) = statement else {
+                return None;
+            };
+            (import.source.value == "react").then_some(import)
+        })
+        .flat_map(|import| import.specifiers.iter().flatten())
+        .filter_map(|specifier| match specifier {
+            ImportDeclarationSpecifier::ImportNamespaceSpecifier(specifier) => specifier
+                .local
+                .symbol_id
+                .get()
+                .map(|symbol| (symbol, specifier.local.name.as_str())),
+            ImportDeclarationSpecifier::ImportDefaultSpecifier(specifier) => specifier
+                .local
+                .symbol_id
+                .get()
+                .map(|symbol| (symbol, specifier.local.name.as_str())),
+            ImportDeclarationSpecifier::ImportSpecifier(_) => None,
+        })
+        .collect()
+}
+
+fn canonical_react_hook<'a>(
+    expression: &Expression<'a>,
+    scoping: &Scoping,
+    namespaces: &BTreeMap<SymbolId, &'a str>,
+    aliases: &BTreeMap<SymbolId, ReactHookAlias<'a>>,
+) -> Option<ReactHookAlias<'a>> {
+    match expression.without_parentheses() {
+        Expression::StaticMemberExpression(member) if member.property.name.starts_with("use") => {
+            let identifier = member
+                .object
+                .without_parentheses()
+                .get_identifier_reference()?;
+            let symbol = reference_symbol(identifier, scoping)?;
+            Some(ReactHookAlias {
+                namespace: namespaces.get(&symbol)?,
+                hook: member.property.name.as_str(),
+            })
+        }
+        Expression::Identifier(identifier) => aliases
+            .get(&reference_symbol(identifier, scoping)?)
+            .copied(),
+        Expression::ConditionalExpression(conditional) => {
+            let consequent =
+                canonical_react_hook(&conditional.consequent, scoping, namespaces, aliases);
+            let alternate =
+                canonical_react_hook(&conditional.alternate, scoping, namespaces, aliases);
+            match (consequent, alternate) {
+                (Some(left), Some(right)) if left == right => Some(left),
+                (Some(alias), None) if is_inline_hook_fallback(&conditional.alternate) => {
+                    Some(alias)
+                }
+                (None, Some(alias)) if is_inline_hook_fallback(&conditional.consequent) => {
+                    Some(alias)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn is_inline_hook_fallback(expression: &Expression<'_>) -> bool {
+    matches!(
+        expression.without_parentheses(),
+        Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
+    )
+}
+
+struct ReactHookAliasRewriter<'a, 's> {
+    ast: AstBuilder<'a>,
+    scoping: &'s Scoping,
+    aliases: BTreeMap<SymbolId, ReactHookAlias<'a>>,
+}
+
+impl<'a> VisitMut<'a> for ReactHookAliasRewriter<'a, '_> {
+    fn visit_statements(&mut self, statements: &mut ArenaVec<'a, Statement<'a>>) {
+        walk_statements(self, statements);
+        statements.retain(|statement| {
+            let declaration = match statement {
+                Statement::VariableDeclaration(declaration) => Some(declaration.as_ref()),
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    Declaration::VariableDeclaration(declaration) => Some(declaration.as_ref()),
+                    _ => None,
+                },
+                _ => None,
+            };
+            declaration.is_none_or(|declaration| {
+                !declaration.declarations.iter().all(|declarator| {
+                    let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+                        return false;
+                    };
+                    identifier
+                        .symbol_id
+                        .get()
+                        .is_some_and(|symbol| self.aliases.contains_key(&symbol))
+                })
+            })
+        });
+    }
+
+    fn visit_expression(&mut self, expression: &mut Expression<'a>) {
+        let Expression::Identifier(identifier) = expression else {
+            walk_expression(self, expression);
+            return;
+        };
+        let Some(symbol) = reference_symbol(identifier, self.scoping) else {
+            return;
+        };
+        let Some(alias) = self.aliases.get(&symbol) else {
+            return;
+        };
+        *expression = Expression::from(MemberExpression::new_static_member_expression(
+            identifier.span,
+            Expression::new_identifier(SPAN, alias.namespace, &self.ast),
+            IdentifierName::new(SPAN, alias.hook, &self.ast),
+            false,
+            &self.ast,
+        ));
+    }
+}
+
+struct ReactNamespaceCloneCollector<'a, 's> {
+    scoping: &'s Scoping,
+    namespaces: &'s BTreeMap<SymbolId, &'a str>,
+    aliases: BTreeMap<SymbolId, &'a str>,
+}
+
+impl<'a> Visit<'a> for ReactNamespaceCloneCollector<'a, '_> {
+    fn visit_variable_declaration(&mut self, declaration: &VariableDeclaration<'a>) {
+        if declaration.declarations.len() != 1 {
+            return;
+        }
+        let declarator = &declaration.declarations[0];
+        let BindingPattern::BindingIdentifier(alias) = &declarator.id else {
+            return;
+        };
+        let Some(alias_symbol) = alias.symbol_id.get() else {
+            return;
+        };
+        let Some(Expression::ObjectExpression(object)) = &declarator.init else {
+            return;
+        };
+        let [ObjectPropertyKind::SpreadProperty(spread)] = object.properties.as_slice() else {
+            return;
+        };
+        let Some(namespace) = spread.argument.get_identifier_reference() else {
+            return;
+        };
+        let Some(namespace_symbol) = reference_symbol(namespace, self.scoping) else {
+            return;
+        };
+        if let Some(name) = self.namespaces.get(&namespace_symbol) {
+            self.aliases.insert(alias_symbol, name);
+        }
+    }
+}
+
+struct ReactNamespaceCloneRewriter<'a, 's> {
+    ast: AstBuilder<'a>,
+    scoping: &'s Scoping,
+    aliases: BTreeMap<SymbolId, &'a str>,
+}
+
+impl<'a> VisitMut<'a> for ReactNamespaceCloneRewriter<'a, '_> {
+    fn visit_statements(&mut self, statements: &mut ArenaVec<'a, Statement<'a>>) {
+        walk_statements(self, statements);
+        statements.retain(|statement| {
+            let Statement::VariableDeclaration(declaration) = statement else {
+                return true;
+            };
+            if declaration.declarations.len() != 1 {
+                return true;
+            }
+            let BindingPattern::BindingIdentifier(identifier) = &declaration.declarations[0].id
+            else {
+                return true;
+            };
+            identifier
+                .symbol_id
+                .get()
+                .is_none_or(|symbol| !self.aliases.contains_key(&symbol))
+        });
+    }
+
+    fn visit_expression(&mut self, expression: &mut Expression<'a>) {
+        let Expression::Identifier(identifier) = expression else {
+            walk_expression(self, expression);
+            return;
+        };
+        let Some(symbol) = reference_symbol(identifier, self.scoping) else {
+            return;
+        };
+        let Some(namespace) = self.aliases.get(&symbol) else {
+            return;
+        };
+        *expression = Expression::new_identifier(identifier.span, *namespace, &self.ast);
+    }
+}
+
 pub(crate) fn normalize_lowered_react<'a>(
+    allocator: &'a Allocator,
+    program: &mut Program<'a>,
+    scoping: &Scoping,
+) -> Result<bool, Diagnostic> {
+    if normalize_react_namespace_clones(allocator, program, scoping) {
+        let semantic = SemanticBuilder::new()
+            .with_build_nodes(true)
+            .with_check_syntax_error(true)
+            .build(program);
+        if !semantic.diagnostics.is_empty() {
+            return Err(Diagnostic::new(
+                DiagnosticCode::AnalysisFailed,
+                format!(
+                    "OXC semantic analysis failed after React namespace clone normalization: {:?}",
+                    semantic.diagnostics
+                ),
+            ));
+        }
+        let scoping = semantic.semantic.into_scoping();
+        if normalize_react_hook_aliases(allocator, program, &scoping) {
+            let semantic = SemanticBuilder::new()
+                .with_build_nodes(true)
+                .with_check_syntax_error(true)
+                .build(program);
+            if !semantic.diagnostics.is_empty() {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::AnalysisFailed,
+                    format!(
+                        "OXC semantic analysis failed after React hook alias normalization: {:?}",
+                        semantic.diagnostics
+                    ),
+                ));
+            }
+            let scoping = semantic.semantic.into_scoping();
+            normalize_lowered_react_core(allocator, program, &scoping)?;
+        } else {
+            normalize_lowered_react_core(allocator, program, &scoping)?;
+        }
+        return Ok(true);
+    }
+    if normalize_react_hook_aliases(allocator, program, scoping) {
+        let semantic = SemanticBuilder::new()
+            .with_build_nodes(true)
+            .with_check_syntax_error(true)
+            .build(program);
+        if !semantic.diagnostics.is_empty() {
+            return Err(Diagnostic::new(
+                DiagnosticCode::AnalysisFailed,
+                format!(
+                    "OXC semantic analysis failed after React hook alias normalization: {:?}",
+                    semantic.diagnostics
+                ),
+            ));
+        }
+        let scoping = semantic.semantic.into_scoping();
+        normalize_lowered_react_core(allocator, program, &scoping)?;
+        return Ok(true);
+    }
+    normalize_lowered_react_core(allocator, program, scoping)
+}
+
+fn normalize_lowered_react_core<'a>(
     allocator: &'a Allocator,
     program: &mut Program<'a>,
     scoping: &Scoping,
@@ -719,6 +1102,18 @@ impl<'a> LoweredReactNormalizer<'a, '_> {
             arguments.next(),
             "React element factory is missing its props argument",
         )?;
+        if kind == FactoryKind::Classic
+            && matches!(tag.without_parentheses(), Expression::Identifier(_))
+            && !matches!(
+                props.without_parentheses(),
+                Expression::ObjectExpression(_) | Expression::NullLiteral(_)
+            )
+        {
+            if arguments.next().is_some() {
+                return Err("dynamic React.createElement children must be supplied through props");
+            }
+            return Ok(self.lower_dynamic_intrinsic(span, tag, props));
+        }
         let (mut attributes, mut children) = self.lower_props(props)?;
 
         if matches!(kind, FactoryKind::Automatic | FactoryKind::Development)
@@ -742,6 +1137,30 @@ impl<'a> LoweredReactNormalizer<'a, '_> {
             }
         }
         self.finish_element(span, tag, attributes, children, fragment)
+    }
+
+    fn lower_dynamic_intrinsic(
+        &self,
+        span: Span,
+        tag: Expression<'a>,
+        props: Expression<'a>,
+    ) -> Expression<'a> {
+        let attributes = [
+            attribute("tag", tag, span, &self.ast),
+            attribute("props", props, span, &self.ast),
+        ];
+        let name = JSXElementName::new_identifier_reference(
+            span,
+            "__vidactDynamicIntrinsicComponent",
+            &self.ast,
+        );
+        Expression::new_jsx_element(
+            span,
+            JSXOpeningElement::boxed(span, name, None, attributes, &self.ast),
+            [],
+            None,
+            &self.ast,
+        )
     }
 
     fn finish_element(
@@ -790,6 +1209,57 @@ impl<'a> LoweredReactNormalizer<'a, '_> {
         let Expression::ObjectExpression(object) = props.without_parentheses() else {
             return Err("React element factory props must be an object literal or null");
         };
+        let first_spread = object
+            .properties
+            .iter()
+            .position(|property| matches!(property, ObjectPropertyKind::SpreadProperty(_)));
+        if first_spread.is_some_and(|index| {
+            object.properties[..index]
+                .iter()
+                .any(|property| matches!(property, ObjectPropertyKind::ObjectProperty(_)))
+        }) {
+            let mut key = None;
+            for (index, property) in object.properties.iter().enumerate() {
+                let ObjectPropertyKind::ObjectProperty(property) = property else {
+                    continue;
+                };
+                let Some(name) = property.key.static_name() else {
+                    return Err("React factory prop name must be statically known");
+                };
+                if name == "children" {
+                    return Err(
+                        "React factory props mixing leading properties, spreads, and children are unsupported",
+                    );
+                }
+                if name == "key" {
+                    if index + 1 != object.properties.len() {
+                        return Err(
+                            "React factory key after a leading prop and spread must be last",
+                        );
+                    }
+                    key = Some((
+                        property.span,
+                        property
+                            .value
+                            .clone_in_with_semantic_ids(self.ast.allocator()),
+                    ));
+                }
+            }
+            let mut merged = object.clone_in_with_semantic_ids(self.ast.allocator());
+            merged.properties.retain(|property| {
+                !matches!(property, ObjectPropertyKind::ObjectProperty(property) if property.key.static_name().as_deref() == Some("key"))
+            });
+            let mut attributes = ArenaVec::new_in(&self.ast);
+            attributes.push(JSXAttributeItem::new_spread_attribute(
+                object.span,
+                Expression::ObjectExpression(merged),
+                &self.ast,
+            ));
+            if let Some((span, value)) = key {
+                attributes.push(attribute("key", value, span, &self.ast));
+            }
+            return Ok((attributes, ArenaVec::new_in(&self.ast)));
+        }
         let mut attributes = ArenaVec::new_in(&self.ast);
         let mut children = ArenaVec::new_in(&self.ast);
         let mut saw_children = false;

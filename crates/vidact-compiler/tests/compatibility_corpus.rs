@@ -59,6 +59,7 @@ fn verify_fixture(root: &Path, fixture: &Value) {
                 "retained-ui" => CompilerFeature::RetainedUi,
                 "profiling" => CompilerFeature::Profiling,
                 "framework" => CompilerFeature::Framework,
+                "dependency-source" => CompilerFeature::DependencySource,
                 feature => panic!("unknown compatibility fixture feature {feature}"),
             };
             options.with_feature(feature)

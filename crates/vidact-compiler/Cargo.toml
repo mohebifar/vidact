@@ -20,5 +20,6 @@ oxc_parser = { path = "../../vendor/oxc/crates/oxc_parser", features = ["regular
 oxc_react_compiler = { path = "../../vendor/oxc/crates/oxc_react_compiler" }
 oxc_semantic = { path = "../../vendor/oxc/crates/oxc_semantic" }
 oxc_span = { path = "../../vendor/oxc/crates/oxc_span" }
+oxc_sourcemap = "8.1.2"
 oxc_syntax = { path = "../../vendor/oxc/crates/oxc_syntax" }
 serde_json = "1.0.149"

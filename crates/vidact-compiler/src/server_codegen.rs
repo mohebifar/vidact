@@ -1,23 +1,24 @@
 use std::{collections::BTreeSet, path::Path};
 
-use oxc_allocator::Allocator;
+use oxc_allocator::{Allocator, Vec as ArenaVec};
 use oxc_ast::{
     ast::{
         CallExpression, Class, JSXAttributeItem, JSXAttributeName, JSXAttributeValue, JSXElement,
-        JSXElementName, Program,
+        JSXElementName, Program, Statement,
     },
     builder::AstBuilder,
 };
 use oxc_ast_visit::{
     Visit, VisitMut,
     walk::{walk_call_expression, walk_class, walk_jsx_element},
-    walk_mut::walk_jsx_element as walk_jsx_element_mut,
+    walk_mut::{walk_expression, walk_jsx_element as walk_jsx_element_mut, walk_statements},
 };
 use oxc_codegen::{Codegen, CodegenOptions};
 use oxc_parser::Parser;
 use oxc_react_compiler::{CompileResult, CompilerOutputMode, PluginOptions, compile};
 use oxc_semantic::SemanticBuilder;
 use oxc_span::{GetSpan, SourceType};
+use oxc_syntax::operator::{BinaryOperator, UnaryOperator};
 
 use crate::{
     ComponentIr, Diagnostic, DiagnosticCode, SourceSpan,
@@ -31,6 +32,8 @@ use crate::{
     options::{CompilationOptions, CompilerFeature, CompilerTarget},
     oxc_react::{analyze_program, lower_react_diagnostics},
     react_bindings::ReactBindings,
+    server_renderable::lower_server_renderables,
+    surgical_codegen::normalize_state_elisions,
 };
 
 #[derive(Debug)]
@@ -38,6 +41,78 @@ pub struct ServerCompilation {
     pub code: String,
     pub source_map: String,
     pub components: Vec<ComponentIr>,
+}
+
+struct ObjectMethodNormalizer;
+
+impl<'a> VisitMut<'a> for ObjectMethodNormalizer {
+    fn visit_object_property(&mut self, property: &mut oxc_ast::ast::ObjectProperty<'a>) {
+        if property.kind == oxc_ast::ast::PropertyKind::Init {
+            property.method = false;
+        }
+        oxc_ast_visit::walk_mut::walk_object_property(self, property);
+    }
+}
+
+struct ServerEnvironmentNormalizer<'a> {
+    ast: AstBuilder<'a>,
+}
+
+impl<'a> VisitMut<'a> for ServerEnvironmentNormalizer<'a> {
+    fn visit_statements(&mut self, statements: &mut ArenaVec<'a, Statement<'a>>) {
+        walk_statements(self, statements);
+        statements.retain(|statement| {
+            !matches!(
+                statement,
+                Statement::IfStatement(statement)
+                    if statement.alternate.is_none()
+                        && matches!(
+                            statement.test.without_parentheses(),
+                            oxc_ast::ast::Expression::BooleanLiteral(value) if !value.value
+                        )
+            )
+        });
+    }
+
+    fn visit_expression(&mut self, expression: &mut oxc_ast::ast::Expression<'a>) {
+        walk_expression(self, expression);
+        let oxc_ast::ast::Expression::BinaryExpression(binary) = expression else {
+            return;
+        };
+        let equality = match binary.operator {
+            BinaryOperator::Equality | BinaryOperator::StrictEquality => Some(true),
+            BinaryOperator::Inequality | BinaryOperator::StrictInequality => Some(false),
+            _ => None,
+        };
+        let Some(value) = equality else {
+            return;
+        };
+        if is_typeof_document(&binary.left, &binary.right)
+            || is_typeof_document(&binary.right, &binary.left)
+        {
+            *expression =
+                oxc_ast::ast::Expression::new_boolean_literal(binary.span, value, &self.ast);
+        }
+    }
+}
+
+fn is_typeof_document(
+    left: &oxc_ast::ast::Expression<'_>,
+    right: &oxc_ast::ast::Expression<'_>,
+) -> bool {
+    let oxc_ast::ast::Expression::UnaryExpression(unary) = left.without_parentheses() else {
+        return false;
+    };
+    let oxc_ast::ast::Expression::Identifier(identifier) = unary.argument.without_parentheses()
+    else {
+        return false;
+    };
+    let oxc_ast::ast::Expression::StringLiteral(value) = right.without_parentheses() else {
+        return false;
+    };
+    unary.operator == UnaryOperator::Typeof
+        && identifier.name == "document"
+        && value.value == "undefined"
 }
 
 pub fn compile_server_module(input: ModuleInput<'_>) -> Result<ServerCompilation, Vec<Diagnostic>> {
@@ -49,6 +124,8 @@ pub fn compile_server_module_with_options(
     options: &CompilationOptions,
 ) -> Result<ServerCompilation, Vec<Diagnostic>> {
     let allocator = Allocator::default();
+    let mut canonical_maps = Vec::new();
+    let mut canonical_sources = vec![input.source.to_string()];
     let source_type =
         SourceType::from_path(Path::new(input.filename)).unwrap_or_else(|_| SourceType::tsx());
     let mut parsed = Parser::new(&allocator, input.source, source_type).parse();
@@ -63,6 +140,12 @@ pub fn compile_server_module_with_options(
     }
     crate::framework_directives::validate_framework_directives(&parsed.program, options)
         .map_err(|diagnostic| vec![diagnostic])?;
+    if options.feature_enabled(CompilerFeature::DependencySource) {
+        ServerEnvironmentNormalizer {
+            ast: AstBuilder::new(&allocator),
+        }
+        .visit_program(&mut parsed.program);
+    }
     let anonymous_defaults =
         normalize_expression_bodied_component_arrows(&allocator, &mut parsed.program);
 
@@ -109,6 +192,41 @@ pub fn compile_server_module_with_options(
             .apply(&mut parsed.program)
             .map_err(|diagnostic| vec![diagnostic])?;
     }
+    if options.feature_enabled(CompilerFeature::DependencySource) {
+        let generated = Codegen::new()
+            .with_options(CodegenOptions {
+                source_map_path: Some(Path::new(input.filename).to_path_buf()),
+                ..CodegenOptions::default()
+            })
+            .build(&parsed.program);
+        canonical_maps.push(
+            generated
+                .map
+                .expect("source map is enabled for dependency canonicalization")
+                .into_owned_sourcemap(),
+        );
+        let normalized = generated.code;
+        canonical_sources.push(normalized.clone());
+        let normalized_source = allocator.alloc_str(&normalized);
+        parsed = Parser::new(&allocator, normalized_source, source_type.with_jsx(true)).parse();
+        if !parsed.diagnostics.is_empty() {
+            return Err(vec![Diagnostic::new(
+                crate::DiagnosticCode::AnalysisFailed,
+                format!(
+                    "OXC could not parse {} after server custom-hook canonicalization: {:?}",
+                    input.filename, parsed.diagnostics
+                ),
+            )]);
+        }
+    }
+    if let Err(mut diagnostics) = normalize_state_elisions(&allocator, &mut parsed.program) {
+        crate::source_maps::remap_diagnostics(
+            &mut diagnostics,
+            &canonical_sources,
+            &canonical_maps,
+        );
+        return Err(diagnostics);
+    }
 
     let semantic = SemanticBuilder::new()
         .with_build_nodes(true)
@@ -139,19 +257,58 @@ pub fn compile_server_module_with_options(
     };
     validator.visit_program(&parsed.program);
     if let Some(diagnostic) = validator.diagnostic {
-        return Err(vec![diagnostic]);
+        let mut diagnostics = vec![diagnostic];
+        crate::source_maps::remap_diagnostics(
+            &mut diagnostics,
+            &canonical_sources,
+            &canonical_maps,
+        );
+        return Err(diagnostics);
     }
-    let components = analyze_program(input, &parsed.program, &semantic.semantic, &allocator)?
-        .into_iter()
-        .map(lower_component)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|diagnostic| vec![diagnostic])?;
+    let components = analyze_program(
+        input,
+        &parsed.program,
+        &semantic.semantic,
+        &allocator,
+        options,
+    )
+    .map_err(|mut diagnostics| {
+        crate::source_maps::remap_diagnostics(
+            &mut diagnostics,
+            &canonical_sources,
+            &canonical_maps,
+        );
+        diagnostics
+    })?
+    .into_iter()
+    .map(lower_component)
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|diagnostic| {
+        let mut diagnostics = vec![diagnostic];
+        crate::source_maps::remap_diagnostics(
+            &mut diagnostics,
+            &canonical_sources,
+            &canonical_maps,
+        );
+        diagnostics
+    })?;
     let suspense_spans = std::mem::take(&mut validator.suspense_spans);
     let activity_spans = std::mem::take(&mut validator.activity_spans);
     let profiler_spans = std::mem::take(&mut validator.profiler_spans);
     drop(validator);
     drop(react);
-    drop(semantic);
+    let scoping = semantic.semantic.into_scoping();
+    let react = ReactBindings::new(&parsed.program, &scoping);
+    lower_server_renderables(&allocator, &mut parsed.program, &react).map_err(|diagnostic| {
+        let mut diagnostics = vec![diagnostic];
+        crate::source_maps::remap_diagnostics(
+            &mut diagnostics,
+            &canonical_sources,
+            &canonical_maps,
+        );
+        diagnostics
+    })?;
+    drop(react);
     let mut async_transformer = ServerAsyncTransformer {
         ast: AstBuilder::new(&allocator),
         options,
@@ -162,7 +319,41 @@ pub fn compile_server_module_with_options(
     };
     async_transformer.visit_program(&mut parsed.program);
     if let Some(diagnostic) = async_transformer.diagnostic {
-        return Err(vec![diagnostic]);
+        let mut diagnostics = vec![diagnostic];
+        crate::source_maps::remap_diagnostics(
+            &mut diagnostics,
+            &canonical_sources,
+            &canonical_maps,
+        );
+        return Err(diagnostics);
+    }
+    if options.feature_enabled(CompilerFeature::DependencySource) {
+        ObjectMethodNormalizer.visit_program(&mut parsed.program);
+        let generated = Codegen::new()
+            .with_options(CodegenOptions {
+                source_map_path: Some(Path::new(input.filename).to_path_buf()),
+                ..CodegenOptions::default()
+            })
+            .build(&parsed.program);
+        canonical_maps.push(
+            generated
+                .map
+                .expect("source map is enabled for dependency canonicalization")
+                .into_owned_sourcemap(),
+        );
+        let normalized = generated.code;
+        canonical_sources.push(normalized.clone());
+        let normalized_source = allocator.alloc_str(&normalized);
+        parsed = Parser::new(&allocator, normalized_source, source_type.with_jsx(true)).parse();
+        if !parsed.diagnostics.is_empty() {
+            return Err(vec![Diagnostic::new(
+                DiagnosticCode::AnalysisFailed,
+                format!(
+                    "OXC could not parse {} after server capability canonicalization: {:?}",
+                    input.filename, parsed.diagnostics
+                ),
+            )]);
+        }
     }
     let semantic = SemanticBuilder::new()
         .with_build_nodes(true)
@@ -178,11 +369,23 @@ pub fn compile_server_module_with_options(
         )]);
     }
 
-    let options = PluginOptions {
+    let mut react_options = PluginOptions {
         output_mode: Some(CompilerOutputMode::Ssr),
         ..PluginOptions::default()
     };
-    let result = compile(&parsed.program, &semantic.semantic, &allocator, options);
+    if options.feature_enabled(CompilerFeature::DependencySource) {
+        react_options.environment.validate_ref_access_during_render = false;
+        react_options
+            .environment
+            .validate_exhaustive_memoization_dependencies = false;
+        react_options.environment.validate_hooks_usage = false;
+    }
+    let result = compile(
+        &parsed.program,
+        &semantic.semantic,
+        &allocator,
+        react_options,
+    );
     drop(semantic);
     match result {
         CompileResult::Success {
@@ -190,13 +393,19 @@ pub fn compile_server_module_with_options(
             diagnostics,
         } if diagnostics.is_empty() => output.transform(&mut parsed.program),
         CompileResult::Success { diagnostics, .. } | CompileResult::Fatal { diagnostics } => {
-            return Err(lower_react_diagnostics(
+            let mut diagnostics = lower_react_diagnostics(
                 &diagnostics,
                 format!(
                     "React Compiler rejected {} for server codegen",
                     input.filename
                 ),
-            ));
+            );
+            crate::source_maps::remap_diagnostics(
+                &mut diagnostics,
+                &canonical_sources,
+                &canonical_maps,
+            );
+            return Err(diagnostics);
         }
     }
     restore_anonymous_default_component_names(&mut parsed.program, &anonymous_defaults);
@@ -210,7 +419,9 @@ pub fn compile_server_module_with_options(
     let source_map = generated
         .map
         .expect("source map is enabled for server compilation")
-        .to_json_string();
+        .into_owned_sourcemap();
+    let source_map =
+        crate::source_maps::compose_chain(source_map, canonical_maps.into_iter()).to_json_string();
     Ok(ServerCompilation {
         code: generated.code,
         source_map,

@@ -18,6 +18,8 @@ mod react_bindings;
 pub mod reactive_flow;
 pub mod render_flow;
 mod server_codegen;
+mod server_renderable;
+mod source_maps;
 mod surgical_codegen;
 
 pub use diagnostic::{Diagnostic, DiagnosticCode, SourceSpan};

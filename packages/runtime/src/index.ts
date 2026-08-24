@@ -18,6 +18,7 @@ export {
   cloneRenderable,
   cloneRenderableComponent,
   createRenderable,
+  dynamicIntrinsicComponent,
   forwardedRef,
   isRenderable,
   renderableChildren,

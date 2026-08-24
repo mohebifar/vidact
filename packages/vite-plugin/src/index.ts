@@ -258,7 +258,16 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       if (compilation === undefined) {
         let result
         try {
-          result = await compileWithCompiler(compilationSource, filename, configuration)
+          result = await compileWithCompiler(
+            compilationSource,
+            filename,
+            capsule === undefined
+              ? configuration
+              : {
+                  ...configuration,
+                  features: [...configuration.features, 'dependency-source'],
+                },
+          )
         } catch (error) {
           if (capsule === undefined) throw error
           throw dependencyCompilationError(capsule, configuration.target, error)

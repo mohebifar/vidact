@@ -280,4 +280,38 @@ describe('dependency capsules', () => {
       await server.close()
     }
   })
+
+  it('reports unsupported transitive constructs at the original package source', async () => {
+    const fixture = await capsuleFixture()
+    await writeFile(
+      fixture.hook,
+      `import React, { useState } from 'react'
+export class UnsupportedPublishedClass extends React.Component {
+  render() { return React.createElement('span', null, 'unsupported') }
+}
+export function useLabel() {
+  const [label, setLabel] = useState(React.createElement(UnsupportedPublishedClass, null))
+  return { label, setLabel }
+}`,
+    )
+    const transform = Reflect.get(vidact(), 'transform') as (
+      this: {
+        readonly environment: { readonly name: string }
+        addWatchFile(filename: string): void
+      },
+      source: string,
+      id: string,
+    ) => Promise<unknown>
+
+    await expect(
+      transform.call(
+        {
+          environment: { name: 'client' },
+          addWatchFile() {},
+        },
+        fixture.input.source,
+        fixture.entry,
+      ),
+    ).rejects.toThrow(/original .*use-label\.mjs:2:\d+.*React class components are unsupported/)
+  })
 })

@@ -6,6 +6,7 @@ const SERVER_NODE_KIND = Symbol.for('vidact.v1.ServerNodeKind')
 const SERVER_CONTEXT = Symbol('Vidact.ServerContext')
 const SERVER_ASYNC_RESOURCE = Symbol('Vidact.ServerAsyncResource')
 const SERVER_SUSPENSION = Symbol('Vidact.ServerSuspension')
+const SERVER_RENDERABLE = Symbol('Vidact.ServerRenderable')
 
 export interface ServerNode {
   readonly [SERVER_NODE]: (context: RenderContext) => string
@@ -25,6 +26,85 @@ export type ServerChild =
 export type ServerComponent = (props: Record<string, unknown>) => ServerChild
 export type ServerElementType = string | typeof Fragment | ServerComponent
 export type ServerProps = Record<string, unknown> | null
+
+type ServerRenderable = {
+  readonly props: Record<string, unknown>
+  readonly [SERVER_RENDERABLE]: {
+    readonly input: Record<string, unknown>
+    readonly construct: (input: Record<string, unknown>) => ServerChild
+  }
+}
+
+export function createRenderable(
+  input: Record<string, unknown>,
+  construct: (input: Record<string, unknown>) => ServerChild,
+): ServerRenderable {
+  return {
+    props: input,
+    [SERVER_RENDERABLE]: { input, construct },
+  }
+}
+
+export function isRenderable(value: unknown): value is ServerRenderable {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Object.hasOwn(value, SERVER_RENDERABLE) &&
+    typeof (value as ServerRenderable)[SERVER_RENDERABLE]?.construct === 'function'
+  )
+}
+
+export function renderableToArray(value: unknown): [ServerRenderable] {
+  if (!isRenderable(value)) throw new TypeError('expected a compiled server renderable')
+  return [value]
+}
+
+export function renderableMarker(value: unknown): undefined {
+  if (!isRenderable(value)) throw new TypeError('expected a compiled server renderable')
+  return undefined
+}
+
+export function cloneRenderable(
+  value: unknown,
+  overrides: Record<string, unknown> = {},
+): ServerChild {
+  if (!isRenderable(value)) throw new TypeError('expected a compiled server renderable')
+  const renderable = value[SERVER_RENDERABLE]
+  return renderable.construct({ ...renderable.input, ...overrides })
+}
+
+export function cloneRenderableComponent(props: Record<string, unknown>): ServerChild {
+  return cloneRenderable(props.value, props.overrides as Record<string, unknown> | undefined)
+}
+
+export function renderableProps(input: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(input).filter(([name]) => !['children', 'key', 'ref'].includes(name)),
+  )
+}
+
+export function renderableChildren(input: Record<string, unknown>): ServerChild {
+  return input.children as ServerChild
+}
+
+export function renderableRef(_input: Record<string, unknown>): undefined {
+  return undefined
+}
+
+export function forwardedRef(_props: Record<string, unknown>): undefined {
+  return undefined
+}
+
+export function dynamicIntrinsicComponent(props: Record<string, unknown>): ServerNode {
+  if (typeof props.tag !== 'string') {
+    throw new TypeError('dynamic intrinsic construction requires a string tag')
+  }
+  const input = props.props as Record<string, unknown>
+  return jsx(props.tag, {
+    ...renderableProps(input),
+    children: renderableChildren(input),
+  })
+}
 
 export interface ServerRenderOptions {
   readonly identifierPrefix?: string
@@ -327,6 +407,17 @@ export function jsxDEV(
   isStaticChildren = false,
 ): ServerNode {
   return createServerElement(type, props, isStaticChildren)
+}
+
+export function createElement(
+  type: ServerElementType,
+  props: ServerProps,
+  ...children: ServerChild[]
+): ServerNode {
+  const nextProps = { ...(props ?? {}) }
+  if (children.length === 1) nextProps.children = children[0]
+  else if (children.length > 1) nextProps.children = children
+  return createServerElement(type, nextProps, children.length > 1)
 }
 
 /** @internal */

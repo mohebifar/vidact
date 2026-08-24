@@ -903,6 +903,7 @@ dependencies = [
  "oxc_parser",
  "oxc_react_compiler",
  "oxc_semantic",
+ "oxc_sourcemap",
  "oxc_span",
  "oxc_syntax",
  "serde_json",

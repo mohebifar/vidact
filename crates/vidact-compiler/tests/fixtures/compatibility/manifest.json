@@ -167,6 +167,12 @@
       "components": ["Child"]
     },
     {
+      "path": "accepted/dependency-published-patterns.tsx",
+      "expectation": "accepted",
+      "features": ["dependency-source"],
+      "components": ["DependencyPublishedPatterns"]
+    },
+    {
       "path": "rejected/class-error-boundary.tsx",
       "expectation": "rejected",
       "code": "UnsupportedSyntax",
