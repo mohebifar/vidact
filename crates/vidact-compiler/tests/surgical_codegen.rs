@@ -2250,6 +2250,144 @@ fn compiles_reactive_component_spreads_into_mutable_prop_stores() {
 }
 
 #[test]
+fn compiles_element_valued_props_into_opaque_renderable_capabilities() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "Renderable.tsx",
+        source: r#"
+            import * as React from 'react';
+            import { useState } from 'react';
+            function Slot({ render, disabled }) {
+                const merged = {
+                    ...render.props,
+                    'data-disabled': disabled,
+                    children: disabled ? 'Disabled' : render.props.children,
+                };
+                return React.cloneElement(render, merged);
+            }
+            export function App() {
+                const [disabled, setDisabled] = useState(false);
+                const [href, setHref] = useState('/first');
+                return <Slot disabled={disabled} render={<a href={href}>Open</a>} />;
+            }
+        "#,
+    })
+    .expect("element-valued render props should compile as capabilities");
+
+    assert!(
+        output.contains("createRenderable as __vidactCreateRenderable"),
+        "{output}"
+    );
+    assert!(
+        output.contains("cloneRenderableComponent as __vidactCloneRenderableComponent"),
+        "{output}"
+    );
+    assert!(
+        output.contains("renderableProps as __vidactRenderableProps"),
+        "{output}"
+    );
+    assert!(!output.contains("React.cloneElement"), "{output}");
+    assert!(!output.contains("$$typeof"), "{output}");
+}
+
+#[test]
+fn lowers_base_ui_renderable_validation_and_lazy_sentinel_workaround() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "BaseUiRenderable.tsx",
+        source: r#"
+            import * as React from 'react';
+            const REACT_LAZY_TYPE = Symbol.for('react.lazy');
+            function Slot({ render, disabled }) {
+                const merged = { ...render.props, 'data-disabled': disabled };
+                let newElement = render;
+                if (newElement?.$$typeof === REACT_LAZY_TYPE) {
+                    const children = React.Children.toArray(render);
+                    newElement = children[0];
+                }
+                if (!React.isValidElement(newElement)) {
+                    throw new Error('invalid render');
+                }
+                return React.cloneElement(newElement, merged);
+            }
+            export function App() {
+                return <Slot disabled={false} render={<button>Open</button>} />;
+            }
+        "#,
+    })
+    .expect("Base UI render validation should lower to the bounded capability ABI");
+
+    assert!(
+        output.contains("isRenderable as __vidactIsRenderable"),
+        "{output}"
+    );
+    assert!(!output.contains("renderableMarker"), "{output}");
+    assert!(!output.contains("renderableToArray"), "{output}");
+    assert!(!output.contains("React.Children"), "{output}");
+    assert!(!output.contains("React.isValidElement"), "{output}");
+    assert!(!output.contains("React.cloneElement"), "{output}");
+    assert!(!output.contains("$$typeof"), "{output}");
+}
+
+#[test]
+fn lowers_single_renderable_children_to_array_without_tree_traversal() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "RenderableToArray.tsx",
+        source: r#"
+            import * as React from 'react';
+            function Slot({ render }) {
+                const element = React.Children.toArray(render)[0];
+                return React.cloneElement(element, { title: 'merged' });
+            }
+            export function App() {
+                return <Slot render={<button>Open</button>} />;
+            }
+        "#,
+    })
+    .expect("one renderable Children.toArray call should use the bounded capability helper");
+
+    assert!(
+        output.contains("renderableToArray as __vidactRenderableToArray"),
+        "{output}"
+    );
+    assert!(!output.contains("React.Children"), "{output}");
+    assert!(!output.contains("React.cloneElement"), "{output}");
+}
+
+#[test]
+fn preserves_callback_and_element_render_paths_without_component_replay() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "RenderPaths.tsx",
+        source: r#"
+            import * as React from 'react';
+            function Slot({ render, label }) {
+                const props = { title: label, children: label };
+                if (typeof render === 'function') {
+                    return render(props, { label });
+                }
+                return React.cloneElement(render, { ...render.props, ...props });
+            }
+            export function App() {
+                return <main>
+                    <Slot label="callback" render={(props) => <button {...props} />} />
+                    <Slot label="element" render={<a href="/docs">authored</a>} />
+                </main>;
+            }
+        "#,
+    })
+    .expect("callback and element render paths should compile under one component owner");
+
+    assert!(output.contains("render.get()(props"), "{output}");
+    assert!(
+        output.contains("createRenderable as __vidactCreateRenderable"),
+        "{output}"
+    );
+    assert!(
+        output.contains("cloneRenderableComponent as __vidactCloneRenderableComponent"),
+        "{output}"
+    );
+    assert!(!output.contains("React.cloneElement"), "{output}");
+}
+
+#[test]
 fn compiles_rest_props_into_a_resolved_object_slot() {
     let output = compile_surgical_module(ModuleInput {
         filename: "RestProps.tsx",

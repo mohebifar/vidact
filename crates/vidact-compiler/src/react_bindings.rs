@@ -198,6 +198,42 @@ impl<'s> ReactBindings<'s> {
         self.is_named_call(call, "lazy")
     }
 
+    pub(crate) fn is_clone_element_call(&self, call: &CallExpression<'_>) -> bool {
+        self.is_named_call(call, "cloneElement")
+    }
+
+    pub(crate) fn is_valid_element_call(&self, call: &CallExpression<'_>) -> bool {
+        self.is_named_call(call, "isValidElement")
+    }
+
+    pub(crate) fn is_children_to_array_call(&self, call: &CallExpression<'_>) -> bool {
+        let Expression::StaticMemberExpression(to_array) = call.callee.without_parentheses() else {
+            return false;
+        };
+        if to_array.property.name != "toArray" {
+            return false;
+        }
+        match to_array.object.without_parentheses() {
+            Expression::Identifier(identifier) => reference_symbol(identifier, self.scoping)
+                .is_some_and(|symbol| {
+                    self.named
+                        .get("Children")
+                        .is_some_and(|bindings| bindings.contains(&symbol))
+                }),
+            Expression::StaticMemberExpression(children)
+                if children.property.name == "Children" =>
+            {
+                children
+                    .object
+                    .without_parentheses()
+                    .get_identifier_reference()
+                    .and_then(|identifier| reference_symbol(identifier, self.scoping))
+                    .is_some_and(|symbol| self.namespaces.contains(&symbol))
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn concurrent_hook_call(&self, call: &CallExpression<'_>) -> Option<ConcurrentHook> {
         if self.is_named_call(call, "useTransition") {
             Some(ConcurrentHook::Transition)

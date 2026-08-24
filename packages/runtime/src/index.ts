@@ -14,6 +14,20 @@ export { createRoot, mountHotRoot, type CompiledRoot, type HotContext } from './
 export { assertRuntimeProtocol, VIDACT_RUNTIME_PROTOCOL } from './protocol.ts'
 export { compiledSpread } from './spread.ts'
 export { compiledComponentSpread } from './component-spread.ts'
+export {
+  cloneRenderable,
+  cloneRenderableComponent,
+  createRenderable,
+  forwardedRef,
+  isRenderable,
+  renderableChildren,
+  renderableMarker,
+  renderableProps,
+  renderableRef,
+  renderableToArray,
+  type CompiledRenderable,
+  type RenderablePropsInput,
+} from './renderable.ts'
 export { nestedProp } from './nested-prop.ts'
 export {
   binding,

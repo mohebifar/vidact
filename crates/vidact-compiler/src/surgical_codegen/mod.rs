@@ -58,6 +58,9 @@ const COMPILED_LAYOUT_EFFECT: &str = "__vidactLayoutEffect";
 const COMPILED_FORM_ACTION: &str = "__vidactFormAction";
 const COMPILED_SPREAD: &str = "__vidactSpread";
 const COMPILED_ROOT: &str = "__vidactCompiledRoot";
+const CLONE_RENDERABLE: &str = "__vidactCloneRenderable";
+const CLONE_RENDERABLE_COMPONENT: &str = "__vidactCloneRenderableComponent";
+const CREATE_RENDERABLE: &str = "__vidactCreateRenderable";
 const CHOOSE: &str = "__vidactChoose";
 const CREATE_ASYNC: &str = "__vidactCreateAsync";
 const CREATE_ACTION_STATE: &str = "__vidactCreateActionState";
@@ -82,6 +85,7 @@ const ENABLE_FRAMEWORK_METADATA: &str = "__vidactEnableFrameworkMetadata";
 const ENABLE_DOM_FORMS: &str = "__vidactEnableDomForms";
 const ENABLE_DOM_NAMESPACE: &str = "__vidactEnableDomNamespace";
 const ENABLE_DOM_STYLES: &str = "__vidactEnableDomStyles";
+const FORWARDED_REF: &str = "__vidactForwardedRef";
 const INDEXED: &str = "__vidactIndexed";
 const KEYED: &str = "__vidactKeyed";
 const ITEM_INDEX: &str = "__vidactItemIndex";
@@ -90,6 +94,13 @@ const ITEM_VALUE: &str = "__vidactItem";
 const NARROW_SOURCE_BITS: u32 = 32;
 const NESTED_PROP: &str = "__vidactNestedProp";
 const PROPS: &str = "__vidactProps";
+const RENDERABLE_CHILDREN: &str = "__vidactRenderableChildren";
+const RENDERABLE_INPUT: &str = "__vidactRenderableInput";
+const RENDERABLE_MARKER: &str = "__vidactRenderableMarker";
+const RENDERABLE_PROPS: &str = "__vidactRenderableProps";
+const RENDERABLE_REF: &str = "__vidactRenderableRef";
+const RENDERABLE_TO_ARRAY: &str = "__vidactRenderableToArray";
+const IS_RENDERABLE: &str = "__vidactIsRenderable";
 const SOURCE: &str = "__vidactSource";
 const WHEN: &str = "__vidactWhen";
 
@@ -2624,6 +2635,38 @@ enum ReactiveSpreadKind {
 }
 
 impl<'a> JsxBindingTransformer<'a, '_, '_> {
+    fn lower_renderable_attribute(
+        &mut self,
+        element: oxc_allocator::Box<'a, JSXElement<'a>>,
+    ) -> Result<Expression<'a>, Diagnostic> {
+        let element_expression =
+            Expression::JSXElement(element.clone_in_with_semantic_ids(self.ast.allocator()));
+        let reads = dependencies(
+            &element_expression,
+            self.scoping,
+            self.source_symbols,
+            self.item_source_symbols,
+        );
+        let (mut input, constructor) = renderable_parts(self.ast, element)?;
+        if !reads.is_empty() {
+            let mut arguments = vec![
+                ident(self.ast, SCOPE),
+                dependency_mask(self.ast, &reads.parent),
+                arrow_expression(self.ast, [], input),
+            ];
+            append_item_dependency(self.ast, &mut arguments, &reads);
+            input = call_name(self.ast, BINDING, arguments);
+        }
+        Ok(call_name(
+            self.ast,
+            CREATE_RENDERABLE,
+            [
+                input,
+                arrow_expression(self.ast, [RENDERABLE_INPUT], constructor),
+            ],
+        ))
+    }
+
     fn lower_choice_branch(&mut self, expression: &mut Expression<'a>) {
         if self.lower_structural_conditional(expression) {
             return;
@@ -2942,7 +2985,86 @@ pub(super) fn prepare_known_suspense_element<'a>(
 }
 
 impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
+    fn visit_expression(&mut self, expression: &mut Expression<'a>) {
+        walk_expression_mut(self, expression);
+        let Expression::ChainExpression(chain) = expression else {
+            return;
+        };
+        let ChainElement::StaticMemberExpression(member) = &chain.expression else {
+            return;
+        };
+        if member.property.name != "$$typeof" {
+            return;
+        }
+        let value = member
+            .object
+            .clone_in_with_semantic_ids(self.ast.allocator());
+        *expression = call_name(self.ast, RENDERABLE_MARKER, [value]);
+    }
+
     fn visit_call_expression(&mut self, call: &mut CallExpression<'a>) {
+        if self.react.is_clone_element_call(call) {
+            if !(1..=2).contains(&call.arguments.len())
+                || call.arguments.iter().any(Argument::is_spread)
+            {
+                self.diagnostic = Some(
+                    unsupported("cloneElement requires a renderable and optional props object")
+                        .with_span(SourceSpan::new(call.span.start, call.span.end)),
+                );
+                return;
+            }
+            walk_call_expression_mut(self, call);
+            if let Some(overrides) = call.arguments.get_mut(1) {
+                let expression = overrides
+                    .as_expression_mut()
+                    .expect("spread arguments were rejected");
+                let reads = dependencies(
+                    expression,
+                    self.scoping,
+                    self.source_symbols,
+                    self.item_source_symbols,
+                );
+                if !reads.is_empty() {
+                    let evaluate = expression.clone_in_with_semantic_ids(self.ast.allocator());
+                    let mut arguments = vec![
+                        ident(self.ast, SCOPE),
+                        dependency_mask(self.ast, &reads.parent),
+                        arrow_expression(self.ast, [], evaluate),
+                    ];
+                    append_item_dependency(self.ast, &mut arguments, &reads);
+                    *expression = call_name(self.ast, BINDING, arguments);
+                }
+            }
+            call.callee = ident(self.ast, CLONE_RENDERABLE);
+            call.type_arguments = None;
+            return;
+        }
+        if self.react.is_valid_element_call(call) {
+            if call.arguments.len() != 1 || call.arguments[0].is_spread() {
+                self.diagnostic = Some(
+                    unsupported("isValidElement requires one value")
+                        .with_span(SourceSpan::new(call.span.start, call.span.end)),
+                );
+                return;
+            }
+            walk_call_expression_mut(self, call);
+            call.callee = ident(self.ast, IS_RENDERABLE);
+            call.type_arguments = None;
+            return;
+        }
+        if self.react.is_children_to_array_call(call) {
+            if call.arguments.len() != 1 || call.arguments[0].is_spread() {
+                self.diagnostic = Some(
+                    unsupported("Children.toArray supports one renderable value")
+                        .with_span(SourceSpan::new(call.span.start, call.span.end)),
+                );
+                return;
+            }
+            walk_call_expression_mut(self, call);
+            call.callee = ident(self.ast, RENDERABLE_TO_ARRAY);
+            call.type_arguments = None;
+            return;
+        }
         if let Some(name) = self.react.framework_call_name(call) {
             let message = if self.react.is_server_framework_call(call) {
                 Some(format!(
@@ -3377,6 +3499,32 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
     }
 
     fn visit_jsx_attribute(&mut self, attribute: &mut JSXAttribute<'a>) {
+        if let Some(JSXAttributeValue::Element(_)) = &attribute.value {
+            let Some(JSXAttributeValue::Element(element)) = attribute.value.take() else {
+                unreachable!();
+            };
+            match self.lower_renderable_attribute(element) {
+                Ok(expression) => {
+                    attribute.value = Some(JSXAttributeValue::new_expression_container(
+                        attribute.span,
+                        expression.into(),
+                        self.ast,
+                    ));
+                }
+                Err(diagnostic) => self.diagnostic = Some(diagnostic),
+            }
+            return;
+        }
+        if let Some(JSXAttributeValue::ExpressionContainer(container)) = &mut attribute.value
+            && let JSXExpression::JSXElement(element) = &container.expression
+        {
+            let element = element.clone_in_with_semantic_ids(self.ast.allocator());
+            match self.lower_renderable_attribute(element) {
+                Ok(expression) => container.expression = expression.into(),
+                Err(diagnostic) => self.diagnostic = Some(diagnostic),
+            }
+            return;
+        }
         let JSXAttributeName::Identifier(name) = &attribute.name else {
             walk_jsx_attribute(self, attribute);
             return;
@@ -3476,6 +3624,14 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
         let Some(expression) = container.expression.as_expression_mut() else {
             return;
         };
+
+        if matches!(
+            expression.without_parentheses(),
+            Expression::CallExpression(call)
+                if call.callee.get_identifier_reference().is_some_and(|identifier| identifier.name == CREATE_RENDERABLE)
+        ) {
+            return;
+        }
 
         if is_generated_render_thunk(expression) {
             walk_expression_mut(self, expression);
@@ -3636,6 +3792,145 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
         ];
         append_item_dependency(self.ast, &mut arguments, &reads);
         *expression = call_name(self.ast, BINDING, arguments);
+    }
+}
+
+fn renderable_parts<'a>(
+    ast: &AstBuilder<'a>,
+    element: oxc_allocator::Box<'a, JSXElement<'a>>,
+) -> Result<(Expression<'a>, Expression<'a>), Diagnostic> {
+    let span = element.span;
+    let mut properties = oxc_allocator::Vec::new_in(ast);
+    for item in &element.opening_element.attributes {
+        match item {
+            JSXAttributeItem::SpreadAttribute(spread) => {
+                properties.push(ObjectPropertyKind::new_spread_property(
+                    spread.span,
+                    spread.argument.clone_in_with_semantic_ids(ast.allocator()),
+                    ast,
+                ));
+            }
+            JSXAttributeItem::Attribute(attribute) => {
+                let JSXAttributeName::Identifier(name) = &attribute.name else {
+                    return Err(unsupported(
+                        "renderable capability attributes require ordinary prop names",
+                    )
+                    .with_span(SourceSpan::new(attribute.span.start, attribute.span.end)));
+                };
+                let value = match &attribute.value {
+                    None => Expression::new_boolean_literal(attribute.span, true, ast),
+                    Some(JSXAttributeValue::StringLiteral(value)) => {
+                        Expression::StringLiteral(value.clone_in_with_semantic_ids(ast.allocator()))
+                    }
+                    Some(JSXAttributeValue::ExpressionContainer(container)) => container
+                        .expression
+                        .as_expression()
+                        .ok_or_else(|| unsupported("renderable prop must have a value"))?
+                        .clone_in_with_semantic_ids(ast.allocator()),
+                    Some(JSXAttributeValue::Element(value)) => {
+                        Expression::JSXElement(value.clone_in_with_semantic_ids(ast.allocator()))
+                    }
+                    Some(JSXAttributeValue::Fragment(value)) => {
+                        Expression::JSXFragment(value.clone_in_with_semantic_ids(ast.allocator()))
+                    }
+                };
+                let value = if is_event_attribute(name.name.as_str()) {
+                    call_name(ast, COMPILED_EVENT, [ident(ast, SCOPE), value])
+                } else {
+                    value
+                };
+                properties.push(ObjectPropertyKind::new_object_property(
+                    attribute.span,
+                    PropertyKind::Init,
+                    PropertyKey::new_string_literal(name.span, name.name, None, ast),
+                    value,
+                    false,
+                    false,
+                    false,
+                    ast,
+                ));
+            }
+        }
+    }
+    if !element.children.is_empty() {
+        let children = renderable_children_expression(ast, &element.children)?;
+        properties.push(ObjectPropertyKind::new_object_property(
+            span,
+            PropertyKind::Init,
+            PropertyKey::new_static_identifier(SPAN, "children", ast),
+            children,
+            false,
+            false,
+            false,
+            ast,
+        ));
+    }
+    let input = Expression::new_object_expression(span, properties, ast);
+
+    let name = element
+        .opening_element
+        .name
+        .clone_in_with_semantic_ids(ast.allocator());
+    let attributes = [
+        JSXAttributeItem::new_spread_attribute(
+            SPAN,
+            call_name(ast, RENDERABLE_PROPS, [ident(ast, RENDERABLE_INPUT)]),
+            ast,
+        ),
+        JSXAttributeItem::new_attribute(
+            SPAN,
+            JSXAttributeName::new_identifier(SPAN, "ref", ast),
+            Some(JSXAttributeValue::new_expression_container(
+                SPAN,
+                call_name(ast, RENDERABLE_REF, [ident(ast, RENDERABLE_INPUT)]).into(),
+                ast,
+            )),
+            ast,
+        ),
+    ];
+    let child = JSXChild::new_expression_container(
+        SPAN,
+        call_name(ast, RENDERABLE_CHILDREN, [ident(ast, RENDERABLE_INPUT)]).into(),
+        ast,
+    );
+    let opening =
+        JSXOpeningElement::boxed(SPAN, name.clone_in(ast.allocator()), None, attributes, ast);
+    let closing = JSXClosingElement::boxed(SPAN, name, ast);
+    let constructor = Expression::new_jsx_element(SPAN, opening, [child], Some(closing), ast);
+    Ok((input, constructor))
+}
+
+fn renderable_children_expression<'a>(
+    ast: &AstBuilder<'a>,
+    children: &[JSXChild<'a>],
+) -> Result<Expression<'a>, Diagnostic> {
+    let mut values = oxc_allocator::Vec::new_in(ast);
+    for child in children {
+        let expression = match child {
+            JSXChild::Text(text) => {
+                Expression::new_string_literal(text.span, text.value, None, ast)
+            }
+            JSXChild::Element(element) => {
+                Expression::JSXElement(element.clone_in_with_semantic_ids(ast.allocator()))
+            }
+            JSXChild::Fragment(fragment) => {
+                Expression::JSXFragment(fragment.clone_in_with_semantic_ids(ast.allocator()))
+            }
+            JSXChild::ExpressionContainer(container) => container
+                .expression
+                .as_expression()
+                .ok_or_else(|| unsupported("renderable child expression must have a value"))?
+                .clone_in_with_semantic_ids(ast.allocator()),
+            JSXChild::Spread(spread) => spread
+                .expression
+                .clone_in_with_semantic_ids(ast.allocator()),
+        };
+        values.push(ArrayExpressionElement::from(expression));
+    }
+    if values.len() == 1 {
+        Ok(Expression::try_from(values.pop().unwrap()).unwrap())
+    } else {
+        Ok(Expression::new_array_expression(SPAN, values, ast))
     }
 }
 
@@ -4716,6 +5011,8 @@ fn runtime_import<'a>(
     let names = [
         ("ActionForm", ACTION_FORM),
         ("binding", BINDING),
+        ("cloneRenderable", CLONE_RENDERABLE),
+        ("cloneRenderableComponent", CLONE_RENDERABLE_COMPONENT),
         ("combineSources", COMBINE_SOURCES),
         ("compiledComponentSpread", COMPILED_COMPONENT_SPREAD),
         ("compiledEffect", COMPILED_EFFECT),
@@ -4744,12 +5041,20 @@ fn runtime_import<'a>(
         ("createNarrowCompiledScope", CREATE_NARROW_SCOPE),
         ("createCompiledState", CREATE_STATE),
         ("createCompiledTransition", CREATE_TRANSITION),
+        ("createRenderable", CREATE_RENDERABLE),
         ("deferred", DEFERRED),
         ("dispatch", DISPATCH),
         ("enableFrameworkMetadata", ENABLE_FRAMEWORK_METADATA),
+        ("forwardedRef", FORWARDED_REF),
         ("indexed", INDEXED),
         ("keyed", KEYED),
         ("nestedProp", NESTED_PROP),
+        ("isRenderable", IS_RENDERABLE),
+        ("renderableChildren", RENDERABLE_CHILDREN),
+        ("renderableMarker", RENDERABLE_MARKER),
+        ("renderableProps", RENDERABLE_PROPS),
+        ("renderableRef", RENDERABLE_REF),
+        ("renderableToArray", RENDERABLE_TO_ARRAY),
         ("source", SOURCE),
         ("when", WHEN),
     ];

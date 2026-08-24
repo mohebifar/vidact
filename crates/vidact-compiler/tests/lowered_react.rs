@@ -76,6 +76,33 @@ fn normalizes_automatic_runtime_namespace_members() {
 }
 
 #[test]
+fn normalizes_forward_ref_and_plain_memo_component_wrappers() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "wrapped.js",
+        source: r#"
+            import React from "react";
+            import { jsx as h } from "react/jsx-runtime";
+            export const Button = React.memo(React.forwardRef(function Button(props, ref) {
+                return h("button", { ...props, ref, children: props.children });
+            }));
+        "#,
+    })
+    .expect("forwardRef and memo wrappers should expose their component body");
+
+    assert!(
+        output.contains("export const Button = function Button"),
+        "{output}"
+    );
+    assert!(!output.contains("forwardRef"), "{output}");
+    assert!(!output.contains("React.memo"), "{output}");
+    assert!(
+        output.contains("forwardedRef as __vidactForwardedRef"),
+        "{output}"
+    );
+    assert!(!output.contains("props, ref"), "{output}");
+}
+
+#[test]
 fn normalizes_classic_create_element_named_namespace_and_default_imports() {
     for (filename, source) in [
         (
