@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-const releaseIntentPattern = /^\.changeset\/(?:pre\/)?[^/]+\.md$/
+const releaseIntentPattern = /^\.changeset\/[^/]+\.md$/
 
 export function isReleaseIntentPath(filePath) {
   return filePath !== '.changeset/README.md' && releaseIntentPattern.test(filePath)
@@ -22,7 +22,7 @@ export function verifyReleaseIntent({
 
   const result = runGit(
     'git',
-    ['diff', '--name-only', '--diff-filter=AMR', '-z', `${baseRef}...HEAD`, '--', '.changeset'],
+    ['diff', '--name-only', '--diff-filter=AM', '-z', `${baseRef}...HEAD`, '--', '.changeset'],
     { cwd },
   )
 

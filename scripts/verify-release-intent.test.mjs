@@ -8,11 +8,10 @@ import {
   verifyReleaseIntent,
 } from './verify-release-intent.mjs'
 
-test('recognizes direct and prerelease changeset markdown files other than README', () => {
+test('recognizes only direct changeset markdown files other than README', () => {
   assert.equal(isReleaseIntentPath('.changeset/quick-dogs.md'), true)
   assert.equal(isReleaseIntentPath('.changeset/README.md'), false)
-  assert.equal(isReleaseIntentPath('.changeset/pre/quick-dogs.md'), true)
-  assert.equal(isReleaseIntentPath('.changeset/pre/nested/quick-dogs.md'), false)
+  assert.equal(isReleaseIntentPath('.changeset/nested/quick-dogs.md'), false)
   assert.equal(isReleaseIntentPath('.changeset/quick-dogs.txt'), false)
 })
 
@@ -20,10 +19,10 @@ test('parses null-delimited git output', () => {
   assert.deepEqual(
     parseChangedPaths(
       Buffer.from(
-        '.changeset/README.md\0.changeset/quick-dogs.md\0.changeset/pre/quick-cats.md\0packages/runtime/src/index.ts\0',
+        '.changeset/README.md\0.changeset/quick-dogs.md\0packages/runtime/src/index.ts\0',
       ),
     ),
-    ['.changeset/quick-dogs.md', '.changeset/pre/quick-cats.md'],
+    ['.changeset/quick-dogs.md'],
   )
 })
 
@@ -41,23 +40,12 @@ test('accepts an added or modified changeset and uses the pull request base', ()
   assert.deepEqual(calls[0].args, [
     'diff',
     '--name-only',
-    '--diff-filter=AMR',
+    '--diff-filter=AM',
     '-z',
     'abc123...HEAD',
     '--',
     '.changeset',
   ])
-})
-
-test('accepts a changeset renamed into the prerelease directory', () => {
-  const changesets = verifyReleaseIntent({
-    baseRef: 'abc123',
-    runGit() {
-      return { status: 0, stdout: Buffer.from('.changeset/pre/release.md\0') }
-    },
-  })
-
-  assert.deepEqual(changesets, ['.changeset/pre/release.md'])
 })
 
 test('rejects a pull request without an added or modified changeset', () => {
