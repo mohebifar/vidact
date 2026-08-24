@@ -1,6 +1,6 @@
 {
   "name": "@vidact/runtime",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Fine-grained direct-DOM runtime for compiled Vidact applications",
   "keywords": [
     "compiler",
