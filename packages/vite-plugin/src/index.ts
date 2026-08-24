@@ -34,6 +34,8 @@ export interface VidactPluginOptions {
   readonly includeDependencies?: FilterPattern
   /** Source files to leave untouched even when they otherwise match. */
   readonly exclude?: FilterPattern
+  /** JSX-bearing file extensions to compile after earlier Vite transforms. */
+  readonly extensions?: readonly `.${string}`[]
 }
 
 export interface CompilationCacheInput extends VidactCompilerConfiguration {
@@ -75,6 +77,7 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       ? () => false
       : createFilter(options.includeDependencies)
   const includeSource = createFilter(undefined, options.exclude)
+  const extensions = options.extensions ?? ['.tsx']
 
   return {
     name: 'vidact',
@@ -194,7 +197,7 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
     async transform(source, id) {
       const filename = id.split('?', 1)[0] ?? id
       if (
-        !filename.endsWith('.tsx') ||
+        !extensions.some((extension) => filename.endsWith(extension)) ||
         !includeSource(filename) ||
         (filename.includes('/node_modules/') && !includeDependency(filename))
       ) {

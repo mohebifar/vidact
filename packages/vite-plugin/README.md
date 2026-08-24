@@ -21,6 +21,16 @@ vidact({
 })
 ```
 
+Compile JSX emitted by an earlier Vite transform by adding its source extension. This enables
+MDX when the MDX plugin runs before Vidact and preserves JSX output:
+
+```ts
+plugins: [
+  mdx({ jsx: true }),
+  vidact({ extensions: ['.tsx', '.mdx'] }),
+]
+```
+
 Use `features: ['async']` to enable compiler-staged `Suspense`, `lazy`, and
 `use(promise)`. The plugin selects isolated async client, hydrate, or server
 runtime entries; disabled syntax receives a source-located diagnostic.

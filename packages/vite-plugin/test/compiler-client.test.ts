@@ -318,4 +318,22 @@ describe('vidact compiler client', () => {
       }).call(context, source, dependencyId),
     ).resolves.toBeNull()
   })
+
+  it('compiles pre-transformed MDX when the extension is enabled', async () => {
+    const source = `
+      export default function Article() {
+        return <article><h1>Compiled MDX</h1><p>Direct DOM documentation.</p></article>
+      }
+    `
+    const context = { environment: { name: 'client' } }
+
+    await expect(transformHook({}).call(context, source, '/app/guide.mdx')).resolves.toBeNull()
+    await expect(
+      transformHook({ extensions: ['.tsx', '.mdx'] }).call(
+        context,
+        source,
+        '/app/guide.mdx?import',
+      ),
+    ).resolves.toMatchObject({ code: expect.stringContaining('__vidactCompiledRoot') })
+  })
 })
