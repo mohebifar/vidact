@@ -10,6 +10,7 @@ mod custom_hooks;
 mod diagnostic;
 mod framework_directives;
 pub mod ir;
+mod lowered_react;
 mod options;
 mod oxc_react;
 pub mod protocol;

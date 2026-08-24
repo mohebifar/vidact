@@ -27,6 +27,7 @@ use crate::{
     },
     custom_hooks::plan_local_custom_hooks,
     lower_component,
+    lowered_react::{may_contain_lowered_react, normalize_lowered_react},
     options::{CompilationOptions, CompilerFeature, CompilerTarget},
     oxc_react::{analyze_program, lower_react_diagnostics},
     react_bindings::ReactBindings,
@@ -78,6 +79,27 @@ pub fn compile_server_module_with_options(
             ),
         )]);
     }
+    let semantic = if may_contain_lowered_react(&parsed.program) {
+        let scoping = semantic.semantic.into_scoping();
+        normalize_lowered_react(&allocator, &mut parsed.program, &scoping)
+            .map_err(|diagnostic| vec![diagnostic])?;
+        let semantic = SemanticBuilder::new()
+            .with_build_nodes(true)
+            .with_check_syntax_error(true)
+            .build(&parsed.program);
+        if !semantic.diagnostics.is_empty() {
+            return Err(vec![Diagnostic::new(
+                crate::DiagnosticCode::AnalysisFailed,
+                format!(
+                    "OXC semantic analysis failed for {} after lowered React normalization: {:?}",
+                    input.filename, semantic.diagnostics
+                ),
+            )]);
+        }
+        semantic
+    } else {
+        semantic
+    };
     let custom_hooks =
         plan_local_custom_hooks(&allocator, &parsed.program, semantic.semantic.scoping())
             .map_err(|diagnostic| vec![diagnostic])?;
