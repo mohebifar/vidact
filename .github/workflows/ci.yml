@@ -36,5 +36,5 @@ jobs:
           components: clippy,rustfmt
       - name: Prepare patched Oxc checkout
         run: scripts/prepare-oxc.sh
-      - run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - run: pnpm --filter @vidact/browser-corpus exec playwright install --with-deps chromium firefox webkit
       - run: pnpm check
