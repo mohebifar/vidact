@@ -1,5 +1,5 @@
-import { createRequire } from 'node:module'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -54,10 +54,7 @@ async function transformBaseUiEntry(
   )
 }
 
-async function buildBaseUiApp(
-  target: 'client' | 'server',
-  bundleRuntime = false,
-): Promise<string> {
+async function buildBaseUiApp(target: 'client' | 'server', bundleRuntime = false): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'vidact-base-ui-'))
   temporaryDirectories.push(root)
   const entry = join(root, 'src', 'main.tsx')
@@ -79,7 +76,11 @@ async function buildBaseUiApp(
       }
     `,
   )
-  const aliases: Array<{ find: string; replacement: string }> = ['button', 'input', 'toggle-group'].map((subpath) => ({
+  const aliases: Array<{ find: string; replacement: string }> = [
+    'button',
+    'input',
+    'toggle-group',
+  ].map((subpath) => ({
     find: `@base-ui/react/${subpath}`,
     replacement: join(baseUiRoot, subpath, 'index.mjs'),
   }))

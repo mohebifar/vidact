@@ -17,7 +17,7 @@
     "format:fix": "oxfmt --disable-nested-config \"**/*.{js,jsx,ts,tsx,json,jsonc,css}\" --write",
     "format:rust": "cargo fmt -p vidact-compiler --check",
     "lint": "oxlint --disable-nested-config . && ast-grep scan --globs '!vendor/**'",
-    "lint:fix": "oxlint . --fix",
+    "lint:fix": "oxlint . --fix --disable-nested-config",
     "size": "pnpm --fail-if-no-match --filter @vidact/runtime-size measure",
     "test": "pnpm build:packages && pnpm test:rust && pnpm test:runtime && pnpm test:tools && pnpm test:browser && pnpm test:examples && pnpm test:packages && pnpm test:release",
     "test:browser": "pnpm --filter @vidact/browser-corpus test",
