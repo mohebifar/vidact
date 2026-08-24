@@ -6,7 +6,9 @@
     "README.md"
   ],
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "./dist/*hydrate.js"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

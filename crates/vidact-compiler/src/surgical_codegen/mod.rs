@@ -1175,7 +1175,16 @@ fn transform_component<'a>(
                 &source_symbols,
                 &item_source_symbols,
             )?;
-            transform_context_declarator(&ast, declarator, &source_ids, &react, options)?;
+            transform_context_declarator(
+                &ast,
+                declarator,
+                &source_ids,
+                &react,
+                options,
+                scoping,
+                &source_symbols,
+                &item_source_symbols,
+            )?;
             transform_external_store_declarator(
                 &ast,
                 declarator,
@@ -2284,12 +2293,16 @@ fn transform_memo_declarator<'a>(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn transform_context_declarator<'a>(
     ast: &AstBuilder<'a>,
     declarator: &mut VariableDeclarator<'a>,
     sources: &BTreeMap<&str, SourceId>,
     react: &ReactBindings<'_>,
     options: &CompilationOptions,
+    scoping: &Scoping,
+    source_symbols: &BTreeMap<SymbolId, SourceId>,
+    item_source_symbols: &BTreeMap<SymbolId, SourceId>,
 ) -> Result<(), Diagnostic> {
     let Some((hook, value)) = context_binding_symbol(declarator, sources, react)? else {
         return Ok(());
@@ -2305,8 +2318,7 @@ fn transform_context_declarator<'a>(
     }
     let context = hook_call.arguments[0]
         .as_expression()
-        .expect("spread arguments were rejected")
-        .clone_in_with_semantic_ids(ast.allocator());
+        .expect("spread arguments were rejected");
     if hook == ContextHook::Use
         && !options.feature_enabled(CompilerFeature::Async)
         && is_obvious_promise_expression(&context)
@@ -2316,15 +2328,35 @@ fn transform_context_declarator<'a>(
                 .with_span(SourceSpan::new(hook_call.span.start, hook_call.span.end)),
         );
     }
-    declarator.init = Some(call_name(
-        ast,
-        if hook == ContextHook::Use && options.feature_enabled(CompilerFeature::Async) {
-            CREATE_ASYNC
-        } else {
-            CREATE_CONTEXT
-        },
-        [ident(ast, SCOPE), mask(ast, &[value.source]), context],
-    ));
+    if hook == ContextHook::Use && options.feature_enabled(CompilerFeature::Async) {
+        let reads = dependencies(context, scoping, source_symbols, item_source_symbols);
+        if !reads.item.is_empty() {
+            return Err(
+                unsupported("component async values cannot capture keyed item slots")
+                    .with_span(SourceSpan::from_oxc(context.span())),
+            );
+        }
+        declarator.init = Some(call_name(
+            ast,
+            CREATE_ASYNC,
+            [
+                ident(ast, SCOPE),
+                dependency_mask(ast, &reads.parent),
+                mask(ast, &[value.source]),
+                arrow_expression(ast, [], context.clone_in_with_semantic_ids(ast.allocator())),
+            ],
+        ));
+    } else {
+        declarator.init = Some(call_name(
+            ast,
+            CREATE_CONTEXT,
+            [
+                ident(ast, SCOPE),
+                mask(ast, &[value.source]),
+                context.clone_in_with_semantic_ids(ast.allocator()),
+            ],
+        ));
+    }
     Ok(())
 }
 
@@ -3323,6 +3355,11 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             return;
         };
 
+        if is_generated_render_thunk(expression) {
+            walk_expression_mut(self, expression);
+            return;
+        }
+
         if is_generated_list_call(expression) {
             walk_expression_mut(self, expression);
             return;
@@ -3563,6 +3600,13 @@ fn is_generated_list_call(expression: &Expression<'_>) -> bool {
     call.callee
         .get_identifier_reference()
         .is_some_and(|identifier| identifier.name == KEYED || identifier.name == INDEXED)
+}
+
+fn is_generated_render_thunk(expression: &Expression<'_>) -> bool {
+    matches!(
+        expression.without_parentheses(),
+        Expression::ArrowFunctionExpression(render) if render.span == SPAN
+    ) && contains_jsx(expression)
 }
 
 fn is_syntactically_boolean(expression: &Expression<'_>) -> bool {

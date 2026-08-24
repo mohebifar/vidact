@@ -18,6 +18,43 @@ importers:
         specifier: ^1.79.0
         version: 1.79.0
 
+  examples/shop:
+    dependencies:
+      '@vidact/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+      srvx:
+        specifier: ^0.12.7
+        version: 0.12.7
+    devDependencies:
+      '@types/node':
+        specifier: ^24.13.3
+        version: 24.13.3
+      '@types/react':
+        specifier: ^19.2.18
+        version: 19.2.18
+      '@vidact/react-types':
+        specifier: workspace:*
+        version: link:../../packages/react-types
+      '@vidact/vite':
+        specifier: workspace:*
+        version: link:../../packages/vite-plugin
+      '@vitest/browser-playwright':
+        specifier: 4.1.11
+        version: 4.1.11(playwright@1.62.1)(vite@8.2.2(@types/node@24.13.3))(vitest@4.1.11)
+      playwright:
+        specifier: 1.62.1
+        version: 1.62.1
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vite:
+        specifier: 8.2.2
+        version: 8.2.2(@types/node@24.13.3)
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.13.3)(@vitest/browser-playwright@4.1.11)(vite@8.2.2(@types/node@24.13.3))
+
   examples/todomvc:
     dependencies:
       '@vidact/runtime':
@@ -81,11 +118,10 @@ importers:
         version: 4.1.11(@types/node@24.13.3)(@vitest/browser-playwright@4.1.11)(vite@8.2.2(@types/node@24.13.3))
 
   packages/test-support:
-    dependencies:
+    devDependencies:
       '@vidact/runtime':
         specifier: workspace:*
         version: link:../runtime
-    devDependencies:
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -927,6 +963,11 @@ packages:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
 
+  srvx@0.12.7:
+    resolution: {integrity: sha512-PIaq1pDGg3EU2OGSN3pzRfYVu9MJDzLdojlGN6E3lvhAdxqn/lNMJFMA1xGA38jYkBb0V9xw02QEVVMDb0PExA==}
+    engines: {node: '>=20.16.0'}
+    hasBin: true
+
   stackback@0.0.2:
     resolution: {integrity: sha512-1XMJE5fQo1jGH6Y/7ebnwPOBEkIEnT4QF32d5R1+VXdXveM0IBMJt8zfaxX1P3QhVwrYe+576+jkANtSS2mBbw==}
 
@@ -1604,6 +1645,8 @@ snapshots:
       totalist: 3.0.1
 
   source-map-js@1.2.1: {}
+
+  srvx@0.12.7: {}
 
   stackback@0.0.2: {}
 

@@ -27,6 +27,16 @@ primitives directly.
 The compiler and runtime validate the `vidact-runtime-v1` protocol. Server and
 hydration builds must use matching package versions.
 
-`mountHotRoot(import.meta.hot, host, application)` provides owner-safe Vite HMR.
-Local compiled state resets when the module changes; stable external stores are
-the supported state-preservation boundary.
+Text inputs and textareas use React-shaped controlled-form timing: `onInput`
+receives the native `input` event, while `onChange` is dispatched from that same
+native event. Both handlers observe the browser-updated `target.value` before
+Vidact restores an unaccepted controlled edit. Selects, checkboxes, radios, and
+file inputs dispatch `onChange` from the native `change` event.
+
+`mountHotRoot(import.meta.hot, host, application)` provides owner-safe client
+replacement. Hydrated applications use `hydrateHotRoot` from a hydrate entry so
+the first evaluation claims server markup and later evaluations replace its
+owner. Vite application entries must also contain a lexical
+`import.meta.hot.accept()` call so Vite recognizes the HMR boundary. Local
+compiled state resets when the module changes; stable external stores are the
+supported state-preservation boundary.

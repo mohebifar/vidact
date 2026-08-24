@@ -25,6 +25,7 @@ import {
   isHydrationMismatch,
   noteHydrationStructuralParent,
   withoutHydration,
+  withHydrationComponentRange,
   withHydrationInsertion,
   withHydrationCursor,
 } from './hydration-bridge.ts'
@@ -683,6 +684,7 @@ export function suspense(
       let currentKind: 'content' | 'fallback' | null = null
       let removeResourceListener = noop
       let generation = 0
+      let boundary: ErrorBoundaryHandler
 
       const publish = (
         read: () => CompiledRenderValue,
@@ -690,7 +692,11 @@ export function suspense(
         detachedHydrationProbe = false,
       ): void => {
         const currentParent = rangeParent(start, end, 'Suspense boundary')
-        const nextOwner = createOwner(context, rootIdentity, parentErrorBoundary)
+        const nextOwner = createOwner(
+          context,
+          rootIdentity,
+          kind === 'content' ? boundary : parentErrorBoundary,
+        )
         const serverNodes = detachedHydrationProbe ? nodesBetween(start, end) : []
         const [fragment, nodes] = detachedHydrationProbe
           ? withoutHydration(() => stageRender(read, nextOwner))
@@ -713,10 +719,36 @@ export function suspense(
         for (const node of serverNodes) node.parentNode?.removeChild(node)
       }
 
-      const attempt = (initial: boolean): void => {
+      const beginAttempt = (): number => {
         const attemptGeneration = ++generation
         removeResourceListener()
         removeResourceListener = noop
+        return attemptGeneration
+      }
+
+      const suspend = (failure: unknown, attemptGeneration: number): void => {
+        if (!isSuspension(failure)) throw failure
+        const retry = (): void => {
+          if (lifetimeOwner[0] || attemptGeneration !== generation) return
+          runOwnerTask(lifetimeOwner, () => attempt(false))
+        }
+        removeResourceListener = subscribeResource(failure.resource, retry)
+        if (currentKind !== 'fallback') {
+          try {
+            publish(fallback, 'fallback')
+            if (pendingMarker !== undefined) {
+              currentNodes = [pendingMarker, ...currentNodes]
+            }
+          } catch (fallbackError) {
+            removeResourceListener()
+            removeResourceListener = noop
+            throw fallbackError
+          }
+        }
+      }
+
+      const attempt = (initial: boolean): void => {
+        const attemptGeneration = beginAttempt()
         try {
           publish(render, 'content', initial && pendingMarker !== undefined)
         } catch (error) {
@@ -724,26 +756,14 @@ export function suspense(
             if (initial || !routeOwnerError(lifetimeOwner, error)) throw error
             return
           }
-          const retry = (): void => {
-            if (lifetimeOwner[0] || attemptGeneration !== generation) return
-            runOwnerTask(lifetimeOwner, () => attempt(false))
-          }
-          removeResourceListener = subscribeResource(error.resource, retry)
-          if (currentKind !== 'fallback') {
-            try {
-              publish(fallback, 'fallback')
-              if (pendingMarker !== undefined) {
-                currentNodes = [pendingMarker, ...currentNodes]
-              }
-            } catch (fallbackError) {
-              removeResourceListener()
-              removeResourceListener = noop
-              throw fallbackError
-            }
-          }
+          suspend(error, attemptGeneration)
         }
       }
 
+      boundary = {
+        handle: (error) => suspend(error, beginAttempt()),
+        parent: parentErrorBoundary,
+      }
       attempt(true)
       onCleanup(() => {
         generation += 1
@@ -964,12 +984,18 @@ function createScope(operations: SourceOperations): CompiledScope {
       const entry: CompiledUpdater = [
         reads,
         writes,
-        (active) =>
-          captureOwnerError(errorOwner, () =>
+        (active) => {
+          try {
             withOwner(errorOwner, () =>
               withContextFrame(context, () => withScopeNamespace(scope, () => run(active))),
-            ),
-          ),
+            )
+          } catch (error) {
+            if (!routeOwnerError(errorOwner, error)) {
+              failedOwner = errorOwner
+              throw error
+            }
+          }
+        },
         true,
       ]
       const reusableIndex = freeUpdaterIndexes.pop()
@@ -1284,11 +1310,15 @@ export function useAsync<Value>(
 
 export function createCompiledAsync<Value>(
   scope: CompiledScope,
-  sourceMask: SourceMask,
-  input: CompiledContext<Value> | AsyncResource<Value> | PromiseLike<Value>,
+  reads: SourceMask,
+  writes: SourceMask,
+  evaluate: () => CompiledContext<Value> | AsyncResource<Value> | PromiseLike<Value>,
 ): StateSlot<Value> {
-  if (isCompiledContext<Value>(input)) return createCompiledContext(scope, sourceMask, input)
-  return createCompiledState(scope, sourceMask, useAsync(input))
+  const input = evaluate()
+  if (isCompiledContext<Value>(input)) return createCompiledContext(scope, writes, input)
+  const slot = createCompiledState(scope, writes, useAsync(input))
+  scope[0](reads, () => slot.replace(useAsync(evaluate())))
+  return slot
 }
 
 export function lazy<Props extends Record<string, unknown>>(
@@ -1832,7 +1862,10 @@ export function compiledRoot(
       )
     const insert = () => {
       if (hydratedRange === undefined) insertRender()
-      else withHydrationCursor(renderParent, start.nextSibling, insertRender)
+      else
+        withHydrationComponentRange(hydratedRange, () =>
+          withHydrationCursor(renderParent, start.nextSibling, insertRender),
+        )
     }
     if (profilingEnabled) measureProfileWork(owner, 'range', insert)
     else insert()
@@ -3725,15 +3758,6 @@ function commitPublication(operations: readonly PublicationOperation[]): void {
       }
     }
     failedOwner = current?.[5] ?? null
-    throw error
-  }
-}
-
-function captureOwnerError<T>(owner: Owner, operation: () => T): T {
-  try {
-    return operation()
-  } catch (error) {
-    failedOwner = owner
     throw error
   }
 }

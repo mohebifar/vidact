@@ -2,23 +2,45 @@ import { hydrateRoot } from '@vidact/runtime/async/hydrate'
 import {
   Suspense as ServerSuspense,
   jsx as serverJsx,
+  jsxs as serverJsxs,
   renderToString,
   use as serverUse,
   type ServerChild,
 } from '@vidact/runtime/server'
-import { captureMutations } from '@vidact/test-support'
+import { assertMutationEnvelope, captureMutations } from '@vidact/test-support'
 import { afterEach, expect, it } from 'vitest'
 
-import { AsyncHydrationApp, message, revealMessage } from './AsyncHydrationApp.tsx'
+import {
+  AsyncHydrationApp,
+  message,
+  nextMessage,
+  revealMessage,
+  revealNextMessage,
+} from './AsyncHydrationApp.tsx'
 
 function ServerAsyncMessage(): ServerChild {
-  return serverJsx('strong', { 'data-content': '', children: serverUse(message) })
+  return serverJsx('div', {
+    'data-content': '',
+    'data-count': 0,
+    children: serverJsx('strong', { children: serverUse(message) }),
+  })
 }
 
 function ServerAsyncHydrationApp(): ServerChild {
-  return ServerSuspense({
-    children: () => serverJsx(ServerAsyncMessage, null),
-    fallback: () => serverJsx('p', { 'data-fallback': '', children: 'loading' }),
+  return serverJsxs('div', {
+    children: [
+      serverJsx('button', { 'data-increment': '', children: 'increment' }),
+      serverJsx('button', { 'data-refresh': '', children: 'refresh' }),
+      serverJsx('div', {
+        'data-inline-conditional': '',
+        children: serverJsx('p', { children: 'inside conditional' }),
+      }),
+      serverJsx('p', { 'data-after-conditional': '', children: 'after conditional' }),
+      ServerSuspense({
+        children: () => serverJsx(ServerAsyncMessage, null),
+        fallback: () => serverJsx('p', { 'data-fallback': '', children: 'loading' }),
+      }),
+    ],
   })
 }
 
@@ -55,16 +77,46 @@ it('claims a pending server fallback and atomically reveals fulfilled content', 
   expect(fallback?.isConnected).toBe(false)
   expect(host.querySelector('[data-content]')?.textContent).toBe('ready')
   expect(reveal.records.length).toBeGreaterThan(0)
+
+  const content = host.querySelector('[data-content]')
+  const increment = host.querySelector<HTMLButtonElement>('[data-increment]')
+  if (content === null || increment === null) throw new Error('fulfilled controls must exist')
+  expect(content.getAttribute('data-count')).toBe('0')
+  const update = await captureMutations(host, () => increment.click())
+  expect(host.querySelector('[data-content]')).toBe(content)
+  expect(content.getAttribute('data-count')).toBe('1')
+  expect(() =>
+    assertMutationEnvelope(
+      update.records,
+      [{ type: 'attributes', target: content, attributeName: 'data-count' }],
+      'reactive Suspense child prop update',
+    ),
+  ).not.toThrow()
+
+  const refresh = host.querySelector<HTMLButtonElement>('[data-refresh]')
+  if (refresh === null) throw new Error('refresh control must exist')
+  refresh.click()
+  expect(host.querySelector('[data-fallback]')?.textContent).toBe('loading')
+  expect(host.querySelector('[data-content]')).toBeNull()
+  revealNextMessage()
+  await nextMessage
+  await Promise.resolve()
+  expect(host.querySelector('[data-fallback]')).toBeNull()
+  expect(host.querySelector('[data-content]')?.textContent).toBe('updated')
   hydration.result.unmount()
 
   const fulfilledHost = document.createElement('div')
   fulfilledHost.innerHTML = renderToString(() => serverJsx(ServerAsyncHydrationApp, null))
   document.body.append(fulfilledHost)
-  const content = fulfilledHost.querySelector('[data-content]')
+  const fulfilledContent = fulfilledHost.querySelector('[data-content]')
+  const fulfilledRecoveries: unknown[] = []
   const fulfilledHydration = await captureMutations(fulfilledHost, () =>
-    hydrateRoot(fulfilledHost, AsyncHydrationApp),
+    hydrateRoot(fulfilledHost, AsyncHydrationApp, {
+      onRecoverableError: (error) => fulfilledRecoveries.push(error),
+    }),
   )
+  expect(fulfilledRecoveries).toEqual([])
   expect(fulfilledHydration.records).toHaveLength(0)
-  expect(fulfilledHost.querySelector('[data-content]')).toBe(content)
+  expect(fulfilledHost.querySelector('[data-content]')).toBe(fulfilledContent)
   fulfilledHydration.result.unmount()
 })

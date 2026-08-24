@@ -28,7 +28,10 @@ type NativeEvent<Property extends string> =
     : Event
 
 type NativeEventHandler<Property extends string, Target extends EventTarget> = (
-  event: NativeEvent<Property> & { readonly currentTarget: Target },
+  event: NativeEvent<Property> & {
+    readonly currentTarget: Target
+    readonly target: EventTarget & Target
+  },
 ) => void
 
 type NativeEventAttribute<Property extends string, Target extends EventTarget, ReactAttribute> =
@@ -110,7 +113,9 @@ interface MathMLAttributes extends HTMLAttributes<MathMLElement> {
   symmetric?: boolean | 'true' | 'false'
 }
 
-interface CustomElementAttributes extends Record<string, unknown> {
+type CustomElementAttributes = Record<string, unknown> & {
+  [Property in `on${string}`]?: NativeEventAttribute<Property, Element, null | undefined>
+} & {
   children?: VidactNode
   key?: Key | null
   ref?: Ref<Element>

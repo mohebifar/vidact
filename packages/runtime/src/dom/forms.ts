@@ -29,7 +29,7 @@ export function ensureControlledFormRestoration(element: Element): () => void {
       restoreControlledFormState(element)
     }
     root.addEventListener(event.type, restore, { once: true })
-    queueMicrotask(restore)
+    setTimeout(restore, 0)
   }
   element.addEventListener('input', schedule)
   element.addEventListener('change', schedule)

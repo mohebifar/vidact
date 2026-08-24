@@ -123,7 +123,9 @@ export function h(
         ? 'http://www.w3.org/1998/Math/MathML'
         : 'http://www.w3.org/1999/xhtml'
   const element =
-    claimHydrationElement(type, namespaceUrl) ?? createIntrinsicElement(document, type, namespace)
+    claimHydrationElement(type, namespaceUrl, (candidate) =>
+      matchesHydrationElement(candidate, props, children),
+    ) ?? createIntrinsicElement(document, type, namespace)
   const restoreAfterChildren = applyProps(element, props, children)
   withIntrinsicNamespace(intrinsicChildrenNamespace(type, namespace), () =>
     appendChildren(element, children),
@@ -133,6 +135,73 @@ export function h(
     return frameworkMetadataHandler(element, props)
   }
   return element
+}
+
+function matchesHydrationElement(
+  element: Element,
+  props: DirectProps,
+  children: readonly DirectChild[],
+): boolean {
+  const classInput = props?.className
+  const expectedClass = isCompiledBinding(classInput) ? classInput[1]() : classInput
+  if (typeof expectedClass === 'string' && element.getAttribute('class') !== expectedClass) {
+    return false
+  }
+  const idInput = props?.id
+  const expectedId = isCompiledBinding(idInput) ? idInput[1]() : idInput
+  if (typeof expectedId === 'string' && element.getAttribute('id') !== expectedId) return false
+
+  const expectedNodes: Node[] = []
+  collectHydrationChildNodes(children, expectedNodes)
+  if (expectedNodes.some((node) => !element.contains(node))) return false
+
+  const expectedText = staticHydrationText(children)
+  return expectedText === undefined || element.textContent === expectedText
+}
+
+function collectHydrationChildNodes(children: readonly DirectChild[], nodes: Node[]): void {
+  for (const child of children) {
+    if (Array.isArray(child)) {
+      collectHydrationChildNodes(child, nodes)
+      continue
+    }
+    if (child instanceof DocumentFragment) {
+      const fragmentChildren = hydrationFragmentChildren(child)
+      if (fragmentChildren !== undefined) {
+        collectHydrationChildNodes(fragmentChildren as readonly DirectChild[], nodes)
+      }
+      continue
+    }
+    if (child instanceof Node) nodes.push(child)
+  }
+}
+
+function staticHydrationText(children: readonly DirectChild[]): string | undefined {
+  let text = ''
+  for (const child of children) {
+    if (Array.isArray(child)) {
+      const nested = staticHydrationText(child)
+      if (nested === undefined) return undefined
+      text += nested
+      continue
+    }
+    if (child === null || child === undefined || typeof child === 'boolean') continue
+    if (isCompiledBinding(child)) {
+      const value = child[1]()
+      if (value === null || value === undefined || typeof value === 'boolean') continue
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint') {
+        text += String(value)
+        continue
+      }
+      return undefined
+    }
+    if (typeof child === 'string' || typeof child === 'number' || typeof child === 'bigint') {
+      text += String(child)
+      continue
+    }
+    return undefined
+  }
+  return text
 }
 
 function applyProps(

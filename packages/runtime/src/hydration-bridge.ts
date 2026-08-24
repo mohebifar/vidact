@@ -7,9 +7,14 @@ export interface HydrationOperations {
   readonly active: () => boolean
   readonly createFragment: (children: readonly unknown[]) => DocumentFragment
   readonly fragmentChildren: (fragment: DocumentFragment) => readonly unknown[] | undefined
-  readonly claimElement: (localName: string, namespace: string | null) => Element | undefined
+  readonly claimElement: (
+    localName: string,
+    namespace: string | null,
+    matches?: (element: Element) => boolean,
+  ) => Element | undefined
   readonly noteStructuralParent: () => void
   readonly claimComponentRange: () => HydrationRange | undefined
+  readonly withComponentRange: <Result>(range: HydrationRange, operation: () => Result) => Result
   readonly withCursor: <Result>(parent: Node, value: Node | null, operation: () => Result) => Result
   readonly claimNode: (parent: Node, node: Node) => boolean
   readonly claimComponentMount: (parent: Node, start: Comment, end: Comment) => boolean
@@ -74,8 +79,9 @@ export function hydrationFragmentChildren(
 export function claimHydrationElement(
   localName: string,
   namespace: string | null,
+  matches?: (element: Element) => boolean,
 ): Element | undefined {
-  return hydration?.claimElement(localName, namespace)
+  return hydration?.claimElement(localName, namespace, matches)
 }
 
 export function noteHydrationStructuralParent(): void {
@@ -84,6 +90,13 @@ export function noteHydrationStructuralParent(): void {
 
 export function claimHydrationComponentRange(): HydrationRange | undefined {
   return hydration?.claimComponentRange()
+}
+
+export function withHydrationComponentRange<Result>(
+  range: HydrationRange,
+  operation: () => Result,
+): Result {
+  return hydration === undefined ? operation() : hydration.withComponentRange(range, operation)
 }
 
 export function withHydrationCursor<Result>(

@@ -86,6 +86,24 @@ export function mountHotRoot(
   const root = isCompiledRoot(previous) ? previous : createRoot(host, options)
   if (isCompiledRoot(previous)) root.replace(application)
   else root.mount(application)
+  registerHotRoot(hot, root)
+  return root
+}
+
+export function hydrateHotRoot(
+  hot: HotContext,
+  host: ParentNode,
+  application: () => CompiledComponentResult,
+  options?: MountCompiledOptions,
+): CompiledRoot {
+  const previous = hot.data[HOT_ROOT]
+  const root = isCompiledRoot(previous) ? previous : hydrateRoot(host, application, options)
+  if (isCompiledRoot(previous)) root.replace(application)
+  registerHotRoot(hot, root)
+  return root
+}
+
+function registerHotRoot(hot: HotContext, root: CompiledRoot): void {
   hot.data[HOT_ROOT] = root
   hot.accept()
   hot.dispose((data) => {
@@ -96,7 +114,6 @@ export function mountHotRoot(
     delete hot.data[HOT_ROOT]
     root.unmount()
   })
-  return root
 }
 
 function isCompiledRoot(value: unknown): value is CompiledRoot {

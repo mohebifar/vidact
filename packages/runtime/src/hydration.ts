@@ -11,12 +11,14 @@ interface HydrationState {
   readonly root: HydrationRange
   readonly components: readonly HydrationRange[]
   readonly claimedElements: WeakSet<Element>
+  readonly elementComponents: WeakMap<Element, Comment>
   readonly elements: readonly Element[]
   readonly cursors: WeakMap<Node, Node | null>
   readonly slots: WeakMap<Node, Comment[]>
   componentIndex: number
   claimedElementCount: number
   pendingStructuralParents: number
+  activeComponentStart: Comment | undefined
 }
 
 let activeHydration: HydrationState | undefined
@@ -37,12 +39,14 @@ export function beginHydration(host: ParentNode): () => void {
     root,
     components: ranges.components,
     claimedElements: new WeakSet(),
+    elementComponents: collectElementComponents(host),
     elements: collectPostorderElements(root),
     cursors: new WeakMap([[host as Node, root[0].nextSibling]]),
     slots: new WeakMap(),
     componentIndex: 0,
     claimedElementCount: 0,
     pendingStructuralParents: 0,
+    activeComponentStart: undefined,
   }
   return () => {
     activeHydration = undefined
@@ -96,21 +100,33 @@ export function isHydrationMismatch(error: unknown): error is HydrationMismatch 
 export function claimHydrationElement(
   localName: string,
   namespace: string | null,
+  matchesExpected?: (element: Element) => boolean,
 ): Element | undefined {
   const state = activeHydration
   if (state === undefined) return undefined
-  const matches = state.elements.filter(
+  const candidates = state.elements.filter(
     (candidate) =>
       !state.claimedElements.has(candidate) &&
+      (state.activeComponentStart === undefined ||
+        state.elementComponents.get(candidate) === state.activeComponentStart) &&
       candidate.localName === localName &&
       candidate.namespaceURI === namespace,
   )
+  const expectedMatches =
+    matchesExpected === undefined ? candidates : candidates.filter(matchesExpected)
+  const matches = expectedMatches.length === 0 ? candidates : expectedMatches
   const element =
     state.pendingStructuralParents > 0
       ? (matches.find(containsArrayMarker) ?? matches[0])
       : matches[0]
-  if (element === undefined) throw mismatch(`missing server element <${localName}>`)
-  if (state.pendingStructuralParents > 0) state.pendingStructuralParents -= 1
+  if (element === undefined) {
+    throw mismatch(
+      state.pendingStructuralParents > 0
+        ? `missing server structural parent <${localName}>`
+        : `missing server element <${localName}>`,
+    )
+  }
+  if (state.pendingStructuralParents > 0) state.pendingStructuralParents = 0
   state.claimedElements.add(element)
   state.claimedElementCount += 1
   state.cursors.set(element, element.firstChild)
@@ -132,6 +148,21 @@ export function claimHydrationComponentRange(): HydrationRange | undefined {
     throw mismatch('server component marker range is detached')
   }
   return range
+}
+
+export function withHydrationComponentRange<Result>(
+  range: HydrationRange,
+  operation: () => Result,
+): Result {
+  const state = activeHydration
+  if (state === undefined) return operation()
+  const previous = state.activeComponentStart
+  state.activeComponentStart = range[0]
+  try {
+    return operation()
+  } finally {
+    state.activeComponentStart = previous
+  }
 }
 
 export function withHydrationCursor<Result>(
@@ -443,6 +474,27 @@ function collectPostorderElements(root: HydrationRange): Element[] {
   return elements
 }
 
+function collectElementComponents(host: ParentNode): WeakMap<Element, Comment> {
+  const owners = new WeakMap<Element, Comment>()
+  const components: Comment[] = []
+  const walker = document.createTreeWalker(host, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_COMMENT)
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    if (isMarker(node, `${HYDRATION_PREFIX}:c`)) {
+      components.push(node)
+      continue
+    }
+    if (isMarker(node, `/${HYDRATION_PREFIX}:c`)) {
+      components.pop()
+      continue
+    }
+    if (node instanceof Element) {
+      const owner = components.at(-1)
+      if (owner !== undefined) owners.set(node, owner)
+    }
+  }
+  return owners
+}
+
 function containsArrayMarker(element: Element): boolean {
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_COMMENT)
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
@@ -462,6 +514,7 @@ export function installHydration(): void {
     claimElement: claimHydrationElement,
     noteStructuralParent: noteHydrationStructuralParent,
     claimComponentRange: claimHydrationComponentRange,
+    withComponentRange: withHydrationComponentRange,
     withCursor: withHydrationCursor,
     claimNode: claimHydrationNode,
     claimComponentMount: claimHydrationComponentMount,

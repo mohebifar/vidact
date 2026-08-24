@@ -33,7 +33,7 @@ function deferred<Value>(): {
 function asyncText(promise: PromiseLike<string>): () => CompiledRenderValue {
   return () => {
     const scope = createNarrowCompiledScope()
-    const value = createCompiledAsync(scope, source(0), promise)
+    const value = createCompiledAsync(scope, 0, source(0), () => promise)
     return compiledRoot(scope, () => h('strong', { 'data-content': true }, value.get()))
   }
 }
@@ -132,7 +132,7 @@ describe('async resources and Suspense', () => {
     const abandonedHost = document.createElement('div')
     const abandoned = mountSuspense(() => {
       const childScope = createNarrowCompiledScope()
-      const value = createCompiledAsync(childScope, source(0), resource)
+      const value = createCompiledAsync(childScope, 0, source(0), () => resource)
       return compiledRoot(childScope, () => value.get())
     }, abandonedHost)
     abandoned.dispose()

@@ -1,7 +1,7 @@
 import { captureMutations } from '@vidact/test-support'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { hydrateRoot } from '../../src/hydrate.ts'
+import { hydrateHotRoot, hydrateRoot } from '../../src/hydrate.ts'
 import {
   binding,
   choose,
@@ -107,6 +107,58 @@ describe('compiled client roots', () => {
     expect(host.textContent).toBe('second:0')
     expect(cleanups).toEqual(['first'])
     expect(accepted).toBe(2)
+
+    pruneHot()
+    expect(host.childNodes).toHaveLength(0)
+    expect(cleanups).toEqual(['first', 'second'])
+  })
+
+  it('hydrates the first hot evaluation before replacing later evaluations', async () => {
+    const host = document.createElement('div')
+    function ServerApplication(): ServerChild {
+      return serverJsx('button', { children: 'first' })
+    }
+    host.innerHTML = renderToString(() => serverJsx(ServerApplication, null))
+    document.body.append(host)
+    const serverButton = host.querySelector('button')!
+    const data: Record<string, unknown> = {}
+    const cleanups: string[] = []
+    let disposeHot = (_data: Record<string, unknown>): void => {}
+    let pruneHot = (): void => {}
+    const hot = (): HotContext => ({
+      data,
+      accept: () => {},
+      dispose: (callback) => {
+        disposeHot = callback
+      },
+      prune: (callback) => {
+        pruneHot = callback
+      },
+    })
+    const application = (label: string) => () => {
+      const scope = createCompiledScope()
+      useLayoutEffect(
+        () => () => {
+          cleanups.push(label)
+        },
+        [],
+      )
+      return compiledRoot(scope, () => h('button', null, label))
+    }
+
+    const hydration = await captureMutations(host, () =>
+      hydrateHotRoot(hot(), host, application('first')),
+    )
+
+    expect(hydration.records).toHaveLength(0)
+    expect(host.querySelector('button')).toBe(serverButton)
+    disposeHot(data)
+
+    hydrateHotRoot(hot(), host, application('second'))
+
+    expect(host.querySelector('button')).not.toBe(serverButton)
+    expect(host.textContent).toBe('second')
+    expect(cleanups).toEqual(['first'])
 
     pruneHot()
     expect(host.childNodes).toHaveLength(0)

@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "preserve",
+    "jsxImportSource": "@vidact/react-types",
+    "lib": ["ES2024", "ESNext.Disposable", "DOM", "DOM.Iterable"],
+    "types": ["node", "vitest/globals", "vitest/importMeta", "@vidact/react-types"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.*.config.ts"]
+}

@@ -5,6 +5,7 @@ import {
   startMutationCapture,
 } from '@vidact/test-support'
 import { afterEach, describe, expect, it } from 'vitest'
+import { userEvent } from 'vitest/browser'
 
 import { DomSemanticsApp } from './DomSemanticsApp.tsx'
 
@@ -214,13 +215,20 @@ describe('compiled DOM semantics app', () => {
     expect(host.querySelector('[data-capture-child]')).toBe(captureChild)
     expect(eventOrder.textContent).toBe('capture,bubble')
 
-    text.value = 'typed'
-    await captureMutations(host, () =>
-      text.dispatchEvent(new InputEvent('input', { bubbles: true })),
-    )
+    const textUpdate = await captureMutations(host, async () => {
+      await userEvent.clear(text)
+      await userEvent.type(text, 'typed')
+    })
     expect(host.querySelector('[data-controlled-text]')).toBe(text)
     expect(text.value).toBe('typed')
     expect(textOutput.textContent).toBe('typed')
+    expect(() =>
+      assertMutationEnvelope(
+        textUpdate.records,
+        [{ type: 'characterData', within: textOutput }],
+        'controlled onChange keyboard input',
+      ),
+    ).not.toThrow()
 
     restore.value = 'browser edit'
     const restoreMutations = startMutationCapture(host)

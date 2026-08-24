@@ -38,6 +38,9 @@ const nativeElements: JSX.Element = (
       disabled
       onClick={(event) => {
         event.currentTarget.disabled = true
+        const target: HTMLButtonElement = event.target
+        event.target.disabled = true
+        void target
         // @ts-expect-error Vidact dispatches native DOM events, not React SyntheticEvents.
         void event.nativeEvent
       }}
@@ -46,15 +49,43 @@ const nativeElements: JSX.Element = (
       {child}
     </button>
     <label htmlFor="contract-input">Value</label>
-    <input id="contract-input" autoComplete="off" />
+    <input
+      id="contract-input"
+      autoComplete="off"
+      onInput={(event) => {
+        const target: HTMLInputElement = event.target
+        const value: string = event.target.value
+        void target
+        void value
+      }}
+      onChange={(event) => {
+        const target: HTMLInputElement = event.target
+        const value: string = event.target.value
+        void target
+        void value
+      }}
+    />
   </main>
 )
 
-const customElement = <vidact-card data-tone="positive">Custom child</vidact-card>
+const customElement = (
+  <vidact-card
+    data-tone="positive"
+    onClick={(event) => {
+      const target: Element = event.target
+      event.target.setAttribute('data-clicked', 'yes')
+      void target
+    }}
+  >
+    Custom child
+  </vidact-card>
+)
 const captureHandler = (
   <div
     onClickCapture={(event) => {
-      event.currentTarget.dataset.captured = 'true'
+      const target: HTMLDivElement = event.target
+      event.target.dataset.captured = 'true'
+      void target
     }}
   />
 )
@@ -65,7 +96,11 @@ const namespacedElements = (
       cx="5"
       cy="5"
       r="4"
-      onClick={(event) => event.currentTarget.setAttribute('data-clicked', 'yes')}
+      onClick={(event) => {
+        const target: SVGCircleElement = event.target
+        event.target.setAttribute('data-clicked', 'yes')
+        void target
+      }}
     />
     <foreignObject>
       <div>HTML island</div>
@@ -74,7 +109,15 @@ const namespacedElements = (
 )
 const mathElement = (
   <math>
-    <mi>x</mi>
+    <mi
+      onClick={(event) => {
+        const target: MathMLElement = event.target
+        event.target.setAttribute('data-clicked', 'yes')
+        void target
+      }}
+    >
+      x
+    </mi>
   </math>
 )
 const Theme = createContext('light')

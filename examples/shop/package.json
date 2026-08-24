@@ -1,0 +1,30 @@
+{
+  "name": "@vidact/example-shop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm build:client && pnpm build:server",
+    "build:client": "vite build --config vite.client.config.ts",
+    "build:server": "vite build --config vite.server.config.ts",
+    "dev": "vite --config vite.dev.config.ts",
+    "start": "node dist/server/server.js",
+    "test": "vitest run --config vite.server.test.config.ts && vitest run --config vite.test.config.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@vidact/runtime": "workspace:*",
+    "srvx": "^0.12.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@vidact/react-types": "workspace:*",
+    "@vidact/vite": "workspace:*",
+    "@vitest/browser-playwright": "4.1.11",
+    "playwright": "1.62.1",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  }
+}

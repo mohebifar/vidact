@@ -1522,6 +1522,74 @@ fn gates_and_lowers_suspense_and_promise_use_as_staged_async_work() {
 }
 
 #[test]
+fn lowers_reactive_component_props_inside_suspense_children() {
+    let output = compile_async(ModuleInput {
+        filename: "ReactiveSuspenseApp.tsx",
+        source: r#"
+            import { Suspense, useState } from 'react';
+            function Results({ request, search, onAdd }): Node {
+                return <section data-search={search}>{request.label}<button onClick={onAdd}>add</button></section>;
+            }
+            export function App({ initialRequest, onAdd }): Node {
+                const [request, setRequest] = useState(initialRequest);
+                const [search, setSearch] = useState('');
+                return (
+                    <Suspense fallback={<p>loading</p>}>
+                        <Results request={request} search={search} onAdd={onAdd} />
+                    </Suspense>
+                );
+            }
+        "#,
+    })
+    .expect("compiler-generated Suspense render thunks should allow reactive child props");
+
+    assert!(
+        output.contains("request={__vidactBinding(__vidactScope, 4, () => request.get())}"),
+        "{output}"
+    );
+    assert!(
+        output.contains("search={__vidactBinding(__vidactScope, 8, () => search.get())}"),
+        "{output}"
+    );
+    assert!(
+        output.contains("onAdd={__vidactBinding(__vidactScope, 2"),
+        "{output}"
+    );
+}
+
+#[test]
+fn subscribes_reactive_promise_reads_inside_suspense_children() {
+    let output = compile_async(ModuleInput {
+        filename: "ReactivePromiseSuspenseApp.tsx",
+        source: r#"
+            import { Suspense, use, useState } from 'react';
+            function Results({ productsPromise }): Node {
+                const products = use(productsPromise);
+                return <p>{products.length} products</p>;
+            }
+            export function App({ initialRequest }): Node {
+                const [request, setRequest] = useState(initialRequest);
+                return (
+                    <Suspense fallback={<p>loading</p>}>
+                        <Results productsPromise={request} />
+                    </Suspense>
+                );
+            }
+        "#,
+    })
+    .expect("reactive promises inside Suspense children should compile as async subscriptions");
+
+    assert!(
+        output.contains("createCompiledAsync as __vidactCreateAsync"),
+        "{output}"
+    );
+    assert!(
+        output.contains("() => productsPromise.get()"),
+        "async reads must retain an evaluator for later prop updates: {output}"
+    );
+}
+
+#[test]
 fn gates_lazy_at_its_call_site() {
     let source = r#"
         import { lazy } from 'react';
