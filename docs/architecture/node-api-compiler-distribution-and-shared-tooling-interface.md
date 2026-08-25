@@ -31,11 +31,13 @@ The package ships prebuilt Node-API addons as optional platform packages for
 macOS arm64/x64, Windows x64, and Linux arm64/x64 on glibc and musl. npm
 consumers do not compile Rust or download an executable during installation.
 
-Changesets owns source version changes and per-package changelogs. The five
+Changesets owns source version changes and per-package changelogs. The six
 public packages are one fixed group and version together. A Changesets workflow
 opens the version pull request, but it does not publish: a reviewed coordinated
-version tag remains the input to the separate native assembly and trusted npm
-publishing workflow.
+`v*` tag remains the input to the separate native assembly and trusted npm
+publishing workflow. Package manifests provide the versions published to npm;
+the compiler tarball version selects `next` for prereleases and `latest` for
+stable releases.
 
 ## Compiler and runtime contract
 
@@ -54,8 +56,8 @@ protocol mismatch before accepting generated code.
 - A normal npm install never requires Rust, Cargo, or a postinstall download.
 - Each supported target has exactly one version-matched optional platform
   package before the root compiler package publishes.
-- A pending changeset versions all five public packages together, and the
-  release tag exactly matches that coordinated version.
+- Changesets versions all six public packages together before a release tag is
+  created.
 - A tarball-installed consumer can compile TSX and invoke `vidactc` outside the
   workspace.
 
@@ -81,7 +83,9 @@ complex because seven native artifacts and their npm packages must be built and
 published before the root facade, and adding a supported platform is a release
 contract change. Version intent is explicit in pull requests and changelog
 generation is automated, while tag creation remains a deliberate maintainer
-step after the version pull request merges.
+step after the version pull request merges. The release workflow trusts that
+reviewed tagged tree instead of passing duplicate version validation state
+between jobs.
 
 ## Verification
 
@@ -96,6 +100,5 @@ step after the version pull request merges.
 - `pnpm --filter @vidact/compiler test`
 - `pnpm --filter @vidact/vite test`
 - `pnpm test:packages`
-- `pnpm test:release`
 - `pnpm changeset:check`
 - `pnpm changeset status --since origin/main`

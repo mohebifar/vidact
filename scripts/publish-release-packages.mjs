@@ -4,11 +4,13 @@ import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 
+import { publicPackages } from './public-packages.mjs'
+
 /* oxlint-disable no-await-in-loop -- Publishing is deliberately sequential so dependencies land before their consumers. */
 
-const [tarballDirectoryArgument, tag = 'latest'] = process.argv.slice(2)
+const [tarballDirectoryArgument] = process.argv.slice(2)
 if (tarballDirectoryArgument === undefined) {
-  throw new Error('usage: publish-release-packages.mjs <tarball-directory> [tag]')
+  throw new Error('usage: publish-release-packages.mjs <tarball-directory>')
 }
 
 const tarballDirectory = path.resolve(tarballDirectoryArgument)
@@ -33,20 +35,16 @@ const native = tarballs
   .filter(({ manifest }) => manifest.name.startsWith('@vidact/compiler-'))
   .toSorted((left, right) => left.manifest.name.localeCompare(right.manifest.name))
 const rootsByName = new Map(tarballs.map((entry) => [entry.manifest.name, entry]))
-const roots = [
-  '@vidact/compiler',
-  '@vidact/runtime',
-  '@vidact/test-support',
-  '@vidact/react-types',
-  '@vidact/vite',
-].map((name) => {
+const roots = publicPackages.map(({ name }) => {
   const entry = rootsByName.get(name)
   if (entry === undefined) throw new Error(`missing release tarball for ${name}`)
   return entry
 })
-if (native.length !== 7 || tarballs.length !== 12) {
+const compilerVersion = rootsByName.get('@vidact/compiler').manifest.version
+const tag = compilerVersion.includes('-') ? 'next' : 'latest'
+if (native.length !== 7 || tarballs.length !== native.length + roots.length) {
   throw new Error(
-    `expected 7 native and 5 root tarballs, found ${native.length} and ${roots.length}`,
+    `expected 7 native and ${publicPackages.length} root tarballs, found ${native.length} and ${roots.length}`,
   )
 }
 
