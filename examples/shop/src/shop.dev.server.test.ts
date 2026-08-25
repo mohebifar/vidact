@@ -32,7 +32,7 @@ describe('shop development server', () => {
     const clientModule =
       await server.environments.client.moduleGraph.getModuleByUrl('/src/client.ts')
     const clientBoundaryModule = await server.environments.client.moduleGraph.getModuleByUrl(
-      '/src/ShopClient.client.tsx',
+      '/src/ShopClient.client.ts',
     )
     const productsResponse = await fetch(
       `http://127.0.0.1:${address.port}/api/products?category=travel`,

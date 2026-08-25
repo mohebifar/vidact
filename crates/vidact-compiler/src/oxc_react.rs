@@ -34,6 +34,8 @@ mod def_use;
 
 use crate::ast_utils::{component_name_for_span, normalize_expression_bodied_component_arrows};
 use crate::custom_hooks::plan_local_custom_hooks;
+use crate::lowered_react::{may_contain_lowered_react, normalize_lowered_react};
+use crate::{CompilationOptions, CompilerFeature};
 use classifier::{classify_component, render_updaters};
 use def_use::CompilerDefUse;
 
@@ -69,6 +71,24 @@ impl ReactAnalysisAdapter for OxcReactAnalysisAdapter {
                 input.filename, semantic.diagnostics
             ))]);
         }
+        let semantic = if may_contain_lowered_react(&parsed.program) {
+            let scoping = semantic.semantic.into_scoping();
+            normalize_lowered_react(&allocator, &mut parsed.program, &scoping)
+                .map_err(|diagnostic| vec![diagnostic])?;
+            let semantic = SemanticBuilder::new()
+                .with_build_nodes(true)
+                .with_check_syntax_error(true)
+                .build(&parsed.program);
+            if !semantic.diagnostics.is_empty() {
+                return Err(vec![analysis_error(format!(
+                    "OXC semantic analysis failed for {} after lowered React normalization: {:?}",
+                    input.filename, semantic.diagnostics
+                ))]);
+            }
+            semantic
+        } else {
+            semantic
+        };
         let custom_hooks =
             plan_local_custom_hooks(&allocator, &parsed.program, semantic.semantic.scoping())
                 .map_err(|diagnostic| vec![diagnostic])?;
@@ -89,7 +109,13 @@ impl ReactAnalysisAdapter for OxcReactAnalysisAdapter {
             ))]);
         }
 
-        analyze_program(input, &parsed.program, &semantic.semantic, &allocator)
+        analyze_program(
+            input,
+            &parsed.program,
+            &semantic.semantic,
+            &allocator,
+            &CompilationOptions::default(),
+        )
     }
 }
 
@@ -98,8 +124,9 @@ pub(crate) fn analyze_program(
     program: &Program<'_>,
     semantic: &Semantic<'_>,
     allocator: &Allocator,
+    options: &CompilationOptions,
 ) -> Result<Vec<ComponentFacts>, Vec<Diagnostic>> {
-    let mut analyses = run_react_analysis(input, program, semantic, allocator)?;
+    let mut analyses = run_react_analysis(input, program, semantic, allocator, options)?;
     if analyses.is_empty() {
         return Err(vec![analysis_error(format!(
             "React Compiler found no components in {}",
@@ -128,8 +155,17 @@ fn run_react_analysis(
     program: &Program<'_>,
     semantic: &Semantic<'_>,
     allocator: &Allocator,
+    compilation_options: &CompilationOptions,
 ) -> Result<Vec<FunctionAnalysis>, Vec<Diagnostic>> {
-    match compile(program, semantic, allocator, PluginOptions::default()) {
+    let mut options = PluginOptions::default();
+    if compilation_options.feature_enabled(CompilerFeature::DependencySource) {
+        options.environment.validate_ref_access_during_render = false;
+        options
+            .environment
+            .validate_exhaustive_memoization_dependencies = false;
+        options.environment.validate_hooks_usage = false;
+    }
+    match compile(program, semantic, allocator, options) {
         CompileResult::Success {
             output: Some(output),
             diagnostics,

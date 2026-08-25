@@ -3,6 +3,7 @@ language: rust
 severity: warning
 ignores:
   - "**/tests/**/*.rs"
+  - "vendor/**"
 rule:
   pattern: "#[test]"
   not:

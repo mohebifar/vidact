@@ -1,12 +1,14 @@
 import { validateRawHtmlRelatedProp } from '../raw-html.ts'
+import {
+  MATHML_NAMESPACE,
+  SVG_NAMESPACE,
+  XLINK_NAMESPACE,
+  XML_NAMESPACE,
+  XMLNS_NAMESPACE,
+} from './namespaces.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 const UNSAFE_HTML = typeof __VIDACT_UNSAFE_HTML__ === 'undefined' || __VIDACT_UNSAFE_HTML__
-
-const XLINK_NAMESPACE = 'http://www.w3.org/1999/xlink'
-const XML_NAMESPACE = 'http://www.w3.org/XML/1998/namespace'
-const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
-const MATHML_NAMESPACE = 'http://www.w3.org/1998/Math/MathML'
 
 const booleanAttributes = new Set([
   'allowFullScreen',
@@ -179,6 +181,9 @@ export function installDomPropHandler(handler: DomPropHandler): void {
 
 /** @internal Specialized capabilities may own a prop while reusing the base policy. */
 export function applyBaseDomProp(element: Element, name: string, value: unknown): void {
+  if (typeof value === 'symbol') {
+    throw new TypeError(DEV ? `DOM prop ${name} cannot receive a symbol value` : 'V105')
+  }
   if (name === 'dangerouslySetInnerHTML') {
     throw new Error(
       DEV ? 'dangerouslySetInnerHTML must be handled as an owned opaque subtree' : 'V401',
@@ -229,11 +234,16 @@ export function applyBaseDomProp(element: Element, name: string, value: unknown)
     element.removeAttribute(attribute)
     return
   }
+  const serialized = String(value)
+  if (element.getAttribute(attribute) === serialized) {
+    validateRawHtmlProp(element, name)
+    return
+  }
   if (name in element) {
     const current = Reflect.get(element, name)
     if (
       !isCustomElement(element) &&
-      (Object.is(current, value) || String(current) === String(value))
+      (Object.is(current, value) || String(current) === serialized)
     ) {
       validateRawHtmlProp(element, name)
       return
@@ -243,7 +253,6 @@ export function applyBaseDomProp(element: Element, name: string, value: unknown)
       return
     }
   }
-  const serialized = String(value)
   if (element.getAttribute(attribute) !== serialized) {
     element.setAttribute(attribute, serialized)
   }
@@ -253,7 +262,18 @@ export function applyBaseDomProp(element: Element, name: string, value: unknown)
 function applyStringAttribute(element: Element, name: string, value: unknown): void {
   if (value === null || value === undefined) element.removeAttribute(name)
   else {
-    const serialized = String(value)
+    if (typeof value === 'symbol') {
+      throw new TypeError(`cannot apply a Symbol value to DOM attribute ${name}`)
+    }
+    let serialized: string
+    try {
+      serialized = String(value)
+    } catch (cause) {
+      const detail = Array.isArray(value)
+        ? value.map((item) => (typeof item === 'symbol' ? String(item) : typeof item)).join(',')
+        : typeof value
+      throw new TypeError(`cannot serialize DOM attribute ${name} from ${detail}`, { cause })
+    }
     if (element.getAttribute(name) !== serialized) element.setAttribute(name, serialized)
   }
 }
@@ -293,7 +313,7 @@ function namespacedAttribute(name: string): {
   }
   if (name === 'xmlnsXlink') {
     return {
-      namespace: 'http://www.w3.org/2000/xmlns/',
+      namespace: XMLNS_NAMESPACE,
       qualifiedName: 'xmlns:xlink',
       localName: 'xlink',
     }

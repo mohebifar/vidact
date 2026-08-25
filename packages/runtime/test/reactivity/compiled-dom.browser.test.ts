@@ -12,6 +12,7 @@ import {
   compiledComponentSpread,
   compiledEvent,
   compiledImperativeHandle,
+  compiledInsertionEffect,
   compiledRoot,
   createCompiledProp,
   createCompiledScope,
@@ -22,6 +23,14 @@ import {
   keyed,
   mountCompiled,
   nestedProp,
+  cloneRenderable,
+  createRenderable,
+  isRenderable,
+  renderableChildren,
+  renderableMarker,
+  renderableProps,
+  renderableRef,
+  renderableToArray,
   source,
   when,
 } from '../../src/index.ts'
@@ -32,6 +41,120 @@ interface Item {
 }
 
 describe('compiled DOM corpus', () => {
+  it('runs insertion effects before callback refs in a staged binding', () => {
+    const host = document.createElement('div')
+    let insertionCommitted = false
+    let refSawInsertion = false
+
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      compiledInsertionEffect(scope, source(0), () => () => {
+        insertionCommitted = true
+      })
+      return compiledRoot(scope, () =>
+        binding(scope, source(0), () =>
+          h('button', {
+            ref: () => {
+              refSawInsertion = insertionCommitted
+            },
+          }),
+        ),
+      )
+    }, host)
+
+    expect(refSawInsertion).toBe(true)
+    mounted.dispose()
+  })
+
+  it('constructs an opaque renderable with reactive merged props without replacing its node', async () => {
+    const authoredSource = source(0)
+    const overridesSource = source(1)
+    const calls: string[] = []
+    let updateAuthored!: ReturnType<typeof createCompiledState<Record<string, unknown>>>['set']
+    let updateOverrides!: ReturnType<typeof createCompiledState<Record<string, unknown>>>['set']
+    const host = document.createElement('div')
+
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const authored = createCompiledState<Record<string, unknown>>(scope, authoredSource, {
+        href: '/first',
+        className: 'authored',
+        children: 'First',
+        onClick: (event: Event) => {
+          event.preventDefault()
+          calls.push('authored')
+        },
+      })
+      const overrides = createCompiledState<Record<string, unknown>>(scope, overridesSource, {
+        className: 'merged authored',
+        'data-disabled': false,
+        children: 'Merged first',
+        onClick: (event: Event) => {
+          event.preventDefault()
+          calls.push('base-ui')
+        },
+      })
+      updateAuthored = authored.set
+      updateOverrides = overrides.set
+      const render = createRenderable(binding(scope, authoredSource, authored.get), (props) =>
+        h(
+          'a',
+          {
+            ...renderableProps(props),
+            ref: renderableRef(props),
+          },
+          renderableChildren(props),
+        ),
+      )
+      expect(isRenderable(render)).toBe(true)
+      expect(Object.keys(render)).toEqual(['props'])
+      expect(render.props.href).toBe('/first')
+      expect(renderableToArray(render)).toEqual([render])
+      expect(renderableMarker(render)).toBeUndefined()
+      expect(() => renderableToArray({ props: {} })).toThrow('compiled renderable capability')
+      return compiledRoot(scope, () =>
+        cloneRenderable(render, binding(scope, overridesSource, overrides.get)),
+      )
+    }, host)
+
+    const anchor = host.querySelector('a')!
+    expect(anchor.getAttribute('href')).toBe('/first')
+    expect(anchor.className).toBe('merged authored')
+    expect(anchor.textContent).toBe('Merged first')
+    anchor.click()
+    expect(calls).toEqual(['base-ui'])
+
+    const capture = await captureMutations(host, () => {
+      updateAuthored((props) => ({ ...props, href: '/second' }))
+      updateOverrides((props) => ({
+        ...props,
+        className: 'merged next',
+        'data-disabled': true,
+        children: 'Merged second',
+      }))
+    })
+
+    expect(host.querySelector('a')).toBe(anchor)
+    expect(anchor.getAttribute('href')).toBe('/second')
+    expect(anchor.className).toBe('merged next')
+    expect(anchor.dataset.disabled).toBe('true')
+    expect(anchor.textContent).toBe('Merged second')
+    expect(() =>
+      assertMutationEnvelope(
+        capture.records,
+        [
+          { type: 'attributes', target: anchor, attributeName: 'href' },
+          { type: 'attributes', target: anchor, attributeName: 'class' },
+          { type: 'attributes', target: anchor, attributeName: 'data-disabled' },
+          { type: 'characterData', within: anchor },
+        ],
+        'renderable prop update',
+      ),
+    ).not.toThrow()
+
+    mounted.dispose()
+  })
+
   it('applies nested container defaults and rejects unguarded nullish destructuring', () => {
     expect(nestedProp(undefined, ['name'], [() => ({ name: 'fallback' })])).toBe('fallback')
     expect(() => nestedProp(null, ['name'], [null])).toThrow(

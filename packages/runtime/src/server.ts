@@ -1,11 +1,25 @@
 // oxlint-disable-next-line typescript/triple-slash-reference -- Include compiler feature defines.
 /// <reference path="./env.d.ts" />
 
+import type { JSX as ReactJSX } from 'react'
+
+import {
+  LINK_IDENTITY_PROPS,
+  META_IDENTITY_PROPS,
+  SERVER_BOOLEAN_ATTRIBUTES,
+  VALID_ATTRIBUTE_NAME,
+  serverHtmlAttributeName,
+} from './dom/attributes.ts'
+import { UNITLESS_STYLE_PROPERTIES } from './dom/style-properties.ts'
+import type { PreinitOptions, PreloadOptions, ResourceHintOptions } from './framework.ts'
+import { isPromiseLike } from './shared/promise.ts'
+
 const SERVER_NODE = Symbol.for('vidact.v1.ServerNode')
 const SERVER_NODE_KIND = Symbol.for('vidact.v1.ServerNodeKind')
 const SERVER_CONTEXT = Symbol('Vidact.ServerContext')
 const SERVER_ASYNC_RESOURCE = Symbol('Vidact.ServerAsyncResource')
 const SERVER_SUSPENSION = Symbol('Vidact.ServerSuspension')
+const SERVER_RENDERABLE = Symbol.for('vidact.v1.ServerRenderable')
 
 export interface ServerNode {
   readonly [SERVER_NODE]: (context: RenderContext) => string
@@ -14,6 +28,7 @@ export interface ServerNode {
 
 export type ServerChild =
   | ServerNode
+  | ServerRenderable
   | string
   | number
   | bigint
@@ -23,8 +38,104 @@ export type ServerChild =
   | readonly ServerChild[]
 
 export type ServerComponent = (props: Record<string, unknown>) => ServerChild
-export type ServerElementType = string | typeof Fragment | ServerComponent
+export type ServerElementType = string | typeof Fragment | ServerComponent | ServerRenderable
 export type ServerProps = Record<string, unknown> | null
+
+type ServerRenderable = {
+  readonly props: Record<string, unknown>
+  readonly [SERVER_RENDERABLE]: {
+    readonly input: Record<string, unknown>
+    readonly construct: (input: Record<string, unknown>) => ServerChild
+  }
+}
+
+type ServerIntrinsicElements = {
+  [Name in keyof ReactJSX.IntrinsicElements]: Omit<ReactJSX.IntrinsicElements[Name], 'children'> & {
+    readonly children?: ServerChild
+  }
+}
+
+export namespace JSX {
+  export type Element = ServerNode
+  export type ElementType = keyof IntrinsicElements | ServerComponent | ServerRenderable
+
+  export interface ElementChildrenAttribute extends ReactJSX.ElementChildrenAttribute {}
+
+  export interface IntrinsicAttributes extends ReactJSX.IntrinsicAttributes {}
+
+  export type IntrinsicElements = ServerIntrinsicElements
+}
+
+export function createRenderable(
+  input: Record<string, unknown>,
+  construct: (input: Record<string, unknown>) => ServerChild,
+): ServerRenderable {
+  return {
+    props: input,
+    [SERVER_RENDERABLE]: { input, construct },
+  }
+}
+
+export function isRenderable(value: unknown): value is ServerRenderable {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Object.hasOwn(value, SERVER_RENDERABLE) &&
+    typeof (value as ServerRenderable)[SERVER_RENDERABLE]?.construct === 'function'
+  )
+}
+
+export function renderableToArray(value: unknown): [ServerRenderable] {
+  if (!isRenderable(value)) throw new TypeError('expected a compiled server renderable')
+  return [value]
+}
+
+export function renderableMarker(value: unknown): undefined {
+  if (!isRenderable(value)) throw new TypeError('expected a compiled server renderable')
+  return undefined
+}
+
+export function cloneRenderable(
+  value: unknown,
+  overrides: Record<string, unknown> = {},
+): ServerChild {
+  if (!isRenderable(value)) throw new TypeError('expected a compiled server renderable')
+  const renderable = value[SERVER_RENDERABLE]
+  return renderable.construct({ ...renderable.input, ...overrides })
+}
+
+export function cloneRenderableComponent(props: Record<string, unknown>): ServerChild {
+  return cloneRenderable(props.value, props.overrides as Record<string, unknown> | undefined)
+}
+
+export function renderableProps(input: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(input).filter(([name]) => !['children', 'key', 'ref'].includes(name)),
+  )
+}
+
+export function renderableChildren(input: Record<string, unknown>): ServerChild {
+  return input.children as ServerChild
+}
+
+export function renderableRef(_input: Record<string, unknown>): undefined {
+  return undefined
+}
+
+export function forwardedRef(_props: Record<string, unknown>): undefined {
+  return undefined
+}
+
+export function dynamicIntrinsicComponent(props: Record<string, unknown>): ServerNode {
+  if (typeof props.tag !== 'string') {
+    throw new TypeError('dynamic intrinsic construction requires a string tag')
+  }
+  const input = props.props as Record<string, unknown>
+  return jsx(props.tag, {
+    ...renderableProps(input),
+    children: renderableChildren(input),
+  })
+}
 
 export interface ServerRenderOptions {
   readonly identifierPrefix?: string
@@ -102,85 +213,14 @@ const VOID_ELEMENTS = new Set([
   'wbr',
 ])
 
-const BOOLEAN_ATTRIBUTES = new Set([
-  'allowFullScreen',
-  'async',
-  'autoFocus',
-  'autoPlay',
-  'checked',
-  'controls',
-  'default',
-  'defer',
-  'disabled',
-  'formNoValidate',
-  'hidden',
-  'inert',
-  'itemScope',
-  'loop',
-  'multiple',
-  'muted',
-  'noModule',
-  'noValidate',
-  'open',
-  'playsInline',
-  'readOnly',
-  'required',
-  'reversed',
-  'selected',
-])
-
-const UNITLESS_STYLES = new Set([
-  'animationIterationCount',
-  'aspectRatio',
-  'columnCount',
-  'fillOpacity',
-  'flex',
-  'flexGrow',
-  'flexShrink',
-  'fontWeight',
-  'gridArea',
-  'gridColumn',
-  'gridColumnEnd',
-  'gridColumnStart',
-  'gridRow',
-  'gridRowEnd',
-  'gridRowStart',
-  'lineHeight',
-  'opacity',
-  'order',
-  'orphans',
-  'scale',
-  'strokeOpacity',
-  'strokeWidth',
-  'tabSize',
-  'widows',
-  'zIndex',
-  'zoom',
-])
-
-const ATTRIBUTE_ALIASES: Readonly<Record<string, string>> = {
-  acceptCharset: 'accept-charset',
-  className: 'class',
-  crossOrigin: 'crossorigin',
-  defaultChecked: 'checked',
-  defaultValue: 'value',
-  formAction: 'formaction',
-  htmlFor: 'for',
-  httpEquiv: 'http-equiv',
-  itemID: 'itemid',
-  itemProp: 'itemprop',
-  itemRef: 'itemref',
-  itemScope: 'itemscope',
-  itemType: 'itemtype',
-}
-
-const VALID_ATTRIBUTE_NAME = /^[A-Za-z_:][A-Za-z0-9:._-]*$/
 const HYDRATION_PREFIX = 'vidact:v1'
 const UNSAFE_HTML = typeof __VIDACT_UNSAFE_HTML__ !== 'undefined' && __VIDACT_UNSAFE_HTML__
 
 let activeRender: RenderContext | undefined
 let activeFrameworkRender: ServerFrameworkRenderContext | undefined
 const serverBuiltins = new WeakSet<ServerComponent>()
+serverBuiltins.add(dynamicIntrinsicComponent)
+serverBuiltins.add(cloneRenderableComponent)
 const serverPromiseResources = new WeakMap<object, ServerAsyncResource<unknown>>()
 
 const FRAMEWORK_HEAD_PLACEHOLDER = '<!--vidact-framework:v1:head-->'
@@ -250,28 +290,6 @@ export function cacheSignal(): AbortSignal | null {
   return activeFrameworkRender?.signal ?? null
 }
 
-export interface ResourceHintOptions {
-  readonly crossOrigin?: '' | 'anonymous' | 'use-credentials'
-}
-
-export interface PreloadOptions extends ResourceHintOptions {
-  readonly as: string
-  readonly fetchPriority?: 'high' | 'low' | 'auto'
-  readonly imageSizes?: string
-  readonly imageSrcSet?: string
-  readonly integrity?: string
-  readonly nonce?: string
-  readonly referrerPolicy?: string
-  readonly type?: string
-}
-
-export interface PreinitOptions extends ResourceHintOptions {
-  readonly as: 'script' | 'style'
-  readonly precedence?: string
-  readonly integrity?: string
-  readonly nonce?: string
-}
-
 export function preconnect(href: string, options: ResourceHintOptions = {}): void {
   registerResourceHint('preconnect', href, options)
 }
@@ -329,6 +347,17 @@ export function jsxDEV(
   return createServerElement(type, props, isStaticChildren)
 }
 
+export function createElement(
+  type: ServerElementType,
+  props: ServerProps,
+  ...children: ServerChild[]
+): ServerNode {
+  const nextProps: Record<string, unknown> = { ...props }
+  if (children.length === 1) nextProps.children = children[0]
+  else if (children.length > 1) nextProps.children = children
+  return createServerElement(type, nextProps, children.length > 1)
+}
+
 /** @internal */
 export function createServerHydrationBoundary(
   value: ServerChild,
@@ -370,6 +399,12 @@ function createServerElement(
             : serializeSlot(props?.children as ServerChild, context)
           : '',
       'transparent',
+    )
+  }
+  if (isRenderable(type)) {
+    return serverNode(
+      (context) => serializeSlot(cloneRenderable(type, props ?? {}), context),
+      'component',
     )
   }
   if (typeof type === 'function') {
@@ -767,13 +802,6 @@ function isServerContext<Value>(value: unknown): value is ServerContext<Value> {
   return typeof value === 'object' && value !== null && SERVER_CONTEXT in value
 }
 
-function isPromiseLike<Value>(value: unknown): value is PromiseLike<Value> {
-  return (
-    ((typeof value === 'object' && value !== null) || typeof value === 'function') &&
-    typeof (value as PromiseLike<Value>).then === 'function'
-  )
-}
-
 function isServerAsyncResource<Value>(value: unknown): value is ServerAsyncResource<Value> {
   return typeof value === 'object' && value !== null && SERVER_ASYNC_RESOURCE in value
 }
@@ -792,6 +820,7 @@ function serializeChild(value: ServerChild, context: RenderContext, markScalar =
       ? hydrationRange('s', content)
       : content
   }
+  if (isRenderable(value)) return serializeChild(cloneRenderable(value), context, markScalar)
   if (Array.isArray(value)) {
     const content = value.map((child) => serializeChild(child, context, markScalar)).join('')
     return context.hydrationMarkers ? hydrationRange('a', content) : content
@@ -832,7 +861,7 @@ function serializeAttribute(name: string, value: unknown): string {
     typeof value === 'function' &&
     typeof Reflect.get(value, 'permalink') === 'string'
   ) {
-    return ` ${attributeName(name)}="${escapeAttribute(Reflect.get(value, 'permalink') as string)}"`
+    return ` ${serverHtmlAttributeName(name)}="${escapeAttribute(Reflect.get(value, 'permalink') as string)}"`
   }
   if (
     name === 'children' ||
@@ -849,11 +878,11 @@ function serializeAttribute(name: string, value: unknown): string {
     return ''
   }
   if (name === 'style') return serializeStyleAttribute(value)
-  const normalizedName = attributeName(name)
+  const normalizedName = serverHtmlAttributeName(name)
   if (name.startsWith('data-') || name.startsWith('aria-')) {
     return ` ${normalizedName}="${escapeAttribute(String(value))}"`
   }
-  if (BOOLEAN_ATTRIBUTES.has(name)) return value ? ` ${normalizedName}=""` : ''
+  if (SERVER_BOOLEAN_ATTRIBUTES.has(name)) return value ? ` ${normalizedName}=""` : ''
   if (typeof value === 'boolean') return ''
   if (!VALID_ATTRIBUTE_NAME.test(normalizedName)) return ''
   return ` ${normalizedName}="${escapeAttribute(String(value))}"`
@@ -909,14 +938,13 @@ function hasOwnProp(props: ServerProps, name: string): boolean {
 function metadataKey(type: string, props: ServerProps): string {
   if (type === 'title') return 'title'
   if (type === 'meta') {
-    for (const name of ['charSet', 'name', 'property', 'httpEquiv'] as const) {
+    for (const name of META_IDENTITY_PROPS) {
       const value = props?.[name]
       if (value !== undefined) return `meta:${name}:${String(value)}`
     }
   }
-  if (type === 'link') {
-    return `link:${String(props?.rel ?? '')}:${String(props?.href ?? '')}:${String(props?.as ?? '')}`
-  }
+  if (type === 'link')
+    return `link:${LINK_IDENTITY_PROPS.map((name) => String(props?.[name] ?? '')).join(':')}`
   if (type === 'style') return `style:${String(props?.href ?? '')}`
   if (type === 'script') return `script:${String(props?.src ?? '')}`
   return `${type}:${JSON.stringify(props)}`
@@ -1008,10 +1036,6 @@ function frameworkAbortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
 }
 
-function attributeName(name: string): string {
-  return ATTRIBUTE_ALIASES[name] ?? name
-}
-
 function serializeStyleAttribute(value: unknown, hiddenByActivity = false): string {
   if (typeof value === 'string') {
     const separator = value === '' || value.endsWith(';') ? '' : ';'
@@ -1028,7 +1052,9 @@ function serializeStyleAttribute(value: unknown, hiddenByActivity = false): stri
       if (item === null || item === undefined || typeof item === 'boolean' || item === '') return []
       const cssName = name.startsWith('--') ? name : camelToKebab(name)
       const cssValue =
-        typeof item === 'number' && item !== 0 && !UNITLESS_STYLES.has(name) ? `${item}px` : item
+        typeof item === 'number' && item !== 0 && !UNITLESS_STYLE_PROPERTIES.has(name)
+          ? `${item}px`
+          : item
       return `${cssName}:${String(cssValue)}`
     })
   if (hiddenByActivity) declarations.push('display:none!important')

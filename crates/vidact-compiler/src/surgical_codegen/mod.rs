@@ -3,7 +3,7 @@ use std::{
     path::Path,
 };
 
-use oxc_allocator::{Allocator, CloneIn, GetAllocator};
+use oxc_allocator::{Allocator, CloneIn, GetAllocator, TakeIn};
 use oxc_ast::{ast::*, builder::AstBuilder};
 use oxc_ast_visit::{
     Visit, VisitMut,
@@ -28,6 +28,7 @@ use crate::{
     },
     custom_hooks::plan_local_custom_hooks,
     ir::{ComponentIr, lower_component},
+    lowered_react::{may_contain_lowered_react, normalize_lowered_react},
     options::{CompilationOptions, CompilerFeature},
     oxc_react::analyze_program,
     react_bindings::{
@@ -57,6 +58,9 @@ const COMPILED_LAYOUT_EFFECT: &str = "__vidactLayoutEffect";
 const COMPILED_FORM_ACTION: &str = "__vidactFormAction";
 const COMPILED_SPREAD: &str = "__vidactSpread";
 const COMPILED_ROOT: &str = "__vidactCompiledRoot";
+const CLONE_RENDERABLE: &str = "__vidactCloneRenderable";
+const CLONE_RENDERABLE_COMPONENT: &str = "__vidactCloneRenderableComponent";
+const CREATE_RENDERABLE: &str = "__vidactCreateRenderable";
 const CHOOSE: &str = "__vidactChoose";
 const CREATE_ASYNC: &str = "__vidactCreateAsync";
 const CREATE_ACTION_STATE: &str = "__vidactCreateActionState";
@@ -77,10 +81,12 @@ const CREATE_MEMO: &str = "__vidactCreateMemo";
 const CREATE_OPTIMISTIC: &str = "__vidactCreateOptimistic";
 const DEFERRED: &str = "__vidactDeferred";
 const DISPATCH: &str = "__vidactDispatch";
+const DYNAMIC_INTRINSIC_COMPONENT: &str = "__vidactDynamicIntrinsicComponent";
 const ENABLE_FRAMEWORK_METADATA: &str = "__vidactEnableFrameworkMetadata";
 const ENABLE_DOM_FORMS: &str = "__vidactEnableDomForms";
 const ENABLE_DOM_NAMESPACE: &str = "__vidactEnableDomNamespace";
 const ENABLE_DOM_STYLES: &str = "__vidactEnableDomStyles";
+const FORWARDED_REF: &str = "__vidactForwardedRef";
 const INDEXED: &str = "__vidactIndexed";
 const KEYED: &str = "__vidactKeyed";
 const ITEM_INDEX: &str = "__vidactItemIndex";
@@ -89,6 +95,13 @@ const ITEM_VALUE: &str = "__vidactItem";
 const NARROW_SOURCE_BITS: u32 = 32;
 const NESTED_PROP: &str = "__vidactNestedProp";
 const PROPS: &str = "__vidactProps";
+const RENDERABLE_CHILDREN: &str = "__vidactRenderableChildren";
+const RENDERABLE_INPUT: &str = "__vidactRenderableInput";
+const RENDERABLE_MARKER: &str = "__vidactRenderableMarker";
+const RENDERABLE_PROPS: &str = "__vidactRenderableProps";
+const RENDERABLE_REF: &str = "__vidactRenderableRef";
+const RENDERABLE_TO_ARRAY: &str = "__vidactRenderableToArray";
+const IS_RENDERABLE: &str = "__vidactIsRenderable";
 const SOURCE: &str = "__vidactSource";
 const WHEN: &str = "__vidactWhen";
 
@@ -121,6 +134,8 @@ pub fn compile_surgical_module_with_ir_and_options(
     options: &CompilationOptions,
 ) -> Result<SurgicalCompilation, Vec<Diagnostic>> {
     let allocator = Allocator::default();
+    let mut canonical_maps = Vec::new();
+    let mut canonical_sources = vec![input.source.to_string()];
     let source_type =
         SourceType::from_path(Path::new(input.filename)).unwrap_or_else(|_| SourceType::tsx());
     let mut parsed = Parser::new(&allocator, input.source, source_type).parse();
@@ -145,6 +160,25 @@ pub fn compile_surgical_module_with_ir_and_options(
         ))]);
     }
 
+    let semantic = if may_contain_lowered_react(&parsed.program) {
+        let scoping = semantic.semantic.into_scoping();
+        normalize_lowered_react(&allocator, &mut parsed.program, &scoping)
+            .map_err(|diagnostic| vec![diagnostic])?;
+        let semantic = SemanticBuilder::new()
+            .with_build_nodes(true)
+            .with_check_syntax_error(true)
+            .build(&parsed.program);
+        if !semantic.diagnostics.is_empty() {
+            return Err(vec![analysis_error(format!(
+                "OXC semantic analysis failed for {} after lowered React normalization: {:?}",
+                input.filename, semantic.diagnostics
+            ))]);
+        }
+        semantic
+    } else {
+        semantic
+    };
+
     let custom_hooks =
         plan_local_custom_hooks(&allocator, &parsed.program, semantic.semantic.scoping())
             .map_err(|diagnostic| vec![diagnostic])?;
@@ -153,6 +187,50 @@ pub fn compile_surgical_module_with_ir_and_options(
         custom_hooks
             .apply(&mut parsed.program)
             .map_err(|diagnostic| vec![diagnostic])?;
+    }
+    if options.feature_enabled(CompilerFeature::DependencySource) {
+        let generated = Codegen::new()
+            .with_options(CodegenOptions {
+                source_map_path: Some(Path::new(input.filename).to_path_buf()),
+                ..CodegenOptions::default()
+            })
+            .build(&parsed.program);
+        canonical_maps.push(
+            generated
+                .map
+                .expect("source map is enabled for dependency canonicalization")
+                .into_owned_sourcemap(),
+        );
+        let normalized = generated.code;
+        canonical_sources.push(normalized.clone());
+        let normalized_source = allocator.alloc_str(&normalized);
+        parsed = Parser::new(&allocator, normalized_source, source_type.with_jsx(true)).parse();
+        if !parsed.diagnostics.is_empty() {
+            return Err(vec![analysis_error(format!(
+                "OXC could not parse {} after custom-hook canonicalization: {:?}",
+                input.filename, parsed.diagnostics
+            ))]);
+        }
+    }
+    if let Err(mut diagnostics) = normalize_state_elisions(&allocator, &mut parsed.program) {
+        crate::source_maps::remap_diagnostics(
+            &mut diagnostics,
+            &canonical_sources,
+            &canonical_maps,
+        );
+        return Err(diagnostics);
+    }
+    if options.feature_enabled(CompilerFeature::DependencySource) {
+        if let Err(mut diagnostics) =
+            normalize_nested_primitive_hooks(&allocator, &mut parsed.program)
+        {
+            crate::source_maps::remap_diagnostics(
+                &mut diagnostics,
+                &canonical_sources,
+                &canonical_maps,
+            );
+            return Err(diagnostics);
+        }
     }
     let semantic = SemanticBuilder::new()
         .with_build_nodes(true)
@@ -172,17 +250,45 @@ pub fn compile_surgical_module_with_ir_and_options(
     };
     class_component.visit_program(&parsed.program);
     if let Some(span) = class_component.span {
-        return Err(vec![unsupported(
+        let mut diagnostics = vec![unsupported(
             "React class components are unsupported; use a function component and Vidact errorBoundary",
         )
-        .with_span(SourceSpan::new(span.start, span.end))]);
+        .with_span(SourceSpan::new(span.start, span.end))];
+        crate::source_maps::remap_diagnostics(
+            &mut diagnostics,
+            &canonical_sources,
+            &canonical_maps,
+        );
+        return Err(diagnostics);
     }
 
-    let components = analyze_program(input, &parsed.program, &semantic.semantic, &allocator)?
-        .into_iter()
-        .map(lower_component)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|diagnostic| vec![diagnostic])?;
+    let components = analyze_program(
+        input,
+        &parsed.program,
+        &semantic.semantic,
+        &allocator,
+        options,
+    )
+    .map_err(|mut diagnostics| {
+        crate::source_maps::remap_diagnostics(
+            &mut diagnostics,
+            &canonical_sources,
+            &canonical_maps,
+        );
+        diagnostics
+    })?
+    .into_iter()
+    .map(lower_component)
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|diagnostic| {
+        let mut diagnostics = vec![diagnostic];
+        crate::source_maps::remap_diagnostics(
+            &mut diagnostics,
+            &canonical_sources,
+            &canonical_maps,
+        );
+        diagnostics
+    })?;
     if components.is_empty() {
         return Err(vec![unsupported("surgical codegen found no component")]);
     }
@@ -194,7 +300,15 @@ pub fn compile_surgical_module_with_ir_and_options(
         options,
         &mut parsed.program,
     )
-    .map_err(|diagnostic| vec![diagnostic])?;
+    .map_err(|diagnostic| {
+        let mut diagnostics = vec![diagnostic];
+        crate::source_maps::remap_diagnostics(
+            &mut diagnostics,
+            &canonical_sources,
+            &canonical_maps,
+        );
+        diagnostics
+    })?;
     restore_anonymous_default_component_names(&mut parsed.program, &anonymous_defaults);
     let generated = Codegen::new()
         .with_options(CodegenOptions {
@@ -205,7 +319,9 @@ pub fn compile_surgical_module_with_ir_and_options(
     let source_map = generated
         .map
         .expect("source map is enabled for surgical compilation")
-        .to_json_string();
+        .into_owned_sourcemap();
+    let source_map =
+        crate::source_maps::compose_chain(source_map, canonical_maps.into_iter()).to_json_string();
     Ok(SurgicalCompilation {
         code: generated.code,
         source_map,
@@ -216,6 +332,167 @@ pub fn compile_surgical_module_with_ir_and_options(
 struct ReactClassComponentFinder<'r, 's> {
     react: &'r ReactBindings<'s>,
     span: Option<Span>,
+}
+
+pub(crate) fn normalize_state_elisions<'a>(
+    allocator: &'a Allocator,
+    program: &mut Program<'a>,
+) -> Result<(), Vec<Diagnostic>> {
+    let semantic = SemanticBuilder::new()
+        .with_build_nodes(true)
+        .with_check_syntax_error(true)
+        .build(&*program);
+    if !semantic.diagnostics.is_empty() {
+        return Err(vec![analysis_error(format!(
+            "OXC semantic analysis failed before state elision normalization: {:?}",
+            semantic.diagnostics
+        ))]);
+    }
+    let scoping = semantic.semantic.into_scoping();
+    let react = ReactBindings::new(program, &scoping);
+    StateElisionNormalizer {
+        ast: AstBuilder::new(allocator),
+        react: &react,
+        ordinal: 0,
+    }
+    .visit_program(program);
+    Ok(())
+}
+
+struct StateElisionNormalizer<'a, 'r, 's> {
+    ast: AstBuilder<'a>,
+    react: &'r ReactBindings<'s>,
+    ordinal: u32,
+}
+
+fn normalize_nested_primitive_hooks<'a>(
+    allocator: &'a Allocator,
+    program: &mut Program<'a>,
+) -> Result<(), Vec<Diagnostic>> {
+    let semantic = SemanticBuilder::new()
+        .with_build_nodes(true)
+        .with_check_syntax_error(true)
+        .build(&*program);
+    if !semantic.diagnostics.is_empty() {
+        return Err(vec![analysis_error(format!(
+            "OXC semantic analysis failed before primitive-hook normalization: {:?}",
+            semantic.diagnostics
+        ))]);
+    }
+    let scoping = semantic.semantic.into_scoping();
+    let react = ReactBindings::new(program, &scoping);
+    PrimitiveHookBodyNormalizer {
+        ast: AstBuilder::new(allocator),
+        react: &react,
+        ordinal: 0,
+    }
+    .visit_program(program);
+    Ok(())
+}
+
+struct PrimitiveHookBodyNormalizer<'a, 'r, 's> {
+    ast: AstBuilder<'a>,
+    react: &'r ReactBindings<'s>,
+    ordinal: u32,
+}
+
+impl<'a> PrimitiveHookBodyNormalizer<'a, '_, '_> {
+    fn normalize_body(&mut self, body: &mut FunctionBody<'a>) {
+        let mut next = oxc_allocator::Vec::new_in(&self.ast);
+        for mut statement in body.statements.drain(..) {
+            let mut hoister = NestedPrimitiveHookCallHoister {
+                ast: &self.ast,
+                react: self.react,
+                ordinal: &mut self.ordinal,
+                statements: Vec::new(),
+            };
+            hoister.visit_statement(&mut statement);
+            next.extend(hoister.statements);
+            next.push(statement);
+        }
+        body.statements = next;
+    }
+}
+
+impl<'a> VisitMut<'a> for PrimitiveHookBodyNormalizer<'a, '_, '_> {
+    fn visit_function(&mut self, function: &mut Function<'a>, flags: ScopeFlags) {
+        if let Some(body) = &mut function.body {
+            self.normalize_body(body);
+        }
+        oxc_ast_visit::walk_mut::walk_function(self, function, flags);
+    }
+
+    fn visit_arrow_function_expression(&mut self, function: &mut ArrowFunctionExpression<'a>) {
+        if let Some(body) = function.body.as_function_body_mut() {
+            self.normalize_body(body);
+        }
+        oxc_ast_visit::walk_mut::walk_arrow_function_expression(self, function);
+    }
+}
+
+struct NestedPrimitiveHookCallHoister<'a, 'r, 's, 'o> {
+    ast: &'r AstBuilder<'a>,
+    react: &'r ReactBindings<'s>,
+    ordinal: &'o mut u32,
+    statements: Vec<Statement<'a>>,
+}
+
+impl<'a> VisitMut<'a> for NestedPrimitiveHookCallHoister<'a, '_, '_, '_> {
+    fn visit_expression(&mut self, expression: &mut Expression<'a>) {
+        if let Expression::CallExpression(call) = expression.without_parentheses()
+            && (self.react.context_hook_call(call).is_some() || self.react.is_id_call(call))
+        {
+            let name = self
+                .ast
+                .allocator()
+                .alloc_str(&format!("__vidactPrimitiveHook{}", *self.ordinal));
+            *self.ordinal += 1;
+            let initializer = expression.take_in(self.ast);
+            self.statements.push(variable_statement(
+                self.ast,
+                VariableDeclarationKind::Const,
+                name,
+                initializer,
+            ));
+            *expression = ident(self.ast, name);
+            return;
+        }
+        walk_expression_mut(self, expression);
+    }
+
+    fn visit_function(&mut self, _function: &mut Function<'a>, _flags: ScopeFlags) {}
+
+    fn visit_arrow_function_expression(&mut self, _function: &mut ArrowFunctionExpression<'a>) {}
+}
+
+impl<'a> VisitMut<'a> for StateElisionNormalizer<'a, '_, '_> {
+    fn visit_variable_declarator(&mut self, declarator: &mut VariableDeclarator<'a>) {
+        let Some(Expression::CallExpression(call)) = &declarator.init else {
+            return;
+        };
+        if self.react.state_hook_call(call).is_none() {
+            return;
+        }
+        let BindingPattern::ArrayPattern(pattern) = &mut declarator.id else {
+            return;
+        };
+        let [value, Some(_)] = pattern.elements.as_mut_slice() else {
+            return;
+        };
+        if value.is_some() {
+            return;
+        }
+        let name = self
+            .ast
+            .allocator()
+            .alloc_str(&format!("__vidactUnusedState{}", self.ordinal));
+        self.ordinal += 1;
+        *value = Some(BindingPattern::new_binding_identifier(
+            declarator.span,
+            name,
+            &self.ast,
+        ));
+    }
 }
 
 impl<'a> Visit<'a> for ReactClassComponentFinder<'_, '_> {
@@ -478,7 +755,7 @@ fn transform_program<'a>(
         );
     }
     let capabilities = dom_capabilities(program);
-    let mut prefix = vec![runtime_import(&ast, program, options)];
+    let mut prefix = runtime_imports(&ast, program, options);
     if capabilities.forms {
         prefix.push(capability_import(
             &ast,
@@ -542,6 +819,8 @@ fn remove_lowered_react_state_imports(
         live_symbols: BTreeSet::new(),
         remaining_state_call: None,
         remaining_compiled_hook_call: None,
+        allow_runtime_memos: options.feature_enabled(CompilerFeature::DependencySource),
+        allow_runtime_ids: options.feature_enabled(CompilerFeature::DependencySource),
         async_enabled: options.feature_enabled(CompilerFeature::Async),
         concurrent_enabled: options.feature_enabled(CompilerFeature::Concurrent),
         remaining_concurrent_call: None,
@@ -666,6 +945,8 @@ struct PostTransformReactUsage<'r, 's> {
     live_symbols: BTreeSet<SymbolId>,
     remaining_state_call: Option<Span>,
     remaining_compiled_hook_call: Option<(&'static str, Span)>,
+    allow_runtime_memos: bool,
+    allow_runtime_ids: bool,
     async_enabled: bool,
     concurrent_enabled: bool,
     remaining_concurrent_call: Option<(&'static str, Span)>,
@@ -762,8 +1043,12 @@ impl<'a> Visit<'a> for PostTransformReactUsage<'_, '_> {
             return;
         }
         if let Some(hook) = self.react.memo_hook_call(call) {
-            self.remaining_compiled_hook_call
-                .get_or_insert((hook.name(), call.span));
+            if self.allow_runtime_memos {
+                walk_call_expression(self, call);
+            } else {
+                self.remaining_compiled_hook_call
+                    .get_or_insert((hook.name(), call.span));
+            }
             return;
         }
         if let Some(hook) = self.react.context_hook_call(call) {
@@ -786,8 +1071,12 @@ impl<'a> Visit<'a> for PostTransformReactUsage<'_, '_> {
             return;
         }
         if self.react.is_id_call(call) {
-            self.remaining_compiled_hook_call
-                .get_or_insert(("useId", call.span));
+            if self.allow_runtime_ids {
+                walk_call_expression(self, call);
+            } else {
+                self.remaining_compiled_hook_call
+                    .get_or_insert(("useId", call.span));
+            }
             return;
         }
         walk_call_expression(self, call);
@@ -885,6 +1174,11 @@ fn transform_component<'a>(
         }
     }
     let prop_bindings = prop_binding_symbols(params, &source_ids, &prop_sources, allocator)?;
+    let renderable_child_symbols = prop_bindings
+        .iter()
+        .filter(|binding| binding.public_name.as_deref() == Some("children"))
+        .map(|binding| binding.symbol)
+        .collect::<BTreeSet<_>>();
     rewrite_component_props_parameter(&ast, params, &prop_bindings);
     let mut render_start = render_suffix_start(body)?;
     let mut source_symbols = BTreeMap::<SymbolId, SourceId>::new();
@@ -1099,17 +1393,43 @@ fn transform_component<'a>(
                     id_sources.insert(source);
                 }
             } else if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
-                && let Some(source) = source_ids.get(identifier.name.as_str())
+                && let Some(source) = lookup_source(&source_ids, identifier.name.as_str())
                 && let Some(symbol) = identifier.symbol_id.get()
             {
-                source_symbols.insert(symbol, *source);
+                source_symbols.insert(symbol, source);
             }
         }
     }
 
     validate_effect_event_uses(body, &react, scoping, &effect_event_symbols)?;
 
-    reject_untracked_derived_bindings(body, scoping, &source_symbols, &item_source_symbols)?;
+    propagate_direct_source_aliases(body, scoping, &mut source_symbols, &mut state_symbols);
+    let synthetic_derivations = if options.feature_enabled(CompilerFeature::DependencySource) {
+        collect_missing_derivations(
+            allocator,
+            body,
+            scoping,
+            &react,
+            &mut next_source,
+            &mut source_ids,
+            &mut source_symbols,
+            &item_source_symbols,
+        )
+    } else {
+        Vec::new()
+    };
+    let synthetic_symbols = synthetic_derivations
+        .iter()
+        .map(|derivation| derivation.symbol)
+        .collect::<BTreeSet<_>>();
+
+    reject_untracked_derived_bindings(
+        body,
+        scoping,
+        &react,
+        &source_symbols,
+        &item_source_symbols,
+    )?;
     let mut render_expression = render::lower_component_render(
         &ast,
         allocator,
@@ -1197,17 +1517,21 @@ fn transform_component<'a>(
             transform_effect_event_declarator(&ast, declarator, &react)?;
             transform_id_declarator(&ast, declarator, &react)?;
             if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
-                && ir.sources.iter().any(|source| {
-                    source.kind == SourceKind::Derived
-                        && source.name == identifier.name.as_str()
-                        && !memo_sources.contains(&source.id)
-                        && !concurrent_sources.contains(&source.id)
-                        && !action_sources.contains(&source.id)
-                        && !context_sources.contains(&source.id)
-                        && !external_sources.contains(&source.id)
-                        && !effect_event_sources.contains(&source.id)
-                        && !id_sources.contains(&source.id)
-                })
+                && (identifier
+                    .symbol_id
+                    .get()
+                    .is_some_and(|symbol| synthetic_symbols.contains(&symbol))
+                    || ir.sources.iter().any(|source| {
+                        source.kind == SourceKind::Derived
+                            && source.name == identifier.name.as_str()
+                            && !memo_sources.contains(&source.id)
+                            && !concurrent_sources.contains(&source.id)
+                            && !action_sources.contains(&source.id)
+                            && !context_sources.contains(&source.id)
+                            && !external_sources.contains(&source.id)
+                            && !effect_event_sources.contains(&source.id)
+                            && !id_sources.contains(&source.id)
+                    }))
             {
                 declarator.kind = VariableDeclarationKind::Let;
                 contains_derived = true;
@@ -1416,6 +1740,31 @@ fn transform_component<'a>(
             }
         });
     }
+    for derivation in &synthetic_derivations {
+        let reads = dependencies(
+            &derivation.expression,
+            scoping,
+            &source_symbols,
+            &item_source_symbols,
+        );
+        if !reads.item.is_empty() {
+            return Err(unsupported(
+                "expanded custom-hook derivations cannot depend on keyed item slots",
+            ));
+        }
+        let reads = reads
+            .parent
+            .into_iter()
+            .filter(|source| *source != derivation.source)
+            .collect::<Vec<_>>();
+        updater_statements.push(register_derived(
+            &ast,
+            derivation.name,
+            derivation.expression.clone_in_with_semantic_ids(allocator),
+            &reads,
+            &[derivation.source],
+        ));
+    }
     let updater_count = updater_statements.len();
     for (offset, statement) in updater_statements.into_iter().enumerate() {
         body.statements.insert(render_start + offset, statement);
@@ -1441,6 +1790,7 @@ fn transform_component<'a>(
         item_source_symbols: &item_source_symbols,
         options,
         react: &react,
+        renderable_depth: 0,
         reactive_spread_overrides: BTreeMap::new(),
         diagnostic: None,
     };
@@ -1448,7 +1798,7 @@ fn transform_component<'a>(
     if let Some(diagnostic) = jsx_transformer.diagnostic {
         return Err(diagnostic);
     }
-    namespace::annotate(&ast, body)?;
+    namespace::annotate(&ast, body, scoping, &renderable_child_symbols)?;
     MultiStateReferenceRewriter {
         ast: &ast,
         scoping,
@@ -1484,10 +1834,20 @@ struct PropBinding<'a> {
     container_defaults: Vec<Option<Expression<'a>>>,
 }
 
+#[derive(Clone)]
 struct StateReference<'a> {
     state_name: &'a str,
     setter: bool,
     path: Vec<String>,
+}
+
+fn lookup_source(sources: &BTreeMap<&str, SourceId>, name: &str) -> Option<SourceId> {
+    sources.get(name).copied().or_else(|| {
+        let generated = name.strip_prefix("__vidactHook")?;
+        let (_, generated) = generated.split_once('_')?;
+        let (_, original) = generated.split_once('_')?;
+        sources.get(original).copied()
+    })
 }
 
 fn state_binding_symbols<'a>(
@@ -1520,7 +1880,7 @@ fn state_binding_symbols<'a>(
         ))
         .with_span(SourceSpan::new(pattern.span.start, pattern.span.end)));
     };
-    let source = sources.get(value.name.as_str()).copied().ok_or_else(|| {
+    let source = lookup_source(sources, value.name.as_str()).ok_or_else(|| {
         unsupported(format!("state {} is absent from analysis", value.name))
             .with_span(SourceSpan::new(value.span.start, value.span.end))
     })?;
@@ -1571,7 +1931,7 @@ fn transition_binding_symbols<'a>(
                 .with_span(SourceSpan::new(pattern.span.start, pattern.span.end)),
         );
     };
-    let source = sources.get(pending.name.as_str()).copied().ok_or_else(|| {
+    let source = lookup_source(sources, pending.name.as_str()).ok_or_else(|| {
         unsupported(format!(
             "transition state {} is absent from analysis",
             pending.name
@@ -1666,14 +2026,14 @@ fn action_state_binding_symbols<'a>(
                 .with_span(SourceSpan::new(pattern.span.start, pattern.span.end)),
         );
     };
-    let state_source = sources.get(state.name.as_str()).copied().ok_or_else(|| {
+    let state_source = lookup_source(sources, state.name.as_str()).ok_or_else(|| {
         unsupported(format!(
             "action state {} is absent from analysis",
             state.name
         ))
         .with_span(SourceSpan::new(state.span.start, state.span.end))
     })?;
-    let pending_source = sources.get(pending.name.as_str()).copied().ok_or_else(|| {
+    let pending_source = lookup_source(sources, pending.name.as_str()).ok_or_else(|| {
         unsupported(format!(
             "action pending state {} is absent from analysis",
             pending.name
@@ -1711,7 +2071,7 @@ fn optimistic_binding_symbols<'a>(
                 .with_span(SourceSpan::new(pattern.span.start, pattern.span.end)),
         );
     };
-    let source = sources.get(value.name.as_str()).copied().ok_or_else(|| {
+    let source = lookup_source(sources, value.name.as_str()).ok_or_else(|| {
         unsupported(format!(
             "optimistic value {} is absent from analysis",
             value.name
@@ -1784,13 +2144,9 @@ fn memo_binding_symbol<'a>(
     let Some(hook) = react.memo_hook_call(call) else {
         return Ok(None);
     };
-    let source = sources
-        .get(identifier.name.as_str())
-        .copied()
-        .ok_or_else(|| {
-            unsupported(format!("memo {} is absent from analysis", identifier.name))
-                .with_span(SourceSpan::new(identifier.span.start, identifier.span.end))
-        })?;
+    let Some(source) = lookup_source(sources, identifier.name.as_str()) else {
+        return Ok(None);
+    };
     let symbol = identifier.symbol_id.get().ok_or_else(|| {
         analysis_error(format!("memo {} has no semantic symbol", identifier.name))
     })?;
@@ -1818,16 +2174,13 @@ fn context_binding_symbol<'a>(
     let Some(hook) = react.context_hook_call(call) else {
         return Ok(None);
     };
-    let source = sources
-        .get(identifier.name.as_str())
-        .copied()
-        .ok_or_else(|| {
-            unsupported(format!(
-                "context {} is absent from analysis",
-                identifier.name
-            ))
-            .with_span(SourceSpan::new(identifier.span.start, identifier.span.end))
-        })?;
+    let source = lookup_source(sources, identifier.name.as_str()).ok_or_else(|| {
+        unsupported(format!(
+            "context {} is absent from analysis",
+            identifier.name
+        ))
+        .with_span(SourceSpan::new(identifier.span.start, identifier.span.end))
+    })?;
     let symbol = identifier.symbol_id.get().ok_or_else(|| {
         analysis_error(format!(
             "context {} has no semantic symbol",
@@ -1903,7 +2256,7 @@ fn effect_event_binding_symbol(
     })?;
     Ok(Some((
         symbol,
-        sources.get(identifier.name.as_str()).copied(),
+        lookup_source(sources, identifier.name.as_str()),
     )))
 }
 
@@ -1920,7 +2273,7 @@ fn id_binding_source(
     };
     react
         .is_id_call(call)
-        .then(|| sources.get(identifier.name.as_str()).copied())
+        .then(|| lookup_source(sources, identifier.name.as_str()))
 }
 
 fn transform_state_declarator<'a>(
@@ -2593,6 +2946,7 @@ struct JsxBindingTransformer<'a, 'b, 's> {
     item_source_symbols: &'s BTreeMap<SymbolId, SourceId>,
     options: &'s CompilationOptions,
     react: &'s ReactBindings<'s>,
+    renderable_depth: usize,
     reactive_spread_overrides: BTreeMap<u32, (ReactiveSpreadKind, Vec<String>)>,
     diagnostic: Option<Diagnostic>,
 }
@@ -2604,6 +2958,27 @@ enum ReactiveSpreadKind {
 }
 
 impl<'a> JsxBindingTransformer<'a, '_, '_> {
+    fn lower_renderable_attribute(
+        &mut self,
+        mut element: oxc_allocator::Box<'a, JSXElement<'a>>,
+    ) -> Result<Expression<'a>, Diagnostic> {
+        self.renderable_depth += 1;
+        self.visit_jsx_element(&mut element);
+        self.renderable_depth -= 1;
+        if let Some(diagnostic) = self.diagnostic.take() {
+            return Err(diagnostic);
+        }
+        let (input, constructor) = renderable_parts(self.ast, element)?;
+        Ok(call_name(
+            self.ast,
+            CREATE_RENDERABLE,
+            [
+                input,
+                arrow_expression(self.ast, [RENDERABLE_INPUT], constructor),
+            ],
+        ))
+    }
+
     fn lower_choice_branch(&mut self, expression: &mut Expression<'a>) {
         if self.lower_structural_conditional(expression) {
             return;
@@ -2922,7 +3297,86 @@ pub(super) fn prepare_known_suspense_element<'a>(
 }
 
 impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
+    fn visit_expression(&mut self, expression: &mut Expression<'a>) {
+        walk_expression_mut(self, expression);
+        let Expression::ChainExpression(chain) = expression else {
+            return;
+        };
+        let ChainElement::StaticMemberExpression(member) = &chain.expression else {
+            return;
+        };
+        if member.property.name != "$$typeof" {
+            return;
+        }
+        let value = member
+            .object
+            .clone_in_with_semantic_ids(self.ast.allocator());
+        *expression = call_name(self.ast, RENDERABLE_MARKER, [value]);
+    }
+
     fn visit_call_expression(&mut self, call: &mut CallExpression<'a>) {
+        if self.react.is_clone_element_call(call) {
+            if !(1..=2).contains(&call.arguments.len())
+                || call.arguments.iter().any(Argument::is_spread)
+            {
+                self.diagnostic = Some(
+                    unsupported("cloneElement requires a renderable and optional props object")
+                        .with_span(SourceSpan::new(call.span.start, call.span.end)),
+                );
+                return;
+            }
+            walk_call_expression_mut(self, call);
+            if let Some(overrides) = call.arguments.get_mut(1) {
+                let expression = overrides
+                    .as_expression_mut()
+                    .expect("spread arguments were rejected");
+                let reads = dependencies(
+                    expression,
+                    self.scoping,
+                    self.source_symbols,
+                    self.item_source_symbols,
+                );
+                if !reads.is_empty() {
+                    let evaluate = expression.clone_in_with_semantic_ids(self.ast.allocator());
+                    let mut arguments = vec![
+                        ident(self.ast, SCOPE),
+                        dependency_mask(self.ast, &reads.parent),
+                        arrow_expression(self.ast, [], evaluate),
+                    ];
+                    append_item_dependency(self.ast, &mut arguments, &reads);
+                    *expression = call_name(self.ast, BINDING, arguments);
+                }
+            }
+            call.callee = ident(self.ast, CLONE_RENDERABLE);
+            call.type_arguments = None;
+            return;
+        }
+        if self.react.is_valid_element_call(call) {
+            if call.arguments.len() != 1 || call.arguments[0].is_spread() {
+                self.diagnostic = Some(
+                    unsupported("isValidElement requires one value")
+                        .with_span(SourceSpan::new(call.span.start, call.span.end)),
+                );
+                return;
+            }
+            walk_call_expression_mut(self, call);
+            call.callee = ident(self.ast, IS_RENDERABLE);
+            call.type_arguments = None;
+            return;
+        }
+        if self.react.is_children_to_array_call(call) {
+            if call.arguments.len() != 1 || call.arguments[0].is_spread() {
+                self.diagnostic = Some(
+                    unsupported("Children.toArray supports one renderable value")
+                        .with_span(SourceSpan::new(call.span.start, call.span.end)),
+                );
+                return;
+            }
+            walk_call_expression_mut(self, call);
+            call.callee = ident(self.ast, RENDERABLE_TO_ARRAY);
+            call.type_arguments = None;
+            return;
+        }
         if let Some(name) = self.react.framework_call_name(call) {
             let message = if self.react.is_server_framework_call(call) {
                 Some(format!(
@@ -3254,6 +3708,36 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             return;
         }
         let intrinsic = raw_html::intrinsic_jsx_name(&element.opening_element.name).is_some();
+        if !intrinsic || self.renderable_depth > 0 {
+            for child in &mut element.children {
+                let nested = match child {
+                    JSXChild::Element(value) => {
+                        Some(value.clone_in_with_semantic_ids(self.ast.allocator()))
+                    }
+                    JSXChild::ExpressionContainer(container) => match &container.expression {
+                        JSXExpression::JSXElement(value) => {
+                            Some(value.clone_in_with_semantic_ids(self.ast.allocator()))
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let Some(nested) = nested else { continue };
+                match self.lower_renderable_attribute(nested) {
+                    Ok(expression) => {
+                        *child = JSXChild::new_expression_container(
+                            child.span(),
+                            JSXExpression::from(expression),
+                            self.ast,
+                        );
+                    }
+                    Err(diagnostic) => {
+                        self.diagnostic = Some(diagnostic);
+                        return;
+                    }
+                }
+            }
+        }
         if intrinsic {
             for item in &element.opening_element.attributes {
                 let JSXAttributeItem::Attribute(attribute) = item else {
@@ -3357,6 +3841,32 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
     }
 
     fn visit_jsx_attribute(&mut self, attribute: &mut JSXAttribute<'a>) {
+        if let Some(JSXAttributeValue::Element(_)) = &attribute.value {
+            let Some(JSXAttributeValue::Element(element)) = attribute.value.take() else {
+                unreachable!();
+            };
+            match self.lower_renderable_attribute(element) {
+                Ok(expression) => {
+                    attribute.value = Some(JSXAttributeValue::new_expression_container(
+                        attribute.span,
+                        expression.into(),
+                        self.ast,
+                    ));
+                }
+                Err(diagnostic) => self.diagnostic = Some(diagnostic),
+            }
+            return;
+        }
+        if let Some(JSXAttributeValue::ExpressionContainer(container)) = &mut attribute.value
+            && let JSXExpression::JSXElement(element) = &container.expression
+        {
+            let element = element.clone_in_with_semantic_ids(self.ast.allocator());
+            match self.lower_renderable_attribute(element) {
+                Ok(expression) => container.expression = expression.into(),
+                Err(diagnostic) => self.diagnostic = Some(diagnostic),
+            }
+            return;
+        }
         let JSXAttributeName::Identifier(name) = &attribute.name else {
             walk_jsx_attribute(self, attribute);
             return;
@@ -3456,6 +3966,14 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
         let Some(expression) = container.expression.as_expression_mut() else {
             return;
         };
+
+        if matches!(
+            expression.without_parentheses(),
+            Expression::CallExpression(call)
+                if call.callee.get_identifier_reference().is_some_and(|identifier| identifier.name == CREATE_RENDERABLE)
+        ) {
+            return;
+        }
 
         if is_generated_render_thunk(expression) {
             walk_expression_mut(self, expression);
@@ -3616,6 +4134,140 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
         ];
         append_item_dependency(self.ast, &mut arguments, &reads);
         *expression = call_name(self.ast, BINDING, arguments);
+    }
+}
+
+fn renderable_parts<'a>(
+    ast: &AstBuilder<'a>,
+    element: oxc_allocator::Box<'a, JSXElement<'a>>,
+) -> Result<(Expression<'a>, Expression<'a>), Diagnostic> {
+    let span = element.span;
+    let mut properties = oxc_allocator::Vec::new_in(ast);
+    for item in &element.opening_element.attributes {
+        match item {
+            JSXAttributeItem::SpreadAttribute(spread) => {
+                properties.push(ObjectPropertyKind::new_spread_property(
+                    spread.span,
+                    spread.argument.clone_in_with_semantic_ids(ast.allocator()),
+                    ast,
+                ));
+            }
+            JSXAttributeItem::Attribute(attribute) => {
+                let JSXAttributeName::Identifier(name) = &attribute.name else {
+                    return Err(unsupported(
+                        "renderable capability attributes require ordinary prop names",
+                    )
+                    .with_span(SourceSpan::new(attribute.span.start, attribute.span.end)));
+                };
+                let value = match &attribute.value {
+                    None => Expression::new_boolean_literal(attribute.span, true, ast),
+                    Some(JSXAttributeValue::StringLiteral(value)) => {
+                        Expression::StringLiteral(value.clone_in_with_semantic_ids(ast.allocator()))
+                    }
+                    Some(JSXAttributeValue::ExpressionContainer(container)) => container
+                        .expression
+                        .as_expression()
+                        .ok_or_else(|| unsupported("renderable prop must have a value"))?
+                        .clone_in_with_semantic_ids(ast.allocator()),
+                    Some(JSXAttributeValue::Element(value)) => {
+                        Expression::JSXElement(value.clone_in_with_semantic_ids(ast.allocator()))
+                    }
+                    Some(JSXAttributeValue::Fragment(value)) => {
+                        Expression::JSXFragment(value.clone_in_with_semantic_ids(ast.allocator()))
+                    }
+                };
+                properties.push(ObjectPropertyKind::new_object_property(
+                    attribute.span,
+                    PropertyKind::Init,
+                    PropertyKey::new_string_literal(name.span, name.name, None, ast),
+                    value,
+                    false,
+                    false,
+                    false,
+                    ast,
+                ));
+            }
+        }
+    }
+    if !element.children.is_empty() {
+        let children = renderable_children_expression(ast, &element.children)?;
+        properties.push(ObjectPropertyKind::new_object_property(
+            span,
+            PropertyKind::Init,
+            PropertyKey::new_static_identifier(SPAN, "children", ast),
+            children,
+            false,
+            false,
+            false,
+            ast,
+        ));
+    }
+    let input = Expression::new_object_expression(span, properties, ast);
+
+    let name = element
+        .opening_element
+        .name
+        .clone_in_with_semantic_ids(ast.allocator());
+    let attributes = [
+        JSXAttributeItem::new_spread_attribute(
+            SPAN,
+            call_name(ast, RENDERABLE_PROPS, [ident(ast, RENDERABLE_INPUT)]),
+            ast,
+        ),
+        JSXAttributeItem::new_attribute(
+            SPAN,
+            JSXAttributeName::new_identifier(SPAN, "ref", ast),
+            Some(JSXAttributeValue::new_expression_container(
+                SPAN,
+                call_name(ast, RENDERABLE_REF, [ident(ast, RENDERABLE_INPUT)]).into(),
+                ast,
+            )),
+            ast,
+        ),
+    ];
+    let child = JSXChild::new_expression_container(
+        SPAN,
+        call_name(ast, RENDERABLE_CHILDREN, [ident(ast, RENDERABLE_INPUT)]).into(),
+        ast,
+    );
+    let opening =
+        JSXOpeningElement::boxed(SPAN, name.clone_in(ast.allocator()), None, attributes, ast);
+    let closing = JSXClosingElement::boxed(SPAN, name, ast);
+    let constructor = Expression::new_jsx_element(SPAN, opening, [child], Some(closing), ast);
+    Ok((input, constructor))
+}
+
+fn renderable_children_expression<'a>(
+    ast: &AstBuilder<'a>,
+    children: &[JSXChild<'a>],
+) -> Result<Expression<'a>, Diagnostic> {
+    let mut values = oxc_allocator::Vec::new_in(ast);
+    for child in children {
+        let expression = match child {
+            JSXChild::Text(text) => {
+                Expression::new_string_literal(text.span, text.value, None, ast)
+            }
+            JSXChild::Element(element) => {
+                Expression::JSXElement(element.clone_in_with_semantic_ids(ast.allocator()))
+            }
+            JSXChild::Fragment(fragment) => {
+                Expression::JSXFragment(fragment.clone_in_with_semantic_ids(ast.allocator()))
+            }
+            JSXChild::ExpressionContainer(container) => container
+                .expression
+                .as_expression()
+                .ok_or_else(|| unsupported("renderable child expression must have a value"))?
+                .clone_in_with_semantic_ids(ast.allocator()),
+            JSXChild::Spread(spread) => spread
+                .expression
+                .clone_in_with_semantic_ids(ast.allocator()),
+        };
+        values.push(ArrayExpressionElement::from(expression));
+    }
+    if values.len() == 1 {
+        Ok(Expression::try_from(values.pop().unwrap()).unwrap())
+    } else {
+        Ok(Expression::new_array_expression(SPAN, values, ast))
     }
 }
 
@@ -4037,9 +4689,130 @@ fn contains_component_return(statement: &Statement<'_>) -> bool {
     nested.found
 }
 
+struct SyntheticDerivation<'a> {
+    name: &'a str,
+    symbol: SymbolId,
+    source: SourceId,
+    expression: Expression<'a>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_missing_derivations<'a>(
+    allocator: &'a Allocator,
+    body: &FunctionBody<'a>,
+    scoping: &Scoping,
+    react: &ReactBindings<'_>,
+    next_source: &mut u32,
+    source_ids: &mut BTreeMap<&'a str, SourceId>,
+    source_symbols: &mut BTreeMap<SymbolId, SourceId>,
+    item_source_symbols: &BTreeMap<SymbolId, SourceId>,
+) -> Vec<SyntheticDerivation<'a>> {
+    let mut derivations = Vec::new();
+    loop {
+        let previous = source_symbols.len();
+        for statement in &body.statements {
+            let Statement::VariableDeclaration(declaration) = statement else {
+                continue;
+            };
+            for declarator in &declaration.declarations {
+                let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+                    continue;
+                };
+                let Some(symbol) = identifier.symbol_id.get() else {
+                    continue;
+                };
+                if source_symbols.contains_key(&symbol) {
+                    continue;
+                }
+                let Some(initializer) = &declarator.init else {
+                    continue;
+                };
+                if matches!(initializer, Expression::CallExpression(call) if react.state_hook_call(call).is_some()
+                    || react.memo_hook_call(call).is_some()
+                    || react.context_hook_call(call).is_some()
+                    || react.effect_hook_call(call).is_some()
+                    || react.is_sync_external_store_call(call))
+                {
+                    continue;
+                }
+                let reads = immediate_dependencies(
+                    initializer,
+                    scoping,
+                    source_symbols,
+                    item_source_symbols,
+                );
+                if reads.is_empty() || !reads.item.is_empty() {
+                    continue;
+                }
+                let source = SourceId::new(*next_source);
+                *next_source += 1;
+                let name = allocator.alloc_str(identifier.name.as_str());
+                source_ids.insert(name, source);
+                source_symbols.insert(symbol, source);
+                derivations.push(SyntheticDerivation {
+                    name,
+                    symbol,
+                    source,
+                    expression: initializer.clone_in_with_semantic_ids(allocator),
+                });
+            }
+        }
+        if source_symbols.len() == previous {
+            break;
+        }
+    }
+    derivations
+}
+
+fn propagate_direct_source_aliases<'a>(
+    body: &FunctionBody<'a>,
+    scoping: &Scoping,
+    source_symbols: &mut BTreeMap<SymbolId, SourceId>,
+    state_symbols: &mut BTreeMap<SymbolId, StateReference<'a>>,
+) {
+    loop {
+        let previous = source_symbols.len();
+        for statement in &body.statements {
+            let Statement::VariableDeclaration(declaration) = statement else {
+                continue;
+            };
+            for declarator in &declaration.declarations {
+                let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+                    continue;
+                };
+                let Some(symbol) = identifier.symbol_id.get() else {
+                    continue;
+                };
+                if source_symbols.contains_key(&symbol) {
+                    continue;
+                }
+                let Some(Expression::Identifier(initializer)) = &declarator.init else {
+                    continue;
+                };
+                let Some(source_symbol) =
+                    crate::react_bindings::reference_symbol(initializer, scoping)
+                else {
+                    continue;
+                };
+                let Some(source) = source_symbols.get(&source_symbol).copied() else {
+                    continue;
+                };
+                source_symbols.insert(symbol, source);
+                if let Some(state) = state_symbols.get(&source_symbol).cloned() {
+                    state_symbols.insert(symbol, state);
+                }
+            }
+        }
+        if source_symbols.len() == previous {
+            break;
+        }
+    }
+}
+
 fn reject_untracked_derived_bindings(
     body: &FunctionBody<'_>,
     scoping: &Scoping,
+    react: &ReactBindings<'_>,
     source_symbols: &BTreeMap<SymbolId, SourceId>,
     item_source_symbols: &BTreeMap<SymbolId, SourceId>,
 ) -> Result<(), Diagnostic> {
@@ -4060,6 +4833,10 @@ fn reject_untracked_derived_bindings(
             let Some(initializer) = &declarator.init else {
                 continue;
             };
+            if matches!(initializer, Expression::CallExpression(call) if react.memo_hook_call(call).is_some())
+            {
+                continue;
+            }
             let reads =
                 immediate_dependencies(initializer, scoping, source_symbols, item_source_symbols);
             if !reads.is_empty() {
@@ -4688,14 +5465,16 @@ fn scope_statement<'a>(ast: &AstBuilder<'a>, narrow: bool) -> Statement<'a> {
     )
 }
 
-fn runtime_import<'a>(
+fn runtime_imports<'a>(
     ast: &AstBuilder<'a>,
     program: &Program<'a>,
     options: &CompilationOptions,
-) -> Statement<'a> {
+) -> Vec<Statement<'a>> {
     let names = [
         ("ActionForm", ACTION_FORM),
         ("binding", BINDING),
+        ("cloneRenderable", CLONE_RENDERABLE),
+        ("cloneRenderableComponent", CLONE_RENDERABLE_COMPONENT),
         ("combineSources", COMBINE_SOURCES),
         ("compiledComponentSpread", COMPILED_COMPONENT_SPREAD),
         ("compiledEffect", COMPILED_EFFECT),
@@ -4724,73 +5503,88 @@ fn runtime_import<'a>(
         ("createNarrowCompiledScope", CREATE_NARROW_SCOPE),
         ("createCompiledState", CREATE_STATE),
         ("createCompiledTransition", CREATE_TRANSITION),
+        ("createRenderable", CREATE_RENDERABLE),
         ("deferred", DEFERRED),
         ("dispatch", DISPATCH),
+        ("dynamicIntrinsicComponent", DYNAMIC_INTRINSIC_COMPONENT),
         ("enableFrameworkMetadata", ENABLE_FRAMEWORK_METADATA),
+        ("forwardedRef", FORWARDED_REF),
         ("indexed", INDEXED),
         ("keyed", KEYED),
         ("nestedProp", NESTED_PROP),
+        ("isRenderable", IS_RENDERABLE),
+        ("renderableChildren", RENDERABLE_CHILDREN),
+        ("renderableMarker", RENDERABLE_MARKER),
+        ("renderableProps", RENDERABLE_PROPS),
+        ("renderableRef", RENDERABLE_REF),
+        ("renderableToArray", RENDERABLE_TO_ARRAY),
         ("source", SOURCE),
         ("when", WHEN),
     ];
     let mut references = GeneratedReferenceFinder::default();
     references.visit_program(program);
-    let framework_metadata = references.names.contains(ENABLE_FRAMEWORK_METADATA);
-    let specifiers = oxc_allocator::Vec::from_iter_in(
-        names
-            .into_iter()
-            .filter(|(_, local)| references.names.contains(*local))
-            .map(|(imported, local)| {
-                ImportDeclarationSpecifier::new_import_specifier(
-                    SPAN,
-                    ModuleExportName::new_identifier_name(SPAN, atom(ast, imported), ast),
-                    BindingIdentifier::new(SPAN, atom(ast, local), ast),
-                    ImportOrExportKind::Value,
-                    ast,
-                )
-            }),
-        ast,
-    );
-    Statement::new_import_declaration(
-        SPAN,
-        Some(specifiers),
-        StringLiteral::new(
+    let mut imports = Vec::new();
+    if options.target() == crate::CompilerTarget::Hydrate {
+        imports.push(Statement::new_import_declaration(
             SPAN,
-            if framework_metadata {
-                if options.target() == crate::CompilerTarget::Hydrate {
-                    "@vidact/runtime/framework/hydrate"
-                } else {
-                    "@vidact/runtime/framework"
-                }
-            } else {
-                match (
-                    options.feature_enabled(CompilerFeature::Async),
-                    options.feature_enabled(CompilerFeature::Concurrent),
-                    options.feature_enabled(CompilerFeature::Actions),
-                    options.target() == crate::CompilerTarget::Hydrate,
-                ) {
-                    (true, _, true, true) => "@vidact/runtime/async/actions/hydrate",
-                    (true, _, true, false) => "@vidact/runtime/async/actions",
-                    (false, _, true, true) => "@vidact/runtime/actions/hydrate",
-                    (false, _, true, false) => "@vidact/runtime/actions",
-                    (true, true, false, true) => "@vidact/runtime/async/concurrent/hydrate",
-                    (true, true, false, false) => "@vidact/runtime/async/concurrent",
-                    (true, false, false, true) => "@vidact/runtime/async/hydrate",
-                    (true, false, false, false) => "@vidact/runtime/async",
-                    (false, true, false, true) => "@vidact/runtime/concurrent/hydrate",
-                    (false, true, false, false) => "@vidact/runtime/concurrent",
-                    (false, false, false, true) => "@vidact/runtime/hydrate",
-                    (false, false, false, false) => "@vidact/runtime",
-                }
-            },
             None,
+            StringLiteral::new(SPAN, "@vidact/runtime/hydrate", None, ast),
+            None,
+            None,
+            ImportOrExportKind::Value,
             ast,
-        ),
-        None,
-        None,
-        ImportOrExportKind::Value,
-        ast,
-    )
+        ));
+    }
+    for source in [
+        "@vidact/runtime",
+        "@vidact/runtime/async",
+        "@vidact/runtime/concurrent",
+        "@vidact/runtime/actions",
+        "@vidact/runtime/framework",
+    ] {
+        let specifiers = oxc_allocator::Vec::from_iter_in(
+            names
+                .iter()
+                .copied()
+                .filter(|(_, local)| {
+                    references.names.contains(*local) && runtime_source(local) == source
+                })
+                .map(|(imported, local)| {
+                    ImportDeclarationSpecifier::new_import_specifier(
+                        SPAN,
+                        ModuleExportName::new_identifier_name(SPAN, atom(ast, imported), ast),
+                        BindingIdentifier::new(SPAN, atom(ast, local), ast),
+                        ImportOrExportKind::Value,
+                        ast,
+                    )
+                }),
+            ast,
+        );
+        if specifiers.is_empty() {
+            continue;
+        }
+        imports.push(Statement::new_import_declaration(
+            SPAN,
+            Some(specifiers),
+            StringLiteral::new(SPAN, atom(ast, source), None, ast),
+            None,
+            None,
+            ImportOrExportKind::Value,
+            ast,
+        ));
+    }
+    imports
+}
+
+fn runtime_source(local: &str) -> &'static str {
+    match local {
+        CREATE_ASYNC => "@vidact/runtime/async",
+        CREATE_DEFERRED | CREATE_TRANSITION => "@vidact/runtime/concurrent",
+        ACTION_FORM | COMPILED_FORM_ACTION | CREATE_ACTION_STATE | CREATE_FORM_STATUS
+        | CREATE_OPTIMISTIC => "@vidact/runtime/actions",
+        ENABLE_FRAMEWORK_METADATA => "@vidact/runtime/framework",
+        _ => "@vidact/runtime",
+    }
 }
 
 fn capability_import<'a>(

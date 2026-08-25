@@ -5,7 +5,7 @@ import {
   compiledRoot,
   createCompiledScope,
   createCompiledState,
-} from '../../src/compiled.ts'
+} from '../../src/compiled/core.ts'
 import { Fragment, h } from '../../src/direct-dom.ts'
 import { createEventReplayQueue, hydrateFrameworkBoundary } from '../../src/framework-hydrate.ts'
 import {

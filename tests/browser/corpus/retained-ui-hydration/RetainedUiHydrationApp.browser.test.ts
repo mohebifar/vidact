@@ -1,11 +1,11 @@
-import { hydrateRoot } from '@vidact/runtime/retained-ui/hydrate'
+import { hydrateRoot } from '@vidact/runtime/hydrate'
 import {
   Activity as ServerActivity,
   jsx as serverJsx,
   jsxs as serverJsxs,
   renderToString,
   type ServerChild,
-} from '@vidact/runtime/retained-ui/server'
+} from '@vidact/runtime/server'
 import { assertMutationEnvelope, captureMutations } from '@vidact/test-support'
 import { afterEach, expect, it } from 'vitest'
 

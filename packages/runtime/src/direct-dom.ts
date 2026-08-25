@@ -1,7 +1,6 @@
 import {
   isCompiledBinding,
   isStructuralBinding,
-  hasInvalidChild,
   adoptCompiledRoot,
   constructCompiledComponent,
   mountCompiledBinding,
@@ -10,10 +9,9 @@ import {
   mountCompiledPropTransition,
   queueElementRef,
   registerCompiledCleanup,
-  type CompiledBinding,
-  type CompiledRenderValue,
-  type StructuralBinding,
-} from './compiled.ts'
+} from './compiled/core.ts'
+import type { CompiledBinding, CompiledRenderValue, StructuralBinding } from './compiled/types.ts'
+import { hasInvalidChild } from './compiled/validation.ts'
 import { attachEventProp, isEventProp } from './dom/events.ts'
 import {
   INTERNAL_NAMESPACE_PROP,
@@ -24,6 +22,7 @@ import {
   resolveIntrinsicNamespace,
   withIntrinsicNamespace,
 } from './dom/intrinsic.ts'
+import { intrinsicNamespaceUrl } from './dom/namespaces.ts'
 import {
   applyDomProp,
   ensureControlledFormRestoration,
@@ -41,6 +40,7 @@ import {
   isHydrating,
 } from './hydration-bridge.ts'
 import { mountRawHtmlProp } from './raw-html.ts'
+import { isRenderableProtocol, materializeRenderable } from './renderable-protocol.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 const UNSAFE_HTML = typeof __VIDACT_UNSAFE_HTML__ === 'undefined' || __VIDACT_UNSAFE_HTML__
@@ -59,7 +59,7 @@ export type DirectChild =
 export type DirectProps = Record<string, unknown> | null
 export type DirectComponent = (props: Record<string, unknown>) => CompiledRenderValue
 
-export const Fragment = Symbol(DEV ? 'Vidact.Fragment' : undefined)
+export const Fragment: symbol = Symbol.for('vidact.v1.Fragment')
 let frameworkMetadataHandler: ((element: Element, props: DirectProps) => Node) | undefined
 
 /** @internal */
@@ -99,7 +99,7 @@ export function h(
   props: DirectProps,
   ...children: DirectChild[]
 ): DirectChild {
-  if (type === Fragment) {
+  if (typeof type === 'symbol') {
     if (isHydrating()) return createHydrationFragment(children)
     const fragment = document.createDocumentFragment()
     appendChildren(fragment, children)
@@ -116,12 +116,7 @@ export function h(
   }
 
   const namespace = resolveIntrinsicNamespace(type, readIntrinsicNamespace(props))
-  const namespaceUrl =
-    namespace === 'svg'
-      ? 'http://www.w3.org/2000/svg'
-      : namespace === 'mathml'
-        ? 'http://www.w3.org/1998/Math/MathML'
-        : 'http://www.w3.org/1999/xhtml'
+  const namespaceUrl = intrinsicNamespaceUrl(namespace)
   const element =
     claimHydrationElement(type, namespaceUrl, (candidate) =>
       matchesHydrationElement(candidate, props, children),
@@ -135,6 +130,17 @@ export function h(
     return frameworkMetadataHandler(element, props)
   }
   return element
+}
+
+export function createElement(
+  type: string | typeof Fragment | DirectComponent,
+  props: DirectProps,
+  ...children: DirectChild[]
+): DirectChild {
+  if (children.length === 0 && props !== null && Object.hasOwn(props, 'children')) {
+    return h(type, props, props.children as DirectChild)
+  }
+  return h(type, props, ...children)
 }
 
 function matchesHydrationElement(
@@ -303,6 +309,10 @@ function appendChild(parent: Node, child: DirectChild): void {
   }
   if (isCompiledBinding(child)) {
     mountCompiledBinding(parent, child)
+    return
+  }
+  if (isRenderableProtocol(child)) {
+    appendChild(parent, materializeRenderable(child) as DirectChild)
     return
   }
   if (Array.isArray(child)) {

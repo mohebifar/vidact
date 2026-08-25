@@ -1,9 +1,5 @@
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 
-export const HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml'
-export const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
-export const MATHML_NAMESPACE = 'http://www.w3.org/1998/Math/MathML'
-
 export const INTERNAL_NAMESPACE_PROP = '__vidactNamespace'
 export const INTERNAL_COMPONENT_SPREAD_PROP = Symbol(DEV ? 'Vidact.ComponentSpread' : undefined)
 
@@ -46,8 +42,12 @@ export function createComponentProps(
   props: Record<string, unknown> | null,
   children: readonly unknown[],
 ): Record<string, unknown> {
-  const publicProps: Record<string, unknown> = { ...props, children }
+  const publicProps: Record<string, unknown> = { ...props }
+  if (children.length === 1) publicProps.children = children[0]
+  else if (children.length > 1) publicProps.children = children
   delete publicProps[INTERNAL_NAMESPACE_PROP]
+  delete publicProps.key
+  if (publicProps.ref === undefined) delete publicProps.ref
   const propsWithDirective = publicProps as Record<PropertyKey, unknown>
   const directive = propsWithDirective[INTERNAL_COMPONENT_SPREAD_PROP]
   delete propsWithDirective[INTERNAL_COMPONENT_SPREAD_PROP]

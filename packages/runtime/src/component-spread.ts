@@ -1,9 +1,5 @@
-import {
-  COMPONENT_SPREAD_SOURCE,
-  binding,
-  mountCompiledProp,
-  type CompiledBinding,
-} from './compiled.ts'
+import { COMPONENT_SPREAD_SOURCE, binding, mountCompiledProp } from './compiled/core.ts'
+import type { CompiledBinding } from './compiled/types.ts'
 import { INTERNAL_COMPONENT_SPREAD_PROP } from './dom/intrinsic.ts'
 
 type Props = Record<string, unknown>

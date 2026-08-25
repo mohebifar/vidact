@@ -1,0 +1,128 @@
+:root {
+  color: #1d211c;
+  background: #f2f0e8;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+}
+
+.shell {
+  min-height: 100vh;
+}
+
+.masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem clamp(1.25rem, 4vw, 4rem);
+  border-bottom: 1px solid #1d211c33;
+}
+
+.wordmark {
+  font-family: Georgia, serif;
+  font-size: 1.4rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+nav {
+  display: flex;
+  gap: 1.25rem;
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.hero,
+.product-layout {
+  width: min(68rem, calc(100% - 2.5rem));
+  margin: 0 auto;
+  padding: clamp(5rem, 12vw, 10rem) 0;
+}
+
+.eyebrow {
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+h1 {
+  max-width: 12ch;
+  margin: 1rem 0;
+  font-family: Georgia, serif;
+  font-size: clamp(3.6rem, 9vw, 7.6rem);
+  font-weight: 500;
+  line-height: 0.9;
+  letter-spacing: -0.055em;
+}
+
+.lede {
+  max-width: 42rem;
+  font-size: 1.25rem;
+  line-height: 1.7;
+}
+
+.proof {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1px;
+  margin-top: 4rem;
+  background: #1d211c33;
+  border: 1px solid #1d211c33;
+}
+
+.proof div,
+.product-card {
+  padding: 1.5rem;
+  background: #faf8ef;
+}
+
+dt {
+  margin-bottom: 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+dd {
+  margin: 0;
+  font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+
+.product-card {
+  border: 1px solid #1d211c33;
+}
+
+.product-card p:not(.eyebrow) {
+  max-width: 44rem;
+  font-size: 1.1rem;
+  line-height: 1.7;
+}
+
+code {
+  padding: 0.14rem 0.35rem;
+  background: #dedbd0;
+}
+
+@media (max-width: 42rem) {
+  .masthead {
+    align-items: flex-start;
+  }
+
+  nav {
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+}

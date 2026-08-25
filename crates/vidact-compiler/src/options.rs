@@ -31,6 +31,7 @@ pub enum CompilerFeature {
     RetainedUi,
     Profiling,
     Framework,
+    DependencySource,
 }
 
 impl FromStr for CompilerFeature {
@@ -46,6 +47,7 @@ impl FromStr for CompilerFeature {
             "retained-ui" => Ok(Self::RetainedUi),
             "profiling" => Ok(Self::Profiling),
             "framework" => Ok(Self::Framework),
+            "dependency-source" => Ok(Self::DependencySource),
             _ => Err(format!("unsupported Vidact feature {value}")),
         }
     }

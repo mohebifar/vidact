@@ -1,4 +1,5 @@
-import { createCompiledState, runCompiledTransaction, type CompiledScope } from './compiled.ts'
+import { createCompiledState, runCompiledTransaction } from './compiled/core.ts'
+import type { CompiledScope } from './compiled/types.ts'
 import { flushScheduledTasks, scheduleDeferredTask, type CancelScheduledTask } from './scheduler.ts'
 import type { SourceMask } from './source-mask.ts'
 import {
@@ -47,8 +48,6 @@ export interface CompiledTransitionSlot {
 let activeTransition: TransitionWork | undefined
 let schedulerInstalled = false
 const globalLane = createLane(() => {})
-
-export * from './index.ts'
 
 export function startTransition(action: TransitionAction): void {
   ensureConcurrentScheduler()

@@ -280,7 +280,9 @@ export function claimHydrationSlotRange(parent: Node): HydrationRange | undefine
   if (state === undefined) return undefined
   const start = cursor(state, parent)
   if (!isMarker(start, `${HYDRATION_PREFIX}:b`)) {
-    throw mismatch('expected a vidact:v1 child-slot marker')
+    throw mismatch(
+      `expected a vidact:v1 child-slot marker in ${parent.nodeName}; found ${JSON.stringify(markerValue(start as Node) ?? start?.nodeName ?? null)} after ${JSON.stringify(markerValue(start?.previousSibling as Node) ?? start?.previousSibling?.nodeName ?? null)}; insertion=${JSON.stringify(markerValue(activeInsertionPoint?.[1] as Node) ?? activeInsertionPoint?.[1]?.nodeName ?? null)}`,
+    )
   }
   const end = findClosingSibling(start, `${HYDRATION_PREFIX}:b`)
   const slots = state.slots.get(parent) ?? []
@@ -288,6 +290,26 @@ export function claimHydrationSlotRange(parent: Node): HydrationRange | undefine
   state.slots.set(parent, slots)
   state.cursors.set(parent, start.nextSibling)
   return [start, end]
+}
+
+export function borrowHydrationSlotRange(
+  parent: Node,
+  current: boolean,
+): HydrationRange | undefined {
+  const state = activeHydration
+  if (state === undefined) return undefined
+  const start = (
+    current ? cursor(state, parent) : cursor(state, parent)?.previousSibling
+  ) as Node | null
+  if (!isMarker(start, `${HYDRATION_PREFIX}:b`)) return undefined
+  if (
+    !current &&
+    activeInsertionPoint?.[0] === parent &&
+    isMarker(activeInsertionPoint[1], `/${HYDRATION_PREFIX}:b`)
+  ) {
+    return [start, activeInsertionPoint[1]]
+  }
+  return [start, findClosingSibling(start, `${HYDRATION_PREFIX}:b`)]
 }
 
 export function claimHydrationSuspenseFallback(parent: Node): Comment | undefined {
@@ -523,6 +545,7 @@ export function installHydration(): void {
     claimArrayRange: claimHydrationArrayRange,
     finishArrayRange: finishHydrationArrayRange,
     claimSlotRange: claimHydrationSlotRange,
+    borrowSlotRange: borrowHydrationSlotRange,
     claimSuspenseFallback: claimHydrationSuspenseFallback,
     withoutHydration,
     withInsertion: withHydrationInsertion,

@@ -3,13 +3,13 @@ import {
   enableProfiling,
   profiled,
   recordCompiledDebugValue,
-  type CompiledBinding,
-  type CompiledRenderValue,
-  type ProfilerOnRender,
-  type StructuralBinding,
-} from './compiled.ts'
-
-export * from './index.ts'
+} from './compiled/core.ts'
+import type {
+  CompiledBinding,
+  CompiledRenderValue,
+  ProfilerOnRender,
+  StructuralBinding,
+} from './compiled/types.ts'
 
 export interface ProfilerProps {
   readonly children?: (() => CompiledRenderValue) | readonly [() => CompiledRenderValue]

@@ -1,4 +1,4 @@
-import { mountCompiled } from '@vidact/runtime/actions'
+import { mountCompiled } from '@vidact/runtime'
 import {
   act,
   assertMutationEnvelope,

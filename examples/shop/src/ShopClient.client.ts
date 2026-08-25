@@ -1,0 +1,28 @@
+'use client'
+
+import { createResource } from '@vidact/runtime/async'
+import { defineClientBoundary } from '@vidact/runtime/framework'
+
+import type { Product } from './model.ts'
+import { ShopApp } from './ShopApp.tsx'
+
+interface ShopClientProps {
+  readonly products: readonly Product[]
+}
+
+interface PreparedShopClient {
+  readonly productsPromise: PromiseLike<readonly Product[]>
+}
+
+export const shop = defineClientBoundary(
+  (_props: ShopClientProps, prepared: PreparedShopClient) =>
+    ShopApp({ productsPromise: prepared.productsPromise }),
+  async (props) => {
+    if (!Array.isArray(props.products))
+      throw new TypeError('Shop client products must be an array.')
+    const productsPromise = Promise.resolve(props.products)
+    createResource(productsPromise)
+    await productsPromise
+    return { productsPromise }
+  },
+)

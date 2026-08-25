@@ -1,8 +1,5 @@
-import {
-  mountCompiledPropTransition,
-  registerCompiledCleanup,
-  type CompiledBinding,
-} from './compiled.ts'
+import { mountCompiledPropTransition, registerCompiledCleanup } from './compiled/core.ts'
+import type { CompiledBinding } from './compiled/types.ts'
 import { attachEventProp, isEventProp } from './dom/events.ts'
 import { INTERNAL_NAMESPACE_PROP } from './dom/intrinsic.ts'
 import {

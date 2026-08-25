@@ -1,13 +1,6 @@
-import {
-  enableRetainedUi,
-  retainedActivity,
-  type CompiledBinding,
-  type CompiledRenderValue,
-  type StructuralBinding,
-} from './compiled.ts'
+import { enableRetainedUi, retainedActivity } from './compiled/core.ts'
+import type { CompiledBinding, CompiledRenderValue, StructuralBinding } from './compiled/types.ts'
 import { enableRetainedUiStyles } from './dom/styles.ts'
-
-export * from './index.ts'
 
 export interface ActivityProps {
   readonly children?: (() => CompiledRenderValue) | readonly [() => CompiledRenderValue]

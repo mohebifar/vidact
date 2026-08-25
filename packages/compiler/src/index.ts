@@ -20,6 +20,7 @@ export type VidactFeature =
   | 'retained-ui'
   | 'profiling'
   | 'framework'
+  | 'dependency-source'
 
 export interface VidactCompilerOptions {
   readonly filename: string

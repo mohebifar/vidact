@@ -36,41 +36,13 @@
       "types": "./dist/async.d.ts",
       "import": "./dist/async.js"
     },
-    "./async/hydrate": {
-      "types": "./dist/async-hydrate.d.ts",
-      "import": "./dist/async-hydrate.js"
-    },
-    "./async/concurrent": {
-      "types": "./dist/async-concurrent.d.ts",
-      "import": "./dist/async-concurrent.js"
-    },
-    "./async/concurrent/hydrate": {
-      "types": "./dist/async-concurrent-hydrate.d.ts",
-      "import": "./dist/async-concurrent-hydrate.js"
-    },
     "./actions": {
       "types": "./dist/actions.d.ts",
       "import": "./dist/actions.js"
     },
-    "./actions/hydrate": {
-      "types": "./dist/actions-hydrate.d.ts",
-      "import": "./dist/actions-hydrate.js"
-    },
-    "./async/actions": {
-      "types": "./dist/async-actions.d.ts",
-      "import": "./dist/async-actions.js"
-    },
-    "./async/actions/hydrate": {
-      "types": "./dist/async-actions-hydrate.d.ts",
-      "import": "./dist/async-actions-hydrate.js"
-    },
     "./concurrent": {
       "types": "./dist/concurrent.d.ts",
       "import": "./dist/concurrent.js"
-    },
-    "./concurrent/hydrate": {
-      "types": "./dist/concurrent-hydrate.d.ts",
-      "import": "./dist/concurrent-hydrate.js"
     },
     "./hydrate": {
       "types": "./dist/hydrate.d.ts",
@@ -92,25 +64,9 @@
       "types": "./dist/retained-ui.d.ts",
       "import": "./dist/retained-ui.js"
     },
-    "./retained-ui/hydrate": {
-      "types": "./dist/retained-ui-hydrate.d.ts",
-      "import": "./dist/retained-ui-hydrate.js"
-    },
-    "./retained-ui/server": {
-      "types": "./dist/retained-ui-server.d.ts",
-      "import": "./dist/retained-ui-server.js"
-    },
     "./profiling": {
       "types": "./dist/profiling.d.ts",
       "import": "./dist/profiling.js"
-    },
-    "./profiling/hydrate": {
-      "types": "./dist/profiling-hydrate.d.ts",
-      "import": "./dist/profiling-hydrate.js"
-    },
-    "./profiling/server": {
-      "types": "./dist/server-profiling.d.ts",
-      "import": "./dist/server-profiling.js"
     },
     "./framework": {
       "types": "./dist/framework.d.ts",
@@ -129,20 +85,20 @@
       "import": "./dist/server-framework.js"
     },
     "./framework/server/jsx-dev-runtime": {
-      "types": "./dist/server-framework-jsx-dev-runtime.d.ts",
-      "import": "./dist/server-framework-jsx-dev-runtime.js"
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
     },
     "./framework/server/jsx-runtime": {
-      "types": "./dist/server-framework-jsx-runtime.d.ts",
-      "import": "./dist/server-framework-jsx-runtime.js"
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
     },
     "./hydrate/jsx-dev-runtime": {
-      "types": "./dist/hydrate-jsx-dev-runtime.d.ts",
-      "import": "./dist/hydrate-jsx-dev-runtime.js"
+      "types": "./dist/jsx-runtime.d.ts",
+      "import": "./dist/jsx-runtime.js"
     },
     "./hydrate/jsx-runtime": {
-      "types": "./dist/hydrate-jsx-runtime.d.ts",
-      "import": "./dist/hydrate-jsx-runtime.js"
+      "types": "./dist/jsx-runtime.d.ts",
+      "import": "./dist/jsx-runtime.js"
     },
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.ts",
@@ -156,33 +112,13 @@
       "types": "./dist/server.d.ts",
       "import": "./dist/server.js"
     },
-    "./async/server": {
-      "types": "./dist/server-async.d.ts",
-      "import": "./dist/server-async.js"
-    },
-    "./concurrent/server": {
-      "types": "./dist/server-concurrent.d.ts",
-      "import": "./dist/server-concurrent.js"
-    },
-    "./async/concurrent/server": {
-      "types": "./dist/server-async-concurrent.d.ts",
-      "import": "./dist/server-async-concurrent.js"
-    },
-    "./actions/server": {
-      "types": "./dist/server-actions.d.ts",
-      "import": "./dist/server-actions.js"
-    },
-    "./async/actions/server": {
-      "types": "./dist/server-async-actions.d.ts",
-      "import": "./dist/server-async-actions.js"
-    },
     "./server/jsx-dev-runtime": {
-      "types": "./dist/server-jsx-dev-runtime.d.ts",
-      "import": "./dist/server-jsx-dev-runtime.js"
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
     },
     "./server/jsx-runtime": {
-      "types": "./dist/server-jsx-runtime.d.ts",
-      "import": "./dist/server-jsx-runtime.js"
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
     },
     "./testing": {
       "types": "./dist/testing.d.ts",
@@ -194,15 +130,20 @@
     "provenance": true
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node ../../scripts/finalize-typescript-package.mjs dist src/env.d.ts",
+    "build": "node ../../scripts/clean-typescript-package.mjs dist && tsc -p tsconfig.build.json && node ../../scripts/finalize-typescript-package.mjs dist src/env.d.ts",
     "test": "vitest run && vitest run --config vitest.retained-ui.config.ts && vitest run --config vitest.server.config.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@vidact/react-types": "workspace:*",
     "@vidact/test-support": "workspace:*",
     "@vitest/browser-playwright": "4.1.11",
     "typescript": "7.0.2",
     "vitest": "4.1.11"
+  },
+  "peerDependencies": {
+    "@types/react": "^19.2.18"
   },
   "engines": {
     "node": ">=24"

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { handleApiRequest } from './backend.ts'
 import { CATALOG } from './catalog.ts'
-import { renderShopPage } from './server.ts'
+import { handleShopRequest, renderShopPage } from './server.ts'
 
 describe('shop server', () => {
   it('renders a fulfilled server component with a manifest client boundary', async () => {
@@ -22,6 +22,10 @@ describe('shop server', () => {
   })
 
   it('filters products and validates mock checkout requests', async () => {
+    const health = await handleShopRequest(new Request('http://shop.test/health'))
+    expect(health.status).toBe(200)
+    await expect(health.json()).resolves.toEqual({ status: 'ok' })
+
     const productsResponse = await handleApiRequest(
       new Request('http://shop.test/api/products?category=travel'),
     )

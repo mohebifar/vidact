@@ -1,4 +1,4 @@
-import { hydrateRoot } from '@vidact/runtime/actions/hydrate'
+import { hydrateRoot } from '@vidact/runtime/hydrate'
 import {
   jsx as serverJsx,
   jsxs as serverJsxs,
@@ -6,7 +6,7 @@ import {
   useActionState as useServerActionState,
   useFormStatus as useServerFormStatus,
   type ServerChild,
-} from '@vidact/runtime/actions/server'
+} from '@vidact/runtime/server'
 import { act, assertMutationEnvelope, captureMutations } from '@vidact/test-support'
 import { afterEach, expect, it } from 'vitest'
 

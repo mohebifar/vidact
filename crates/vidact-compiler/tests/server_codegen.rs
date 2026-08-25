@@ -29,6 +29,72 @@ fn emits_react_compiler_ssr_output_without_client_hook_replay() {
 }
 
 #[test]
+fn lowers_element_valued_render_props_to_server_capabilities() {
+    let compilation = compile_server_module(ModuleInput {
+        filename: "ServerRenderable.tsx",
+        source: r#"
+            import { cloneElement, isValidElement } from 'react';
+            function Slot({ render }) {
+                if (!isValidElement(render)) throw new Error('render must be an element');
+                return cloneElement(render, { className: 'merged' });
+            }
+            export function ServerRenderable() {
+                return <Slot render={<a href="/original">Element</a>} />;
+            }
+        "#,
+    })
+    .expect("server element-valued render props should use compiled capabilities");
+
+    assert!(
+        compilation
+            .code
+            .contains("createRenderable as __vidactCreateRenderable")
+    );
+    assert!(
+        compilation
+            .code
+            .contains("isRenderable as __vidactIsRenderable")
+    );
+    assert!(
+        compilation
+            .code
+            .contains("cloneRenderableComponent as __vidactCloneRenderableComponent")
+    );
+    assert!(!compilation.code.contains("isValidElement("));
+    assert!(!compilation.code.contains("cloneElement("));
+}
+
+#[test]
+fn removes_browser_only_hook_branches_from_dependency_server_source() {
+    let compilation = compile_server_module_with_options(
+        ModuleInput {
+            filename: "PublishedDependency.tsx",
+            source: r#"
+                import { useRef } from 'react';
+                function useMergedRefs(refs) {
+                    const storage = useRef(refs);
+                    return [...storage.current];
+                }
+                export function PublishedDependency({ refs }) {
+                    const props = {};
+                    if (typeof document !== 'undefined') {
+                        props.ref = useMergedRefs(refs);
+                    }
+                    return <div {...props} />;
+                }
+            "#,
+        },
+        &CompilationOptions::new(CompilerTarget::Server)
+            .with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("browser-only dependency hooks should be removed before server hook expansion");
+
+    assert!(!compilation.code.contains("useMergedRefs"));
+    assert!(!compilation.code.contains("storage.current"));
+    assert!(!compilation.code.contains("typeof document"));
+}
+
+#[test]
 fn unsafe_html_requires_the_server_feature_at_the_attribute() {
     let input = ModuleInput {
         filename: "Raw.tsx",

@@ -1,0 +1,76 @@
+{
+  "name": "@vidact/start",
+  "version": "0.1.0",
+  "description": "Full-stack application framework primitives for Vidact",
+  "keywords": [
+    "full-stack",
+    "router",
+    "ssr",
+    "vidact",
+    "vite"
+  ],
+  "homepage": "https://github.com/mohebifar/vidact#readme",
+  "bugs": "https://github.com/mohebifar/vidact/issues",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mohebifar/vidact.git",
+    "directory": "packages/start"
+  },
+  "files": [
+    "CHANGELOG.md",
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "browser": "./dist/index-client.js",
+      "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "import": "./dist/vite.js"
+    },
+    "./virtual": {
+      "types": "./dist/virtual.d.ts",
+      "import": "./dist/virtual.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "node ../../scripts/clean-typescript-package.mjs dist && tsc -p tsconfig.build.json && node ../../scripts/finalize-typescript-package.mjs dist",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@vidact/runtime": "workspace:*",
+    "@vidact/vite": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  },
+  "peerDependencies": {
+    "vite": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

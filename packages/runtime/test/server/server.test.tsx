@@ -21,17 +21,26 @@ import {
   useActionState,
   useFormStatus,
   useOptimistic,
-} from '../../src/server-actions.ts'
+} from '../../src/server.ts'
 import {
   Profiler as ServerProfiler,
   captureOwnerStack as captureServerOwnerStack,
   jsx as profilingJsx,
   renderToStaticMarkup as renderProfilingToStaticMarkup,
   useDebugValue as useServerDebugValue,
-} from '../../src/server-profiling.ts'
+} from '../../src/server.ts'
 import {
   Activity as ServerActivity,
+  cloneRenderable,
+  dynamicIntrinsicComponent,
+  createRenderable,
+  isRenderable,
   jsx as retainedJsx,
+  renderableChildren,
+  renderableMarker,
+  renderableProps,
+  renderableRef,
+  renderableToArray,
   renderToStaticMarkup as renderRetainedToStaticMarkup,
   renderToString as renderRetainedToString,
 } from '../../src/server.ts'
@@ -52,6 +61,56 @@ describe('server rendering', () => {
     ).toBe(
       '<main class="shell" data-label="a&quot;&lt;&amp;" hidden="" style="line-height:1.2;width:4px">Hello &lt;script&gt;&amp; goodbye<input disabled=""></main>',
     )
+    expect(
+      renderToStaticMarkup(() => <input defaultChecked defaultValue="initial" itemID="field" />),
+    ).toBe('<input checked="" value="initial" itemid="field">')
+  })
+
+  it('constructs and clones opaque server renderable capabilities', () => {
+    const renderable = createRenderable(
+      { href: '/original', className: 'authored', children: 'Original', ref: {} },
+      (input) => (
+        <a {...renderableProps(input)} ref={renderableRef(input)}>
+          {renderableChildren(input)}
+        </a>
+      ),
+    )
+
+    expect(isRenderable(renderable)).toBe(true)
+    expect(renderable.props.href).toBe('/original')
+    expect(renderableToArray(renderable)).toEqual([renderable])
+    expect(renderableMarker(renderable)).toBeUndefined()
+    expect(renderToStaticMarkup(renderable)).toBe(
+      '<a class="authored" href="/original">Original</a>',
+    )
+    expect(
+      renderToStaticMarkup(
+        cloneRenderable(renderable, { className: 'merged', children: 'Element' }),
+      ),
+    ).toBe('<a class="merged" href="/original">Element</a>')
+  })
+
+  it('constructs server renderable capabilities used as residual JSX element types', () => {
+    const component = createRenderable({ className: 'base', children: 'Base' }, (input) => (
+      <button {...renderableProps(input)}>{renderableChildren(input)}</button>
+    ))
+
+    expect(
+      renderToStaticMarkup(retainedJsx(component, { className: 'override', children: 'Save' })),
+    ).toBe('<button class="override">Save</button>')
+  })
+
+  it('keeps direct runtime helpers transparent to hydration ownership', () => {
+    const html = renderRetainedToString(() =>
+      retainedJsx(dynamicIntrinsicComponent, {
+        tag: 'button',
+        props: { children: 'Save' },
+      }),
+    )
+
+    expect(html).toContain('<button>')
+    expect(html).toContain('Save')
+    expect(html).not.toContain('vidact:v1:c')
   })
 
   it('evaluates initial state and produces request-deterministic ids', () => {

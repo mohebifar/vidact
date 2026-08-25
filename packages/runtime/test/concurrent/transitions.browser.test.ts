@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  combineSources,
   createCompiledDeferred,
-  createCompiledScope,
-  createCompiledState,
   createCompiledTransition,
   flushSync,
-  source,
   startTransition,
 } from '../../src/concurrent.ts'
+import {
+  createCompiledScope,
+  createCompiledState,
+  combineSources,
+  source,
+} from '../../src/index.ts'
 import { flushScheduledTasks } from '../../src/testing.ts'
 
 describe('concurrent scheduling', () => {

@@ -6,22 +6,24 @@ import {
 import { describe, expect, it } from 'vitest'
 
 import {
+  ActionForm,
+  createCompiledActionState,
+  createCompiledFormStatus,
+  createCompiledOptimistic,
+} from '../../src/actions.ts'
+import { startTransition } from '../../src/concurrent.ts'
+import {
   binding,
   combineSources,
   compiledRoot,
-  createCompiledFormStatus,
-  createCompiledActionState,
-  createCompiledOptimistic,
   createCompiledScope,
   createCompiledState,
   deferred,
   h,
   mountCompiled,
   source,
-  startTransition,
   when,
-  ActionForm,
-} from '../../src/actions.ts'
+} from '../../src/index.ts'
 import { flushScheduledTasks } from '../../src/testing.ts'
 
 async function publishTransitions(): Promise<void> {

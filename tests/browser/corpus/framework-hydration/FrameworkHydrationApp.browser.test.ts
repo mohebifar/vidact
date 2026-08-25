@@ -1,18 +1,15 @@
+import { defineClientBoundary } from '@vidact/runtime/framework'
 import {
   createEventReplayQueue,
-  defineClientBoundary,
   hydrateClientBoundaries,
   hydrateFrameworkBoundary,
 } from '@vidact/runtime/framework/hydrate'
 import {
-  createClientBoundary,
   createClientModuleManifest,
   createClientReference,
-  jsx as serverJsx,
-  jsxs as serverJsxs,
-  renderToReadableStream,
-  type ServerChild,
-} from '@vidact/runtime/framework/server'
+} from '@vidact/runtime/framework/protocol'
+import { createClientBoundary, renderToReadableStream } from '@vidact/runtime/framework/server'
+import { jsx as serverJsx, jsxs as serverJsxs, type ServerChild } from '@vidact/runtime/server'
 import {
   assertMutationEnvelope,
   captureMutations,

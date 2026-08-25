@@ -2,6 +2,7 @@
 
 - Decision state: Accepted
 - Decided: 2026-08-23
+- Superseded in part by: [Capability-owned runtime entrypoints](capability-owned-runtime-entrypoints.md)
 
 ## Context
 

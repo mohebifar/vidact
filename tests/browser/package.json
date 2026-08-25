@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run && vitest run --config vitest.hydrate.config.ts && vitest run --config vitest.async-hydrate.config.ts && vitest run --config vitest.concurrent.config.ts && vitest run --config vitest.actions.config.ts && vitest run --config vitest.actions-hydrate.config.ts && vitest run --config vitest.retained-ui.config.ts && vitest run --config vitest.retained-ui-hydrate.config.ts && vitest run --config vitest.profiling.config.ts && vitest run --config vitest.profiling-hydrate.config.ts && vitest run --config vitest.framework.config.ts && vitest run --config vitest.framework-hydrate.config.ts",
+    "test": "vitest run && vitest run --config vitest.base-ui.config.ts && vitest run --config vitest.hydrate.config.ts && vitest run --config vitest.async-hydrate.config.ts && vitest run --config vitest.concurrent.config.ts && vitest run --config vitest.actions.config.ts && vitest run --config vitest.actions-hydrate.config.ts && vitest run --config vitest.retained-ui.config.ts && vitest run --config vitest.retained-ui-hydrate.config.ts && vitest run --config vitest.profiling.config.ts && vitest run --config vitest.profiling-hydrate.config.ts && vitest run --config vitest.framework.config.ts && vitest run --config vitest.framework-hydrate.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@base-ui/react": "1.7.0",
     "@vidact/runtime": "workspace:*"
   },
   "devDependencies": {

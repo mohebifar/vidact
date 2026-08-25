@@ -1,3 +1,5 @@
+import { abortReason, withAbort } from './shared/promise.ts'
+
 const CLIENT_REFERENCE = Symbol('Vidact.ClientReference')
 const SERVER_REFERENCE = Symbol('Vidact.ServerReference')
 
@@ -330,26 +332,4 @@ function checksum(value: string): string {
     hash = Math.imul(hash ^ byte, 0x01_00_01_93)
   }
   return (hash >>> 0).toString(16).padStart(8, '0')
-}
-
-function abortReason(signal: AbortSignal): unknown {
-  return signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
-}
-
-function withAbort<Value>(operation: Promise<Value>, signal: AbortSignal): Promise<Value> {
-  if (signal.aborted) return Promise.reject(abortReason(signal))
-  return new Promise((resolve, reject) => {
-    const onAbort = (): void => reject(abortReason(signal))
-    signal.addEventListener('abort', onAbort, { once: true })
-    void operation.then(
-      (value) => {
-        signal.removeEventListener('abort', onAbort)
-        resolve(value)
-      },
-      (error: unknown) => {
-        signal.removeEventListener('abort', onAbort)
-        reject(error)
-      },
-    )
-  })
 }

@@ -1,4 +1,4 @@
-import { mountCompiled } from '@vidact/runtime/retained-ui'
+import { mountCompiled } from '@vidact/runtime'
 import {
   act,
   assertMutationEnvelope,

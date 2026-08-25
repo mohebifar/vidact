@@ -2,6 +2,7 @@
 
 - Decision state: Accepted
 - Decided: 2026-08-23
+- Superseded in part by: [Capability-owned runtime entrypoints](capability-owned-runtime-entrypoints.md)
 - Amends: [Compiled lifecycle effects and commit phases](compiled-lifecycle-effects-and-commit-phases.md)
 - Amends: [Owned external-store snapshots](owned-external-store-snapshots.md)
 

@@ -5,6 +5,7 @@ import { hydrateHotRoot, hydrateRoot } from '../../src/hydrate.ts'
 import {
   binding,
   choose,
+  compiledInsertionEffect,
   compiledRoot,
   createCompiledScope,
   createCompiledId,
@@ -208,6 +209,94 @@ describe('compiled client roots', () => {
 
     root.unmount()
     expect(host.childNodes).toHaveLength(0)
+  })
+
+  it('runs hydrated insertion effects before attaching claimed callback refs', async () => {
+    const host = document.createElement('div')
+    function ServerButton(): ServerChild {
+      return serverJsx('button', { children: 'Ready' })
+    }
+    host.innerHTML = renderToString(() => serverJsx(ServerButton, null))
+    document.body.append(host)
+    const serverButton = host.querySelector('button')!
+    let insertionCommitted = false
+    let refSawInsertion = false
+
+    const hydration = await captureMutations(host, () =>
+      hydrateRoot(host, () => {
+        const scope = createCompiledScope()
+        compiledInsertionEffect(scope, source(0), () => () => {
+          insertionCommitted = true
+        })
+        return compiledRoot(scope, () =>
+          h(
+            'button',
+            {
+              ref: () => {
+                refSawInsertion = insertionCommitted
+                if (!insertionCommitted) {
+                  throw new Error('hydrated callback ref ran before its insertion effect')
+                }
+              },
+            },
+            'Ready',
+          ),
+        )
+      }),
+    )
+
+    expect(hydration.records).toHaveLength(0)
+    expect(host.querySelector('button')).toBe(serverButton)
+    expect(refSawInsertion).toBe(true)
+
+    hydration.result.unmount()
+    expect(host.childNodes).toHaveLength(0)
+  })
+
+  it('hydrates a live binding that forwards a structural child slot', async () => {
+    const host = document.createElement('div')
+    function ServerNestedChildren(): ServerChild {
+      return serverJsx('div', {
+        children: [serverJsx('span', { children: 'one' })],
+      })
+    }
+    host.innerHTML = renderToString(() => serverJsx(ServerNestedChildren, null))
+    document.body.append(host)
+    const existingDiv = host.querySelector('div')!
+    const existingSpan = host.querySelector('span')!
+    const recoveries: unknown[] = []
+
+    const hydration = await captureMutations(host, () =>
+      hydrateRoot(
+        host,
+        () => {
+          const scope = createCompiledScope()
+          const forwarded = deferred(() =>
+            keyed(
+              scope,
+              source(0),
+              () => ['one'],
+              (value) => value,
+              (value) => h('span', null, value.get()),
+            ),
+          )
+          return compiledRoot(scope, () =>
+            h(
+              'div',
+              null,
+              binding(scope, source(0), () => forwarded),
+            ),
+          )
+        },
+        { onRecoverableError: (error) => recoveries.push(error) },
+      ),
+    )
+
+    expect(recoveries).toEqual([])
+    expect(hydration.records).toHaveLength(0)
+    expect(host.querySelector('div')).toBe(existingDiv)
+    expect(host.querySelector('span')).toBe(existingSpan)
+    hydration.result.unmount()
   })
 
   it('reports a marker mismatch and recovers at the whole-root boundary', () => {

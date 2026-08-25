@@ -1,4 +1,4 @@
-import { createRoot } from '@vidact/runtime/actions'
+import { createRoot } from '@vidact/runtime'
 import { useActionState, useOptimistic, useState } from 'react'
 
 function ActionsCounter(): JSX.Element {

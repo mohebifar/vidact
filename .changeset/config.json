@@ -8,6 +8,7 @@
       "@vidact/runtime",
       "@vidact/test-support",
       "@vidact/vite",
+      "@vidact/start",
       "@vidact/react-types"
     ]
   ],

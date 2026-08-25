@@ -62,6 +62,17 @@ pub(super) fn computation<'a>(
         return Ok(None);
     }
 
+    let initial = initial_value(ast, body, symbol);
+    if let Some(region) = body.statements.iter().find(|statement| {
+        matches!(statement, Statement::IfStatement(_))
+            && statement_references_symbol(statement, scoping, symbol)
+    }) {
+        return Ok(Some(DerivedComputation::Statements(vec![
+            assignment_statement(ast, name, initial),
+            region.clone_in_with_semantic_ids(ast.allocator()),
+        ])));
+    }
+
     let region = body.statements.iter().find(|statement| {
         structured_region_kind(statement).is_some_and(|kind| {
             ir.reactive_flow.structured_regions.contains(&kind)
@@ -73,8 +84,18 @@ pub(super) fn computation<'a>(
             "SSA derived values currently require an if/else or one structured switch/loop region",
         ));
     };
-    let initial = body
-        .statements
+    Ok(Some(DerivedComputation::Statements(vec![
+        assignment_statement(ast, name, initial),
+        region.clone_in_with_semantic_ids(ast.allocator()),
+    ])))
+}
+
+fn initial_value<'a>(
+    ast: &AstBuilder<'a>,
+    body: &FunctionBody<'a>,
+    symbol: SymbolId,
+) -> Expression<'a> {
+    body.statements
         .iter()
         .filter_map(|statement| match statement {
             Statement::VariableDeclaration(declaration) => Some(declaration),
@@ -92,11 +113,7 @@ pub(super) fn computation<'a>(
         .map_or_else(
             || ident(ast, "undefined"),
             |expression| expression.clone_in_with_semantic_ids(ast.allocator()),
-        );
-    Ok(Some(DerivedComputation::Statements(vec![
-        assignment_statement(ast, name, initial),
-        region.clone_in_with_semantic_ids(ast.allocator()),
-    ])))
+        )
 }
 
 fn structured_region_kind(statement: &Statement<'_>) -> Option<StructuredRegionKind> {

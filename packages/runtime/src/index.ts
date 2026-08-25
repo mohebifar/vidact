@@ -1,20 +1,6 @@
 // oxlint-disable-next-line typescript/triple-slash-reference -- Include the build define in consuming TypeScript programs.
 /// <reference path="./env.d.ts" />
-export { combineSources, intersectsSources, source, type SourceMask } from './source-mask.ts'
-export type { StateUpdate } from './state-slot.ts'
-export {
-  Fragment,
-  h,
-  type DirectChild,
-  type DirectComponent,
-  type DirectProps,
-} from './direct-dom.ts'
-export { useRef, type MutableRef } from './ref.ts'
-export { createRoot, mountHotRoot, type CompiledRoot, type HotContext } from './root.ts'
-export { assertRuntimeProtocol, VIDACT_RUNTIME_PROTOCOL } from './protocol.ts'
-export { compiledSpread } from './spread.ts'
-export { compiledComponentSpread } from './component-spread.ts'
-export { nestedProp } from './nested-prop.ts'
+
 export {
   binding,
   choose,
@@ -24,7 +10,6 @@ export {
   compiledInsertionEffect,
   compiledLayoutEffect,
   compiledRoot,
-  createPortal,
   createCompiledContext,
   createCompiledEffectEvent,
   createCompiledExternalStore,
@@ -34,36 +19,71 @@ export {
   createCompiledReducer,
   createCompiledRestProp,
   createCompiledScope,
-  createNarrowCompiledScope,
   createCompiledState,
   createContext,
-  dispatch,
+  createNarrowCompiledScope,
+  createPortal,
   deferred,
+  dispatch,
+  errorBoundary,
   indexed,
   keyed,
-  errorBoundary,
   mountCompiled,
   mountCompiledRef,
-  useCallback,
   use,
+  useCallback,
   useContext,
   useEffect,
   useEffectEvent,
+  useId,
   useImperativeHandle,
   useInsertionEffect,
-  useId,
   useLayoutEffect,
   useMemo,
   useSyncExternalStore,
   when,
-  type CompiledBinding,
-  type CompiledComponentResult,
-  type CompiledContext,
-  type CompiledErrorHandler,
-  type CompiledRenderValue,
-  type CompiledScope,
-  type MountCompiledOptions,
   type ChoiceMode,
-  type OwnedBlock,
-  type StructuralBinding,
-} from './compiled.ts'
+  type MountCompiledOptions,
+} from './compiled/core.ts'
+export type {
+  CompiledBinding,
+  CompiledComponentResult,
+  CompiledContext,
+  CompiledErrorHandler,
+  CompiledRenderValue,
+  CompiledScope,
+  OwnedBlock,
+  StructuralBinding,
+} from './compiled/types.ts'
+export { compiledComponentSpread } from './component-spread.ts'
+export {
+  createElement,
+  Fragment,
+  h,
+  type DirectChild,
+  type DirectComponent,
+  type DirectProps,
+} from './direct-dom.ts'
+export { nestedProp } from './nested-prop.ts'
+export { assertRuntimeProtocol, VIDACT_RUNTIME_PROTOCOL } from './protocol.ts'
+export { useRef, type MutableRef } from './ref.ts'
+export {
+  cloneRenderable,
+  cloneRenderableComponent,
+  createReactElement,
+  createRenderable,
+  dynamicIntrinsicComponent,
+  forwardedRef,
+  isRenderable,
+  renderableChildren,
+  renderableMarker,
+  renderableProps,
+  renderableRef,
+  renderableToArray,
+  type CompiledRenderable,
+  type RenderablePropsInput,
+} from './renderable.ts'
+export { createRoot, mountHotRoot, type CompiledRoot, type HotContext } from './root.ts'
+export { combineSources, intersectsSources, source, type SourceMask } from './source-mask.ts'
+export { compiledSpread } from './spread.ts'
+export type { StateUpdate } from './state-slot.ts'

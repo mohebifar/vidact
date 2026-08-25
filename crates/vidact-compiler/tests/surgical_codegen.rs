@@ -409,10 +409,8 @@ fn compiles_actions_inside_module_local_custom_hooks() {
     assert!(!output.contains("function useQueue"), "{output}");
     assert!(!output.contains("useQueue("), "{output}");
     assert!(output.contains("__vidactCreateActionState("), "{output}");
-    assert!(
-        output.contains("dispatch: __vidactHook0_0_value.set"),
-        "{output}"
-    );
+    assert!(output.contains("dispatch: __vidactHook"), "{output}");
+    assert!(output.contains("_value.set"), "{output}");
 }
 
 #[test]
@@ -1521,6 +1519,246 @@ fn compiles_nested_and_repeated_custom_hook_invocations_hygienically() {
 }
 
 #[test]
+fn compiles_custom_hook_default_and_optional_parameters() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "OptionalHook.tsx",
+        source: r#"
+            import { useState } from 'react';
+            function useLabel(enabled = false, prefix?: string) {
+                const [label, setLabel] = useState('Save');
+                void enabled;
+                void prefix;
+                return [label, setLabel];
+            }
+            export function OptionalHook() {
+                const [label, setLabel] = useLabel();
+                return <button onClick={() => setLabel('Saved')}>{label}</button>;
+            }
+        "#,
+    })
+    .expect("custom hook defaults and omitted optional values should expand at the call site");
+
+    assert!(output.contains("__vidactCreateState"), "{output}");
+    assert!(!output.contains("useLabel("), "{output}");
+    assert!(!output.contains("useState("), "{output}");
+}
+
+#[test]
+fn compiles_destructured_custom_hook_parameters() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "ControlledHook.tsx",
+        source: r#"
+            import { useState } from 'react';
+            function useControlled({ controlled, default: defaultValue, state = 'value' }) {
+                const [value, setValue] = useState(defaultValue);
+                void state;
+                return [controlled ?? value, setValue];
+            }
+            export function ControlledHook({ value }) {
+                const [current, setCurrent] = useControlled({ controlled: value, default: '' });
+                return <button onClick={() => setCurrent('next')}>{current}</button>;
+            }
+        "#,
+    })
+    .expect("destructured custom-hook parameters should bind from one evaluated argument");
+
+    assert!(output.contains("__vidactHook0Arg0"), "{output}");
+    assert!(output.contains("__vidactCreateState"), "{output}");
+    assert!(!output.contains("useControlled("), "{output}");
+}
+
+#[test]
+fn compiles_setter_only_state_inside_custom_hooks() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "ForcedUpdate.tsx",
+        source: r#"
+            import { useState } from 'react';
+            function useForceUpdate() {
+                const [, setValue] = useState({});
+                return () => setValue({});
+            }
+            export function ForcedUpdate() {
+                const update = useForceUpdate();
+                return <button onClick={update}>Update</button>;
+            }
+        "#,
+    })
+    .expect("setter-only state destructuring should receive an internal value binding");
+
+    assert!(output.contains("__vidactCreateState"), "{output}");
+    assert!(!output.contains("useForceUpdate("), "{output}");
+}
+
+#[test]
+fn evaluates_complex_custom_hook_arguments_once_at_the_call_site() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "HookObjectArgument.tsx",
+        source: r#"
+            import { useState } from 'react';
+            function useButton(options) {
+                const [pressed, setPressed] = useState(false);
+                return { disabled: options.disabled, pressed, setPressed };
+            }
+            export function HookObjectArgument({ disabled }) {
+                const state = useButton({ disabled });
+                return <button disabled={state.disabled} onClick={() => state.setPressed(true)}>{state.pressed}</button>;
+            }
+        "#,
+    })
+    .expect("object hook arguments should be evaluated once and remain reactive");
+
+    assert!(output.contains("__vidactHook0Arg0"), "{output}");
+    assert!(output.contains("__vidactCreateState"), "{output}");
+    assert!(!output.contains("useButton("), "{output}");
+}
+
+#[test]
+fn hoists_unconditional_nested_custom_hook_results_before_expansion() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "NestedHookResult.tsx",
+        source: r#"
+            import { useEffect } from 'react';
+            function useStable(callback) {
+                useEffect(() => undefined, []);
+                return callback;
+            }
+            function useButton(callback) {
+                return { handler: useStable(callback) };
+            }
+            export function NestedHookResult() {
+                const button = useButton(() => undefined);
+                return <button onClick={button.handler}>Save</button>;
+            }
+        "#,
+    })
+    .expect("an unconditional hook result nested in an object should hoist and expand");
+
+    assert!(output.contains("__vidactEffect"), "{output}");
+    assert!(!output.contains("useStable("), "{output}");
+    assert!(!output.contains("useButton("), "{output}");
+}
+
+#[test]
+fn normalizes_a_custom_hook_guard_return_to_one_result() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "GuardedHook.tsx",
+        source: r#"
+            import { useEffect } from 'react';
+            function useValue(enabled) {
+                useEffect(() => undefined, []);
+                if (!enabled) {
+                    return null;
+                }
+                const result = 'ready!';
+                return result;
+            }
+            export function GuardedHook({ enabled }) {
+                return <p>{useValue(enabled)}</p>;
+            }
+        "#,
+    })
+    .expect("a top-level custom-hook guard return should normalize to one inline result");
+
+    assert!(output.contains("__vidactEffect"), "{output}");
+    assert!(!output.contains("useValue("), "{output}");
+    assert!(output.contains("if (!enabled.get())"), "{output}");
+}
+
+#[test]
+fn dependency_source_mode_accepts_one_time_ref_initialization() {
+    let source = r#"
+        import { useRef } from 'react';
+        const UNINITIALIZED = {};
+        function useRefWithInit(init, argument) {
+            const ref = useRef(UNINITIALIZED);
+            if (ref.current === UNINITIALIZED) {
+                ref.current = init(argument);
+            }
+            return ref;
+        }
+        export function DependencyButton() {
+            const stable = useRefWithInit(() => ({ ready: true })).current;
+            return <button data-ready={stable.ready}>Save</button>;
+        }
+    "#;
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "DependencyButton.tsx",
+        source,
+    })
+    .expect_err("application source should retain React Compiler's ref validation");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("Cannot access refs"))
+    );
+
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "DependencyButton.tsx",
+            source,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("dependency source should preserve the published one-time ref initialization pattern");
+    assert!(output.contains("ref.current"), "{output}");
+    assert!(!output.contains("useRefWithInit("), "{output}");
+}
+
+#[test]
+fn dependency_source_mode_analyzes_memos_expanded_from_custom_hooks() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "DependencyMemo.tsx",
+            source: r#"
+                import { useCallback, useLayoutEffect, useRef } from 'react';
+                function useButton(disabled) {
+                    const elementRef = useRef(null);
+                    const updateDisabled = useCallback(() => {
+                        if (elementRef.current && disabled) elementRef.current.disabled = false;
+                    }, [disabled]);
+                    useLayoutEffect(updateDisabled, [updateDisabled]);
+                    return { elementRef, updateDisabled };
+                }
+                export function DependencyMemo({ disabled }) {
+                    const state = useButton(disabled);
+                    return <button ref={state.elementRef} onClick={state.updateDisabled}>Save</button>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("custom-hook memo bindings should remain present in dependency analysis");
+
+    assert!(output.contains("__vidactCreateMemo"), "{output}");
+    assert!(!output.contains("useButton("), "{output}");
+}
+
+#[test]
+fn dependency_source_mode_keeps_guarded_use_id_on_the_runtime_facade() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "DependencyId.tsx",
+            source: r#"
+                import * as React from 'react';
+                const maybeUseId = React.useId;
+                function useCompatibleId() {
+                    if (maybeUseId !== undefined) return maybeUseId();
+                    return 'legacy-id';
+                }
+                export function DependencyId() {
+                    return <label htmlFor={useCompatibleId()}>Name</label>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("dependency source may retain an invariant guarded useId call");
+
+    assert!(output.contains("useId"), "{output}");
+    assert!(!output.contains("useCompatibleId("), "{output}");
+}
+
+#[test]
 fn gates_and_compiles_insertion_effects() {
     let source = r#"
         import { useInsertionEffect, useState } from 'react';
@@ -2250,6 +2488,144 @@ fn compiles_reactive_component_spreads_into_mutable_prop_stores() {
 }
 
 #[test]
+fn compiles_element_valued_props_into_opaque_renderable_capabilities() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "Renderable.tsx",
+        source: r#"
+            import * as React from 'react';
+            import { useState } from 'react';
+            function Slot({ render, disabled }) {
+                const merged = {
+                    ...render.props,
+                    'data-disabled': disabled,
+                    children: disabled ? 'Disabled' : render.props.children,
+                };
+                return React.cloneElement(render, merged);
+            }
+            export function App() {
+                const [disabled, setDisabled] = useState(false);
+                const [href, setHref] = useState('/first');
+                return <Slot disabled={disabled} render={<a href={href}>Open</a>} />;
+            }
+        "#,
+    })
+    .expect("element-valued render props should compile as capabilities");
+
+    assert!(
+        output.contains("createRenderable as __vidactCreateRenderable"),
+        "{output}"
+    );
+    assert!(
+        output.contains("cloneRenderableComponent as __vidactCloneRenderableComponent"),
+        "{output}"
+    );
+    assert!(
+        output.contains("renderableProps as __vidactRenderableProps"),
+        "{output}"
+    );
+    assert!(!output.contains("React.cloneElement"), "{output}");
+    assert!(!output.contains("$$typeof"), "{output}");
+}
+
+#[test]
+fn lowers_base_ui_renderable_validation_and_lazy_sentinel_workaround() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "BaseUiRenderable.tsx",
+        source: r#"
+            import * as React from 'react';
+            const REACT_LAZY_TYPE = Symbol.for('react.lazy');
+            function Slot({ render, disabled }) {
+                const merged = { ...render.props, 'data-disabled': disabled };
+                let newElement = render;
+                if (newElement?.$$typeof === REACT_LAZY_TYPE) {
+                    const children = React.Children.toArray(render);
+                    newElement = children[0];
+                }
+                if (!React.isValidElement(newElement)) {
+                    throw new Error('invalid render');
+                }
+                return React.cloneElement(newElement, merged);
+            }
+            export function App() {
+                return <Slot disabled={false} render={<button>Open</button>} />;
+            }
+        "#,
+    })
+    .expect("Base UI render validation should lower to the bounded capability ABI");
+
+    assert!(
+        output.contains("isRenderable as __vidactIsRenderable"),
+        "{output}"
+    );
+    assert!(!output.contains("renderableMarker"), "{output}");
+    assert!(!output.contains("renderableToArray"), "{output}");
+    assert!(!output.contains("React.Children"), "{output}");
+    assert!(!output.contains("React.isValidElement"), "{output}");
+    assert!(!output.contains("React.cloneElement"), "{output}");
+    assert!(!output.contains("$$typeof"), "{output}");
+}
+
+#[test]
+fn lowers_single_renderable_children_to_array_without_tree_traversal() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "RenderableToArray.tsx",
+        source: r#"
+            import * as React from 'react';
+            function Slot({ render }) {
+                const element = React.Children.toArray(render)[0];
+                return React.cloneElement(element, { title: 'merged' });
+            }
+            export function App() {
+                return <Slot render={<button>Open</button>} />;
+            }
+        "#,
+    })
+    .expect("one renderable Children.toArray call should use the bounded capability helper");
+
+    assert!(
+        output.contains("renderableToArray as __vidactRenderableToArray"),
+        "{output}"
+    );
+    assert!(!output.contains("React.Children"), "{output}");
+    assert!(!output.contains("React.cloneElement"), "{output}");
+}
+
+#[test]
+fn preserves_callback_and_element_render_paths_without_component_replay() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "RenderPaths.tsx",
+        source: r#"
+            import * as React from 'react';
+            function Slot({ render, label }) {
+                const props = { title: label, children: label };
+                if (typeof render === 'function') {
+                    return render(props, { label });
+                }
+                return React.cloneElement(render, { ...render.props, ...props });
+            }
+            export function App() {
+                return <main>
+                    <Slot label="callback" render={(props) => <button {...props} />} />
+                    <Slot label="element" render={<a href="/docs">authored</a>} />
+                </main>;
+            }
+        "#,
+    })
+    .expect("callback and element render paths should compile under one component owner");
+
+    assert!(output.contains("render.get()(props"), "{output}");
+    assert!(
+        output.contains("createRenderable as __vidactCreateRenderable"),
+        "{output}"
+    );
+    assert!(
+        output.contains("cloneRenderableComponent as __vidactCloneRenderableComponent"),
+        "{output}"
+    );
+    assert!(!output.contains("React.cloneElement"), "{output}");
+}
+
+#[test]
 fn compiles_rest_props_into_a_resolved_object_slot() {
     let output = compile_surgical_module(ModuleInput {
         filename: "RestProps.tsx",
@@ -2331,7 +2707,7 @@ fn compiles_nested_prop_paths_with_container_and_leaf_defaults() {
 }
 
 #[test]
-fn defers_component_children_until_the_child_namespace_is_active() {
+fn defers_component_element_children_until_the_child_namespace_is_active() {
     let output = compile_surgical_module(ModuleInput {
         filename: "NamespaceChildren.tsx",
         source: r#"
@@ -2345,6 +2721,92 @@ fn defers_component_children_until_the_child_namespace_is_active() {
     })
     .expect("component children should defer construction to their insertion namespace");
 
-    assert!(output.contains("deferred as __vidactDeferred"), "{output}");
-    assert!(output.contains("__vidactDeferred(() => <div"), "{output}");
+    assert!(
+        output.contains("createRenderable as __vidactCreateRenderable"),
+        "{output}"
+    );
+    assert!(output.contains("__vidactCreateRenderable({},"), "{output}");
+    assert!(
+        !output.contains("<div __vidactNamespace=\"svg\""),
+        "{output}"
+    );
+}
+
+#[test]
+fn forwards_scalar_component_child_bindings_without_structural_slots() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "ScalarComponentChild.tsx",
+        source: r#"
+            function Frame({ children }) {
+                return <section>{children}</section>;
+            }
+            export function ScalarComponentChild({ label }) {
+                return <Frame>{label.toUpperCase()}</Frame>;
+            }
+        "#,
+    })
+    .expect("scalar component children should remain text bindings across wrappers");
+
+    assert!(output.contains("<Frame>{__vidactBinding("), "{output}");
+    assert!(
+        !output.contains("__vidactDeferred(() => __vidactBinding("),
+        "{output}"
+    );
+}
+
+#[test]
+fn forwards_received_children_as_live_render_value_bindings() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "ForwardedChildren.tsx",
+        source: r#"
+            function Frame({ children }) {
+                return <Layout>{children}</Layout>;
+            }
+            export function ForwardedChildren({ label }) {
+                return <Frame><strong>{label}</strong></Frame>;
+            }
+        "#,
+    })
+    .expect("received component children may carry deferred structural render values");
+
+    assert!(output.contains("<Layout>{__vidactBinding("), "{output}");
+    assert!(output.contains("() => children.get()"), "{output}");
+    assert!(
+        !output.contains("__vidactDeferred(() => __vidactBinding("),
+        "{output}"
+    );
+}
+
+#[test]
+fn dependency_diagnostics_map_through_custom_hook_canonicalization() {
+    let source = r#"
+        import React, { useState } from 'react';
+        function usePublishedState() {
+            const [value] = useState('published');
+            return value;
+        }
+        export function PublishedFunction() {
+            const value = usePublishedState();
+            return <p>{value}</p>;
+        }
+        export class UnsupportedPublishedClass extends React.Component {
+            render() { return <p>unsupported</p>; }
+        }
+    "#;
+    let diagnostics = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "PublishedDependency.tsx",
+            source,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect_err("published class components must fail dependency compilation");
+    let span = diagnostics[0]
+        .span
+        .expect("dependency diagnostic should have a span");
+
+    assert_eq!(
+        &source[span.start as usize..span.end as usize],
+        "React.Component"
+    );
 }

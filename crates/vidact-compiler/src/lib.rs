@@ -10,6 +10,7 @@ mod custom_hooks;
 mod diagnostic;
 mod framework_directives;
 pub mod ir;
+mod lowered_react;
 mod options;
 mod oxc_react;
 pub mod protocol;
@@ -17,6 +18,8 @@ mod react_bindings;
 pub mod reactive_flow;
 pub mod render_flow;
 mod server_codegen;
+mod server_renderable;
+mod source_maps;
 mod surgical_codegen;
 
 pub use diagnostic::{Diagnostic, DiagnosticCode, SourceSpan};

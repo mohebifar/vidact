@@ -70,6 +70,7 @@ try {
           '@vidact/react-types': dependency('@vidact/react-types'),
           '@vidact/compiler': dependency('@vidact/compiler'),
           '@vidact/runtime': dependency('@vidact/runtime'),
+          '@vidact/start': dependency('@vidact/start'),
           '@vidact/test-support': dependency('@vidact/test-support'),
           '@vidact/vite': dependency('@vidact/vite'),
           '@types/node': '24.13.3',
@@ -113,12 +114,13 @@ import { source, type CompiledRenderValue } from '@vidact/runtime'
 import { Suspense, createResource, lazy } from '@vidact/runtime/async'
 import { flushSync, startTransition } from '@vidact/runtime/concurrent'
 import { createCompiledActionState, useActionState } from '@vidact/runtime/actions'
-import { Suspense as AsyncActionsSuspense } from '@vidact/runtime/async/actions'
-import { renderToStaticMarkup as renderActionsToStaticMarkup } from '@vidact/runtime/actions/server'
 import { enableDomForms } from '@vidact/runtime/dom/forms'
 import { enableDomNamespace } from '@vidact/runtime/dom/namespace'
 import { enableDomStyles } from '@vidact/runtime/dom/styles'
 import { renderToStaticMarkup } from '@vidact/runtime/server'
+import { createRouteManifest, defineFileRoute } from '@vidact/start'
+import { createStartHandler } from '@vidact/start/server'
+import { vidactStart } from '@vidact/start/vite'
 import { act } from '@vidact/test-support'
 import { vidact } from '@vidact/vite'
 
@@ -136,14 +138,23 @@ void flushSync
 void startTransition
 void createCompiledActionState
 void useActionState
-void AsyncActionsSuspense
 void enableDomForms()
 void enableDomNamespace()
 void enableDomStyles()
 void act
 void vidact()
+void createStartHandler({
+  manifest: createRouteManifest([
+    {
+      id: 'index',
+      parentId: null,
+      path: '/',
+      load: async () => ({ Route: defineFileRoute({ component: () => 'ready' }) }),
+    },
+  ]),
+})
+void vidactStart({ serverEntry: false })
 if (renderToStaticMarkup(() => 'ready') !== 'ready') throw new Error('server entry failed')
-if (renderActionsToStaticMarkup(() => 'ready') !== 'ready') throw new Error('Actions server entry failed')
 `,
   )
   await writeFile(
@@ -153,12 +164,13 @@ import { VIDACT_RUNTIME_PROTOCOL } from '@vidact/runtime/protocol'
 import { Suspense, createResource, lazy } from '@vidact/runtime/async'
 import { flushSync, startTransition } from '@vidact/runtime/concurrent'
 import { createCompiledActionState, useActionState } from '@vidact/runtime/actions'
-import { Suspense as AsyncActionsSuspense } from '@vidact/runtime/async/actions'
-import { renderToStaticMarkup as renderActionsToStaticMarkup } from '@vidact/runtime/actions/server'
 import { enableDomForms } from '@vidact/runtime/dom/forms'
 import { enableDomNamespace } from '@vidact/runtime/dom/namespace'
 import { enableDomStyles } from '@vidact/runtime/dom/styles'
 import { renderToStaticMarkup } from '@vidact/runtime/server'
+import { createRouteManifest, defineFileRoute } from '@vidact/start'
+import { createStartHandler } from '@vidact/start/server'
+import { vidactStart } from '@vidact/start/vite'
 import { act } from '@vidact/test-support'
 import { vidact } from '@vidact/vite'
 
@@ -168,12 +180,23 @@ if (VIDACT_RUNTIME_PROTOCOL !== 'vidact-runtime-v1') throw new Error('runtime en
 if (renderToStaticMarkup(() => 'ready') !== 'ready') throw new Error('server entry failed')
 if ([Suspense, createResource, lazy].some((value) => typeof value !== 'function')) throw new Error('async entry failed')
 if ([flushSync, startTransition].some((value) => typeof value !== 'function')) throw new Error('concurrent entry failed')
-if ([createCompiledActionState, useActionState, AsyncActionsSuspense].some((value) => typeof value !== 'function')) throw new Error('Actions entry failed')
+if ([createCompiledActionState, useActionState].some((value) => typeof value !== 'function')) throw new Error('Actions entry failed')
 enableDomForms()
 enableDomNamespace()
 enableDomStyles()
-if (renderActionsToStaticMarkup(() => 'ready') !== 'ready') throw new Error('Actions server entry failed')
 if (typeof act !== 'function' || typeof vidact !== 'function') throw new Error('package entry failed')
+const startHandler = createStartHandler({
+  manifest: createRouteManifest([
+    {
+      id: 'index',
+      parentId: null,
+      path: '/',
+      load: async () => ({ Route: defineFileRoute({ component: () => 'ready' }) }),
+    },
+  ]),
+})
+if ((await startHandler(new Request('https://example.test/'))).status !== 200) throw new Error('Start server entry failed')
+if (vidactStart({ serverEntry: false }).length !== 3) throw new Error('Start Vite entry failed')
 `,
   )
 

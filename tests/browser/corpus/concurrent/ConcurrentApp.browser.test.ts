@@ -1,4 +1,4 @@
-import { mountCompiled } from '@vidact/runtime/concurrent'
+import { mountCompiled } from '@vidact/runtime'
 import { act } from '@vidact/test-support'
 import { afterEach, expect, it } from 'vitest'
 
