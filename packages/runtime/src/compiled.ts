@@ -6,6 +6,7 @@ import {
 import {
   HydrationMismatch,
   beginHydration,
+  borrowHydrationSlotRange,
   claimHydrationArrayRange,
   claimHydrationComponentMount,
   claimHydrationComponentRange,
@@ -3260,9 +3261,7 @@ function mountCompiledBindingBefore(
     : undefined
   const borrowedHydrationRange =
     isHydrating() && !scalarInitial
-      ? isStructuralBinding(initial) && initial[2] === 'slot'
-        ? borrowCurrentHydrationSlot(parent)
-        : borrowActiveHydrationSlot(parent)
+      ? borrowHydrationSlotRange(parent, isStructuralBinding(initial) && initial[2] === 'slot')
       : undefined
   const hydratedStructuralRange =
     isHydrating() && !scalarInitial
@@ -3350,46 +3349,6 @@ function mountCompiledBindingBefore(
       end.remove()
     }
   })
-}
-
-function borrowActiveHydrationSlot(parent: Node): readonly [Comment, Comment] | undefined {
-  const start = hydrationCursor(parent)?.previousSibling
-  if (!(start instanceof Comment) || start.data !== 'vidact:v1:b') return undefined
-
-  const insertion = hydrationInsertionPoint()
-  if (
-    insertion !== undefined &&
-    insertion[0] === parent &&
-    insertion[1] instanceof Comment &&
-    insertion[1].data === '/vidact:v1:b'
-  ) {
-    return [start, insertion[1]]
-  }
-
-  const end = closingHydrationSlot(start)
-  return end === undefined ? undefined : [start, end]
-}
-
-function borrowCurrentHydrationSlot(parent: Node): readonly [Comment, Comment] | undefined {
-  const start = hydrationCursor(parent)
-  if (!(start instanceof Comment) || start.data !== 'vidact:v1:b') return undefined
-  const end = closingHydrationSlot(start)
-  return end === undefined ? undefined : [start, end]
-}
-
-function closingHydrationSlot(start: Comment): Comment | undefined {
-  let depth = 0
-  for (let node = start.nextSibling; node !== null; node = node.nextSibling) {
-    if (!(node instanceof Comment)) continue
-    if (node.data === 'vidact:v1:b') {
-      depth += 1
-      continue
-    }
-    if (node.data !== '/vidact:v1:b') continue
-    if (depth === 0) return node
-    depth -= 1
-  }
-  return undefined
 }
 
 function materialize(value: RenderValue): Node[] {

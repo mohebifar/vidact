@@ -292,6 +292,26 @@ export function claimHydrationSlotRange(parent: Node): HydrationRange | undefine
   return [start, end]
 }
 
+export function borrowHydrationSlotRange(
+  parent: Node,
+  current: boolean,
+): HydrationRange | undefined {
+  const state = activeHydration
+  if (state === undefined) return undefined
+  const start = (
+    current ? cursor(state, parent) : cursor(state, parent)?.previousSibling
+  ) as Node | null
+  if (!isMarker(start, `${HYDRATION_PREFIX}:b`)) return undefined
+  if (
+    !current &&
+    activeInsertionPoint?.[0] === parent &&
+    isMarker(activeInsertionPoint[1], `/${HYDRATION_PREFIX}:b`)
+  ) {
+    return [start, activeInsertionPoint[1]]
+  }
+  return [start, findClosingSibling(start, `${HYDRATION_PREFIX}:b`)]
+}
+
 export function claimHydrationSuspenseFallback(parent: Node): Comment | undefined {
   const state = activeHydration
   if (state === undefined) return undefined
@@ -525,6 +545,7 @@ export function installHydration(): void {
     claimArrayRange: claimHydrationArrayRange,
     finishArrayRange: finishHydrationArrayRange,
     claimSlotRange: claimHydrationSlotRange,
+    borrowSlotRange: borrowHydrationSlotRange,
     claimSuspenseFallback: claimHydrationSuspenseFallback,
     withoutHydration,
     withInsertion: withHydrationInsertion,
