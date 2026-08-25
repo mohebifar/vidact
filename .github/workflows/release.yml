@@ -93,28 +93,31 @@ jobs:
           - runner: ubuntu-24.04
             target: x86_64-unknown-linux-musl
     runs-on: ${{ matrix.runner }}
-    container: node:24-alpine
     timeout-minutes: 45
     steps:
-      - name: Install build tools
-        run: apk add --no-cache bash build-base curl git perl python3
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
-      - name: Install Rust
-        shell: sh
-        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.96.0 --target ${{ matrix.target }}
-      - name: Install pnpm
-        run: npm install --global pnpm@10.19.0
       - name: Prepare patched Oxc checkout
         shell: bash
         run: scripts/prepare-oxc.sh
-      - run: pnpm install --frozen-lockfile
-      - name: Build native addon
-        shell: sh
-        run: . "$HOME/.cargo/env" && pnpm --filter @vidact/compiler exec napi build --manifest-path ../../crates/vidact-node/Cargo.toml --output-dir dist --platform --release --strip --esm --js binding.js --dts binding.d.ts --target ${{ matrix.target }}
-      - name: Test native addon
-        run: pnpm --filter @vidact/compiler test
+      - name: Build and test native addon in Alpine
+        shell: bash
+        run: |
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/workspace" \
+            --workdir /workspace \
+            --env TARGET='${{ matrix.target }}' \
+            node:24-alpine \
+            sh -euxc '
+              apk add --no-cache bash build-base curl git perl python3
+              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.96.0 --target "$TARGET"
+              npm install --global pnpm@10.19.0
+              . "$HOME/.cargo/env"
+              pnpm install --frozen-lockfile
+              pnpm --filter @vidact/compiler exec napi build --manifest-path ../../crates/vidact-node/Cargo.toml --output-dir dist --platform --release --strip --esm --js binding.js --dts binding.d.ts --target "$TARGET"
+              pnpm --filter @vidact/compiler test
+            '
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: native-${{ matrix.target }}
