@@ -40,8 +40,7 @@
     }
   },
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "scripts": {
     "build": "node ../../scripts/clean-typescript-package.mjs dist && pnpm build:native && pnpm build:js",

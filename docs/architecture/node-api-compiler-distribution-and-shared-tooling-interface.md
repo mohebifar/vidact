@@ -36,8 +36,8 @@ public packages are one fixed group and version together. A Changesets workflow
 opens the version pull request, but it does not publish: a reviewed coordinated
 `v*` tag remains the input to the separate native assembly and trusted npm
 publishing workflow. Package manifests provide the versions published to npm;
-the compiler tarball version selects `next` for prereleases and `latest` for
-stable releases.
+the compiler tarball prerelease identifier selects its npm tag, while stable
+releases use `latest`.
 
 ## Compiler and runtime contract
 

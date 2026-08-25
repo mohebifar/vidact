@@ -41,7 +41,9 @@ const roots = publicPackages.map(({ name }) => {
   return entry
 })
 const compilerVersion = rootsByName.get('@vidact/compiler').manifest.version
-const tag = compilerVersion.includes('-') ? 'next' : 'latest'
+const tag = compilerVersion.match(/-([^.]+)/)?.[1] ?? 'latest'
+const publishArguments = ['--tag', tag, '--access', 'public']
+if (process.env.GITHUB_ACTIONS !== 'true') publishArguments.push('--provenance=false')
 if (native.length !== 7 || tarballs.length !== native.length + roots.length) {
   throw new Error(
     `expected 7 native and ${publicPackages.length} root tarballs, found ${native.length} and ${roots.length}`,
@@ -55,7 +57,7 @@ for (const entry of [...native, ...roots]) {
     { headers: { accept: 'application/json' } },
   )
   if (response.status === 404) {
-    execFileSync('npm', ['publish', entry.tarballPath, '--tag', tag, '--access', 'public'], {
+    execFileSync('npm', ['publish', entry.tarballPath, ...publishArguments], {
       stdio: 'inherit',
     })
     continue

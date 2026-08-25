@@ -126,8 +126,7 @@
     }
   },
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "scripts": {
     "build": "node ../../scripts/clean-typescript-package.mjs dist && tsc -p tsconfig.build.json && node ../../scripts/finalize-typescript-package.mjs dist src/env.d.ts",
