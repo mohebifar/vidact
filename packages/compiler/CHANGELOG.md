@@ -1,5 +1,11 @@
 # @vidact/compiler
 
+## 0.2.0-beta.0
+
+### Minor Changes
+
+- Add compiled renderable capabilities and React dependency compilation support.
+
 ## 0.1.0
 
 ### Minor Changes
