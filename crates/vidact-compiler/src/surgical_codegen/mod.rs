@@ -755,7 +755,7 @@ fn transform_program<'a>(
         );
     }
     let capabilities = dom_capabilities(program);
-    let mut prefix = vec![runtime_import(&ast, program, options)];
+    let mut prefix = runtime_imports(&ast, program, options);
     if capabilities.forms {
         prefix.push(capability_import(
             &ast,
@@ -5465,11 +5465,11 @@ fn scope_statement<'a>(ast: &AstBuilder<'a>, narrow: bool) -> Statement<'a> {
     )
 }
 
-fn runtime_import<'a>(
+fn runtime_imports<'a>(
     ast: &AstBuilder<'a>,
     program: &Program<'a>,
     options: &CompilationOptions,
-) -> Statement<'a> {
+) -> Vec<Statement<'a>> {
     let names = [
         ("ActionForm", ACTION_FORM),
         ("binding", BINDING),
@@ -5523,75 +5523,68 @@ fn runtime_import<'a>(
     ];
     let mut references = GeneratedReferenceFinder::default();
     references.visit_program(program);
-    let framework_metadata = references.names.contains(ENABLE_FRAMEWORK_METADATA);
-    let async_runtime = references.names.contains(CREATE_ASYNC);
-    let concurrent_runtime = [CREATE_DEFERRED, CREATE_TRANSITION]
-        .into_iter()
-        .any(|name| references.names.contains(name));
-    let actions_runtime = [
-        ACTION_FORM,
-        COMPILED_FORM_ACTION,
-        CREATE_ACTION_STATE,
-        CREATE_FORM_STATUS,
-        CREATE_OPTIMISTIC,
-    ]
-    .into_iter()
-    .any(|name| references.names.contains(name));
-    let specifiers = oxc_allocator::Vec::from_iter_in(
-        names
-            .into_iter()
-            .filter(|(_, local)| references.names.contains(*local))
-            .map(|(imported, local)| {
-                ImportDeclarationSpecifier::new_import_specifier(
-                    SPAN,
-                    ModuleExportName::new_identifier_name(SPAN, atom(ast, imported), ast),
-                    BindingIdentifier::new(SPAN, atom(ast, local), ast),
-                    ImportOrExportKind::Value,
-                    ast,
-                )
-            }),
-        ast,
-    );
-    Statement::new_import_declaration(
-        SPAN,
-        Some(specifiers),
-        StringLiteral::new(
+    let mut imports = Vec::new();
+    if options.target() == crate::CompilerTarget::Hydrate {
+        imports.push(Statement::new_import_declaration(
             SPAN,
-            if framework_metadata {
-                if options.target() == crate::CompilerTarget::Hydrate {
-                    "@vidact/runtime/framework/hydrate"
-                } else {
-                    "@vidact/runtime/framework"
-                }
-            } else {
-                match (
-                    async_runtime,
-                    concurrent_runtime,
-                    actions_runtime,
-                    options.target() == crate::CompilerTarget::Hydrate,
-                ) {
-                    (true, _, true, true) => "@vidact/runtime/async/actions/hydrate",
-                    (true, _, true, false) => "@vidact/runtime/async/actions",
-                    (false, _, true, true) => "@vidact/runtime/actions/hydrate",
-                    (false, _, true, false) => "@vidact/runtime/actions",
-                    (true, true, false, true) => "@vidact/runtime/async/concurrent/hydrate",
-                    (true, true, false, false) => "@vidact/runtime/async/concurrent",
-                    (true, false, false, true) => "@vidact/runtime/async/hydrate",
-                    (true, false, false, false) => "@vidact/runtime/async",
-                    (false, true, false, true) => "@vidact/runtime/concurrent/hydrate",
-                    (false, true, false, false) => "@vidact/runtime/concurrent",
-                    (false, false, false, true) => "@vidact/runtime/hydrate",
-                    (false, false, false, false) => "@vidact/runtime",
-                }
-            },
             None,
+            StringLiteral::new(SPAN, "@vidact/runtime/hydrate", None, ast),
+            None,
+            None,
+            ImportOrExportKind::Value,
             ast,
-        ),
-        None,
-        None,
-        ImportOrExportKind::Value,
-        ast,
-    )
+        ));
+    }
+    for source in [
+        "@vidact/runtime",
+        "@vidact/runtime/async",
+        "@vidact/runtime/concurrent",
+        "@vidact/runtime/actions",
+        "@vidact/runtime/framework",
+    ] {
+        let specifiers = oxc_allocator::Vec::from_iter_in(
+            names
+                .iter()
+                .copied()
+                .filter(|(_, local)| {
+                    references.names.contains(*local) && runtime_source(local) == source
+                })
+                .map(|(imported, local)| {
+                    ImportDeclarationSpecifier::new_import_specifier(
+                        SPAN,
+                        ModuleExportName::new_identifier_name(SPAN, atom(ast, imported), ast),
+                        BindingIdentifier::new(SPAN, atom(ast, local), ast),
+                        ImportOrExportKind::Value,
+                        ast,
+                    )
+                }),
+            ast,
+        );
+        if specifiers.is_empty() {
+            continue;
+        }
+        imports.push(Statement::new_import_declaration(
+            SPAN,
+            Some(specifiers),
+            StringLiteral::new(SPAN, atom(ast, source), None, ast),
+            None,
+            None,
+            ImportOrExportKind::Value,
+            ast,
+        ));
+    }
+    imports
+}
+
+fn runtime_source(local: &str) -> &'static str {
+    match local {
+        CREATE_ASYNC => "@vidact/runtime/async",
+        CREATE_DEFERRED | CREATE_TRANSITION => "@vidact/runtime/concurrent",
+        ACTION_FORM | COMPILED_FORM_ACTION | CREATE_ACTION_STATE | CREATE_FORM_STATUS
+        | CREATE_OPTIMISTIC => "@vidact/runtime/actions",
+        ENABLE_FRAMEWORK_METADATA => "@vidact/runtime/framework",
+        _ => "@vidact/runtime",
+    }
 }
 
 fn capability_import<'a>(

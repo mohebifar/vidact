@@ -1,4 +1,4 @@
-import { mountCompiled } from '@vidact/runtime/async'
+import { mountCompiled } from '@vidact/runtime'
 import { readCompiledOwnerMetrics } from '@vidact/runtime/testing'
 import { assertMutationEnvelope, captureMutations } from '@vidact/test-support'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -47,23 +47,23 @@ describe('Vidact shop', () => {
     await settle(initial.promise)
     expect(productNames(host)).toEqual(['Ridge Bottle', 'Ember Candle'])
 
-    const shell = host.querySelector<HTMLElement>('.shop-shell')!
-    const catalog = host.querySelector<HTMLElement>('.catalog-panel')!
-    const cart = host.querySelector<HTMLElement>('.cart-panel')!
-    const cartLink = host.querySelector<HTMLElement>('.cart-link')!
-    const results = host.querySelector<HTMLElement>('.results')!
+    const shell = host.querySelector<HTMLElement>('[data-vidact-example="shop"]')!
+    const catalog = host.querySelector<HTMLElement>('[data-shop-slot="catalog-panel"]')!
+    const cart = host.querySelector<HTMLElement>('[data-shop-slot="cart-panel"]')!
+    const cartLink = host.querySelector<HTMLElement>('[data-shop-slot="cart-link"]')!
+    const results = host.querySelector<HTMLElement>('[data-shop-slot="product-results"]')!
     const candleCard = productCard(host, 'Ember Candle')
     const bottleCardBeforeSearch = productCard(host, 'Ridge Bottle')!
     const bottleRemovalRules = subtreeMutationRules(bottleCardBeforeSearch, 'childList')
     const productGrid = bottleCardBeforeSearch.parentElement!
-    const search = host.querySelector<HTMLInputElement>('.search-field input')!
+    const search = host.querySelector<HTMLInputElement>('[data-shop-slot="catalog-search"]')!
     const searched = await captureMutations(host, () => userEvent.type(search, 'Ember'))
     expect(search.value).toBe('Ember')
     expect(document.activeElement).toBe(search)
     expect(productNames(host)).toEqual(['Ember Candle'])
-    expect(host.querySelector('.shop-shell')).toBe(shell)
-    expect(host.querySelector('.catalog-panel')).toBe(catalog)
-    expect(host.querySelector('.cart-panel')).toBe(cart)
+    expect(host.querySelector('[data-vidact-example="shop"]')).toBe(shell)
+    expect(host.querySelector('[data-shop-slot="catalog-panel"]')).toBe(catalog)
+    expect(host.querySelector('[data-shop-slot="cart-panel"]')).toBe(cart)
     expect(productCard(host, 'Ember Candle')).toBe(candleCard)
     expect(() =>
       assertMutationEnvelope(
@@ -94,22 +94,29 @@ describe('Vidact shop', () => {
     ).not.toThrow()
 
     const bottleCard = productCard(host, 'Ridge Bottle')
-    const emptyCheckout = host.querySelector<HTMLButtonElement>('.checkout-button')!
+    const emptyCart = host.querySelector<HTMLElement>('[data-shop-slot="empty-cart"]')!
+    const emptyCartRemovalRules = subtreeMutationRules(emptyCart, 'childList')
+    const emptyCheckout = host.querySelector<HTMLButtonElement>(
+      '[data-shop-slot="checkout-button"]',
+    )!
     const emptyCheckoutRemovalRules = subtreeMutationRules(emptyCheckout, 'childList')
     const added = await captureMutations(host, () =>
       host.querySelector<HTMLButtonElement>('[aria-label="Add Ridge Bottle to cart"]')?.click(),
     )
-    expect(host.querySelector('.cart-link')?.textContent).toContain('1')
-    expect(host.querySelector('.cart-lines')?.textContent).toContain('Ridge Bottle')
-    expect(host.querySelector('.cart-summary')?.textContent).toContain('$34.00')
+    expect(host.querySelector('[data-shop-slot="cart-link"]')?.textContent).toContain('1')
+    expect(host.querySelector('[data-shop-slot="cart-lines"]')?.textContent).toContain(
+      'Ridge Bottle',
+    )
+    expect(host.querySelector('[data-shop-slot="cart-summary"]')?.textContent).toContain('$34.00')
     expect(productCard(host, 'Ridge Bottle')).toBe(bottleCard)
-    expect(host.querySelector('.shop-shell')).toBe(shell)
+    expect(host.querySelector('[data-vidact-example="shop"]')).toBe(shell)
     expect(() =>
       assertMutationEnvelope(
         added.records,
         [
           { type: 'characterData', within: cartLink },
           { type: 'childList', within: cart },
+          ...emptyCartRemovalRules,
           ...emptyCheckoutRemovalRules,
           { type: 'characterData', within: cart },
           { type: 'attributes', within: cart },
@@ -118,13 +125,13 @@ describe('Vidact shop', () => {
       ),
     ).not.toThrow()
 
-    const cartLine = host.querySelector<HTMLElement>('.cart-lines li')!
+    const cartLine = host.querySelector<HTMLElement>('[data-shop-slot="cart-lines"] li')!
     const incremented = await captureMutations(host, () =>
       host.querySelector<HTMLButtonElement>('[aria-label="Add one Ridge Bottle"]')?.click(),
     )
-    expect(host.querySelector('.cart-lines li')).toBe(cartLine)
+    expect(host.querySelector('[data-shop-slot="cart-lines"] li')).toBe(cartLine)
     expect(cartLine.textContent).toContain('2')
-    expect(host.querySelector('.cart-summary')?.textContent).toContain('$68.00')
+    expect(host.querySelector('[data-shop-slot="cart-summary"]')?.textContent).toContain('$68.00')
     expect(() =>
       assertMutationEnvelope(
         incremented.records,
@@ -136,19 +143,22 @@ describe('Vidact shop', () => {
       ),
     ).not.toThrow()
 
-    const categoryButtons = host.querySelectorAll<HTMLButtonElement>('.category-filters button')
-    const resultsBeforeCategory = host.querySelector<HTMLElement>('.results')!
+    const categoryButtons = host.querySelectorAll<HTMLButtonElement>(
+      '[data-slot="toggle-group"] button',
+    )
+    const resultsBeforeCategory = host.querySelector<HTMLElement>(
+      '[data-shop-slot="product-results"]',
+    )!
     const resultsRemovalRules = subtreeMutationRules(resultsBeforeCategory, 'childList')
     categoryButtons[2]?.focus()
     const selectedCategory = await captureMutations(host, () => userEvent.keyboard('{Enter}'))
     expect(loadedCategories).toEqual(['travel'])
-    expect(categoryButtons[0]?.classList.contains('selected')).toBe(false)
-    expect(categoryButtons[2]?.classList.contains('selected')).toBe(true)
+    expect(categoryButtons[0]?.getAttribute('aria-pressed')).toBe('false')
     expect(categoryButtons[2]?.getAttribute('aria-pressed')).toBe('true')
     expect(document.activeElement).toBe(categoryButtons[2])
-    expect(host.querySelector('.shop-shell')).toBe(shell)
-    expect(host.querySelector('.catalog-panel')).toBe(catalog)
-    expect(host.querySelector('.cart-panel')).toBe(cart)
+    expect(host.querySelector('[data-vidact-example="shop"]')).toBe(shell)
+    expect(host.querySelector('[data-shop-slot="catalog-panel"]')).toBe(catalog)
+    expect(host.querySelector('[data-shop-slot="cart-panel"]')).toBe(cart)
     expect(host.querySelector('[aria-busy="true"]')).not.toBeNull()
     expect(() =>
       assertMutationEnvelope(
@@ -177,7 +187,9 @@ describe('Vidact shop', () => {
       ),
     ).not.toThrow()
 
-    const checkoutButton = host.querySelector<HTMLButtonElement>('.checkout-button')
+    const checkoutButton = host.querySelector<HTMLButtonElement>(
+      '[data-shop-slot="checkout-button"]',
+    )
     expect(checkoutButton).not.toBeNull()
     expect(checkoutButton?.disabled).toBe(false)
     const submitting = await captureMutations(host, async () => {
@@ -186,8 +198,12 @@ describe('Vidact shop', () => {
       await Promise.resolve()
     })
     expect(checkedOutQuantities).toEqual([2])
-    expect(host.querySelector<HTMLButtonElement>('.checkout-button')?.disabled).toBe(true)
-    expect(host.querySelector('.checkout-message')?.textContent).toContain('Placing your order')
+    expect(
+      host.querySelector<HTMLButtonElement>('[data-shop-slot="checkout-button"]')?.disabled,
+    ).toBe(true)
+    expect(host.querySelector('[data-shop-slot="checkout-message"]')?.textContent).toContain(
+      'Placing your order',
+    )
     expect(() =>
       assertMutationEnvelope(
         submitting.records,
@@ -207,11 +223,13 @@ describe('Vidact shop', () => {
       estimatedDelivery: 'tomorrow',
     })
     await settle(checkout.promise)
-    expect(host.querySelector('.checkout-message')?.textContent).toContain('NS-TEST123')
-    expect(host.querySelector('.cart-link')?.textContent).toContain('0')
-    expect(host.querySelector('.shop-shell')).toBe(shell)
-    expect(host.querySelector('.catalog-panel')).toBe(catalog)
-    expect(host.querySelector('.cart-panel')).toBe(cart)
+    expect(host.querySelector('[data-shop-slot="checkout-message"]')?.textContent).toContain(
+      'NS-TEST123',
+    )
+    expect(host.querySelector('[data-shop-slot="cart-link"]')?.textContent).toContain('0')
+    expect(host.querySelector('[data-vidact-example="shop"]')).toBe(shell)
+    expect(host.querySelector('[data-shop-slot="catalog-panel"]')).toBe(catalog)
+    expect(host.querySelector('[data-shop-slot="cart-panel"]')).toBe(cart)
 
     dispose?.()
     dispose = undefined
@@ -259,14 +277,14 @@ async function settle(promise: PromiseLike<unknown>): Promise<void> {
 }
 
 function productNames(host: ParentNode): string[] {
-  return [...host.querySelectorAll('.product-card:not(.skeleton-card) h3')].map(
-    (heading) => heading.textContent ?? '',
+  return [...host.querySelectorAll('[data-product-card]:not([data-skeleton]) h3')].map(
+    (heading) => heading.textContent?.trim() ?? '',
   )
 }
 
 function productCard(host: ParentNode, name: string): Element | undefined {
-  return [...host.querySelectorAll('.product-card:not(.skeleton-card)')].find(
-    (card) => card.querySelector('h3')?.textContent === name,
+  return [...host.querySelectorAll('[data-product-card]:not([data-skeleton])')].find(
+    (card) => card.querySelector('h3')?.textContent?.trim() === name,
   )
 }
 

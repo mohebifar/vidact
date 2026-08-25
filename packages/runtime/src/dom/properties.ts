@@ -1,12 +1,14 @@
 import { validateRawHtmlRelatedProp } from '../raw-html.ts'
+import {
+  MATHML_NAMESPACE,
+  SVG_NAMESPACE,
+  XLINK_NAMESPACE,
+  XML_NAMESPACE,
+  XMLNS_NAMESPACE,
+} from './namespaces.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 const UNSAFE_HTML = typeof __VIDACT_UNSAFE_HTML__ === 'undefined' || __VIDACT_UNSAFE_HTML__
-
-const XLINK_NAMESPACE = 'http://www.w3.org/1999/xlink'
-const XML_NAMESPACE = 'http://www.w3.org/XML/1998/namespace'
-const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
-const MATHML_NAMESPACE = 'http://www.w3.org/1998/Math/MathML'
 
 const booleanAttributes = new Set([
   'allowFullScreen',
@@ -311,7 +313,7 @@ function namespacedAttribute(name: string): {
   }
   if (name === 'xmlnsXlink') {
     return {
-      namespace: 'http://www.w3.org/2000/xmlns/',
+      namespace: XMLNS_NAMESPACE,
       qualifiedName: 'xmlns:xlink',
       localName: 'xlink',
     }

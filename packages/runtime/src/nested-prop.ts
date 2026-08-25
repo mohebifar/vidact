@@ -1,4 +1,4 @@
-import { binding, isCompiledBinding } from './compiled.ts'
+import { binding, isCompiledBinding } from './compiled/core.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 

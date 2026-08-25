@@ -1,18 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { Suspense, createCompiledAsync, createResource, lazy } from '../../src/async.ts'
 import {
-  Suspense,
   compiledRoot,
-  createCompiledAsync,
   createNarrowCompiledScope,
-  createResource,
   errorBoundary,
   h,
-  lazy,
   mountCompiled,
   source,
   type CompiledRenderValue,
-} from '../../src/async.ts'
+} from '../../src/index.ts'
 
 afterEach(() => document.body.replaceChildren())
 

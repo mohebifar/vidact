@@ -1,11 +1,25 @@
-import { useId, useState } from 'react'
+import { createContext, useId, useState } from 'react'
 
 type Item = {
   readonly id: number
   readonly label: string
 }
 
+const Theme = createContext('default')
+
 export function HydrationApp({ initialItems }: { readonly initialItems: readonly Item[] }) {
+  return (
+    <Theme.Provider value="red">
+      <HydrationContent initialItems={initialItems} />
+    </Theme.Provider>
+  )
+}
+
+function HydrationContent({
+  initialItems,
+}: {
+  readonly initialItems: readonly Item[]
+}): JSX.Element {
   const [items, setItems] = useState(initialItems)
   const labelId = useId()
   return (

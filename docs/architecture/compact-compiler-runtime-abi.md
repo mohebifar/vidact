@@ -2,6 +2,8 @@
 
 **Status:** Accepted
 
+Superseded in part by: [Capability-owned runtime entrypoints](capability-owned-runtime-entrypoints.md)
+
 ## Context
 
 Vidact's generated client is coupled to a private compiler/runtime ABI. The

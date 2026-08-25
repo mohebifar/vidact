@@ -1,9 +1,5 @@
-import {
-  MATHML_NAMESPACE,
-  SVG_NAMESPACE,
-  installNamespaceDomCapability,
-  type IntrinsicNamespace,
-} from './intrinsic.ts'
+import { installNamespaceDomCapability, type IntrinsicNamespace } from './intrinsic.ts'
+import { MATHML_NAMESPACE, SVG_NAMESPACE } from './namespaces.ts'
 
 let enabled = false
 

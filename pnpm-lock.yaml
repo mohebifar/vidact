@@ -146,6 +146,37 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.3)(@vitest/browser-playwright@4.1.11)(vite@8.2.2(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.0))
 
+  examples/start:
+    dependencies:
+      '@vidact/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+      '@vidact/start':
+        specifier: workspace:*
+        version: link:../../packages/start
+      srvx:
+        specifier: ^0.12.7
+        version: 0.12.7
+    devDependencies:
+      '@types/node':
+        specifier: ^24.13.3
+        version: 24.13.3
+      '@types/react':
+        specifier: ^19.2.18
+        version: 19.2.18
+      '@vidact/react-types':
+        specifier: workspace:*
+        version: link:../../packages/react-types
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vite:
+        specifier: 8.2.2
+        version: 8.2.2(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.0)
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.13.3)(@vitest/browser-playwright@4.1.11)(vite@8.2.2(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.0))
+
   examples/todomvc:
     dependencies:
       '@vidact/runtime':
@@ -210,6 +241,12 @@ importers:
 
   packages/runtime:
     devDependencies:
+      '@types/react':
+        specifier: ^19.2.18
+        version: 19.2.18
+      '@vidact/react-types':
+        specifier: workspace:*
+        version: link:../react-types
       '@vidact/test-support':
         specifier: workspace:*
         version: link:../test-support
@@ -219,6 +256,28 @@ importers:
       typescript:
         specifier: 7.0.2
         version: 7.0.2
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.13.3)(@vitest/browser-playwright@4.1.11)(vite@8.2.2(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.0))
+
+  packages/start:
+    dependencies:
+      '@vidact/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@vidact/vite':
+        specifier: workspace:*
+        version: link:../vite-plugin
+    devDependencies:
+      '@types/node':
+        specifier: ^24.13.3
+        version: 24.13.3
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vite:
+        specifier: 8.2.2
+        version: 8.2.2(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.0)
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.3)(@vitest/browser-playwright@4.1.11)(vite@8.2.2(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.0))

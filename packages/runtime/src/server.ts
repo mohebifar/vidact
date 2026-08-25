@@ -1,6 +1,19 @@
 // oxlint-disable-next-line typescript/triple-slash-reference -- Include compiler feature defines.
 /// <reference path="./env.d.ts" />
 
+import type { JSX as ReactJSX } from 'react'
+
+import {
+  LINK_IDENTITY_PROPS,
+  META_IDENTITY_PROPS,
+  SERVER_BOOLEAN_ATTRIBUTES,
+  VALID_ATTRIBUTE_NAME,
+  serverHtmlAttributeName,
+} from './dom/attributes.ts'
+import { UNITLESS_STYLE_PROPERTIES } from './dom/style-properties.ts'
+import type { PreinitOptions, PreloadOptions, ResourceHintOptions } from './framework.ts'
+import { isPromiseLike } from './shared/promise.ts'
+
 const SERVER_NODE = Symbol.for('vidact.v1.ServerNode')
 const SERVER_NODE_KIND = Symbol.for('vidact.v1.ServerNodeKind')
 const SERVER_CONTEXT = Symbol('Vidact.ServerContext')
@@ -34,6 +47,23 @@ type ServerRenderable = {
     readonly input: Record<string, unknown>
     readonly construct: (input: Record<string, unknown>) => ServerChild
   }
+}
+
+type ServerIntrinsicElements = {
+  [Name in keyof ReactJSX.IntrinsicElements]: Omit<ReactJSX.IntrinsicElements[Name], 'children'> & {
+    readonly children?: ServerChild
+  }
+}
+
+export namespace JSX {
+  export type Element = ServerNode
+  export type ElementType = keyof IntrinsicElements | ServerComponent | ServerRenderable
+
+  export interface ElementChildrenAttribute extends ReactJSX.ElementChildrenAttribute {}
+
+  export interface IntrinsicAttributes extends ReactJSX.IntrinsicAttributes {}
+
+  export type IntrinsicElements = ServerIntrinsicElements
 }
 
 export function createRenderable(
@@ -183,79 +213,6 @@ const VOID_ELEMENTS = new Set([
   'wbr',
 ])
 
-const BOOLEAN_ATTRIBUTES = new Set([
-  'allowFullScreen',
-  'async',
-  'autoFocus',
-  'autoPlay',
-  'checked',
-  'controls',
-  'default',
-  'defer',
-  'disabled',
-  'formNoValidate',
-  'hidden',
-  'inert',
-  'itemScope',
-  'loop',
-  'multiple',
-  'muted',
-  'noModule',
-  'noValidate',
-  'open',
-  'playsInline',
-  'readOnly',
-  'required',
-  'reversed',
-  'selected',
-])
-
-const UNITLESS_STYLES = new Set([
-  'animationIterationCount',
-  'aspectRatio',
-  'columnCount',
-  'fillOpacity',
-  'flex',
-  'flexGrow',
-  'flexShrink',
-  'fontWeight',
-  'gridArea',
-  'gridColumn',
-  'gridColumnEnd',
-  'gridColumnStart',
-  'gridRow',
-  'gridRowEnd',
-  'gridRowStart',
-  'lineHeight',
-  'opacity',
-  'order',
-  'orphans',
-  'scale',
-  'strokeOpacity',
-  'strokeWidth',
-  'tabSize',
-  'widows',
-  'zIndex',
-  'zoom',
-])
-
-const ATTRIBUTE_ALIASES: Readonly<Record<string, string>> = {
-  acceptCharset: 'accept-charset',
-  className: 'class',
-  crossOrigin: 'crossorigin',
-  defaultChecked: 'checked',
-  defaultValue: 'value',
-  formAction: 'formaction',
-  htmlFor: 'for',
-  httpEquiv: 'http-equiv',
-  itemID: 'itemid',
-  itemProp: 'itemprop',
-  itemRef: 'itemref',
-  itemScope: 'itemscope',
-  itemType: 'itemtype',
-}
-
-const VALID_ATTRIBUTE_NAME = /^[A-Za-z_:][A-Za-z0-9:._-]*$/
 const HYDRATION_PREFIX = 'vidact:v1'
 const UNSAFE_HTML = typeof __VIDACT_UNSAFE_HTML__ !== 'undefined' && __VIDACT_UNSAFE_HTML__
 
@@ -331,28 +288,6 @@ export function cache<Arguments extends readonly unknown[], Result>(
 
 export function cacheSignal(): AbortSignal | null {
   return activeFrameworkRender?.signal ?? null
-}
-
-export interface ResourceHintOptions {
-  readonly crossOrigin?: '' | 'anonymous' | 'use-credentials'
-}
-
-export interface PreloadOptions extends ResourceHintOptions {
-  readonly as: string
-  readonly fetchPriority?: 'high' | 'low' | 'auto'
-  readonly imageSizes?: string
-  readonly imageSrcSet?: string
-  readonly integrity?: string
-  readonly nonce?: string
-  readonly referrerPolicy?: string
-  readonly type?: string
-}
-
-export interface PreinitOptions extends ResourceHintOptions {
-  readonly as: 'script' | 'style'
-  readonly precedence?: string
-  readonly integrity?: string
-  readonly nonce?: string
 }
 
 export function preconnect(href: string, options: ResourceHintOptions = {}): void {
@@ -867,13 +802,6 @@ function isServerContext<Value>(value: unknown): value is ServerContext<Value> {
   return typeof value === 'object' && value !== null && SERVER_CONTEXT in value
 }
 
-function isPromiseLike<Value>(value: unknown): value is PromiseLike<Value> {
-  return (
-    ((typeof value === 'object' && value !== null) || typeof value === 'function') &&
-    typeof (value as PromiseLike<Value>).then === 'function'
-  )
-}
-
 function isServerAsyncResource<Value>(value: unknown): value is ServerAsyncResource<Value> {
   return typeof value === 'object' && value !== null && SERVER_ASYNC_RESOURCE in value
 }
@@ -933,7 +861,7 @@ function serializeAttribute(name: string, value: unknown): string {
     typeof value === 'function' &&
     typeof Reflect.get(value, 'permalink') === 'string'
   ) {
-    return ` ${attributeName(name)}="${escapeAttribute(Reflect.get(value, 'permalink') as string)}"`
+    return ` ${serverHtmlAttributeName(name)}="${escapeAttribute(Reflect.get(value, 'permalink') as string)}"`
   }
   if (
     name === 'children' ||
@@ -950,11 +878,11 @@ function serializeAttribute(name: string, value: unknown): string {
     return ''
   }
   if (name === 'style') return serializeStyleAttribute(value)
-  const normalizedName = attributeName(name)
+  const normalizedName = serverHtmlAttributeName(name)
   if (name.startsWith('data-') || name.startsWith('aria-')) {
     return ` ${normalizedName}="${escapeAttribute(String(value))}"`
   }
-  if (BOOLEAN_ATTRIBUTES.has(name)) return value ? ` ${normalizedName}=""` : ''
+  if (SERVER_BOOLEAN_ATTRIBUTES.has(name)) return value ? ` ${normalizedName}=""` : ''
   if (typeof value === 'boolean') return ''
   if (!VALID_ATTRIBUTE_NAME.test(normalizedName)) return ''
   return ` ${normalizedName}="${escapeAttribute(String(value))}"`
@@ -1010,14 +938,13 @@ function hasOwnProp(props: ServerProps, name: string): boolean {
 function metadataKey(type: string, props: ServerProps): string {
   if (type === 'title') return 'title'
   if (type === 'meta') {
-    for (const name of ['charSet', 'name', 'property', 'httpEquiv'] as const) {
+    for (const name of META_IDENTITY_PROPS) {
       const value = props?.[name]
       if (value !== undefined) return `meta:${name}:${String(value)}`
     }
   }
-  if (type === 'link') {
-    return `link:${String(props?.rel ?? '')}:${String(props?.href ?? '')}:${String(props?.as ?? '')}`
-  }
+  if (type === 'link')
+    return `link:${LINK_IDENTITY_PROPS.map((name) => String(props?.[name] ?? '')).join(':')}`
   if (type === 'style') return `style:${String(props?.href ?? '')}`
   if (type === 'script') return `script:${String(props?.src ?? '')}`
   return `${type}:${JSON.stringify(props)}`
@@ -1109,10 +1036,6 @@ function frameworkAbortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
 }
 
-function attributeName(name: string): string {
-  return ATTRIBUTE_ALIASES[name] ?? name
-}
-
 function serializeStyleAttribute(value: unknown, hiddenByActivity = false): string {
   if (typeof value === 'string') {
     const separator = value === '' || value.endsWith(';') ? '' : ';'
@@ -1129,7 +1052,9 @@ function serializeStyleAttribute(value: unknown, hiddenByActivity = false): stri
       if (item === null || item === undefined || typeof item === 'boolean' || item === '') return []
       const cssName = name.startsWith('--') ? name : camelToKebab(name)
       const cssValue =
-        typeof item === 'number' && item !== 0 && !UNITLESS_STYLES.has(name) ? `${item}px` : item
+        typeof item === 'number' && item !== 0 && !UNITLESS_STYLE_PROPERTIES.has(name)
+          ? `${item}px`
+          : item
       return `${cssName}:${String(cssValue)}`
     })
   if (hiddenByActivity) declarations.push('display:none!important')

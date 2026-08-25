@@ -1,11 +1,11 @@
 'use server'
 
 import {
-  createClientBoundary,
   createClientModuleManifest,
   createClientReference,
   type FrameworkValue,
-} from '@vidact/runtime/framework/server'
+} from '@vidact/runtime/framework/protocol'
+import { createClientBoundary } from '@vidact/runtime/framework/server'
 
 import type { Product } from './model.ts'
 import { ShopApp } from './ShopApp.tsx'

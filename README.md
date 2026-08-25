@@ -118,7 +118,8 @@ published-source maps and never fall back to a React runtime. Production
 packages contain built ESM, declarations, maps, isolated entry points, and
 clean-install gates.
 
-See [the React migration guide](docs/migration/from-react.md),
+See [the React compatibility matrix](docs/reference/react-compatibility.md),
+[the React migration guide](docs/migration/from-react.md),
 [release policy](docs/release-policy.md), and
 [architecture decisions](docs/architecture/README.md) for the supported and
 intentionally different contracts.

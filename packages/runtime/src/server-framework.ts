@@ -1,4 +1,4 @@
-import type { CompiledComponentResult } from './compiled.ts'
+import type { CompiledComponentResult } from './compiled/types.ts'
 import {
   decodeFrameworkValue,
   encodeFrameworkValue,
@@ -16,9 +16,7 @@ import {
   type ServerNode,
   type ServerRenderOptions,
 } from './server.ts'
-
-export * from './server.ts'
-export * from './framework-protocol.ts'
+import { abortReason, withAbort } from './shared/promise.ts'
 
 export interface FrameworkRenderOptions extends ServerRenderOptions {
   readonly signal?: AbortSignal
@@ -375,24 +373,6 @@ function waitForDrain(destination: PipeDestination, signal: AbortSignal): Promis
   })
 }
 
-function withAbort<Value>(operation: Promise<Value>, signal: AbortSignal): Promise<Value> {
-  if (signal.aborted) return Promise.reject(abortReason(signal))
-  return new Promise((resolve, reject) => {
-    const onAbort = (): void => reject(abortReason(signal))
-    signal.addEventListener('abort', onAbort, { once: true })
-    void operation.then(
-      (value) => {
-        signal.removeEventListener('abort', onAbort)
-        resolve(value)
-      },
-      (error: unknown) => {
-        signal.removeEventListener('abort', onAbort)
-        reject(error)
-      },
-    )
-  })
-}
-
 function linkedAbortController(signal?: AbortSignal): AbortController {
   const controller = new AbortController()
   if (signal?.aborted) controller.abort(signal.reason)
@@ -410,10 +390,6 @@ function normalizeChunkSize(value: number | undefined): number {
 
 function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) throw abortReason(signal)
-}
-
-function abortReason(signal: AbortSignal): unknown {
-  return signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
 }
 
 function isRecord(value: unknown): value is Record<string, FrameworkValue> {

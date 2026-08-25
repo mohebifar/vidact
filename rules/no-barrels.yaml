@@ -1,0 +1,36 @@
+id: no-barrels
+language: typescript
+severity: error
+files:
+  - "**/packages/runtime/**/*.ts"
+ignores:
+  - "vendor/**"
+  - "**/packages/runtime/**/index.ts"
+rule:
+  any:
+    - pattern:
+        context: export {$$$} from '$$$'
+        strictness: relaxed
+    - pattern:
+        context: export * from '$$$'
+        strictness: relaxed
+    - kind: export_statement
+      has:
+        kind: export_clause
+        has:
+          kind: export_specifier
+          has:
+            kind: identifier
+            pattern: $I
+      inside:
+        kind: program
+        has:
+          kind: import_statement
+          has:
+            kind: import_clause
+            has:
+              stopBy: end
+              kind: import_specifier
+              has:
+                kind: identifier
+                pattern: $I

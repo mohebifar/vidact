@@ -150,19 +150,22 @@ describe('vidact compiler client', () => {
     )
 
     expect(compilation.configuration.target).toBe('hydrate')
-    expect(compilation.code).toContain('from "@vidact/runtime/hydrate"')
-    expect(compilation.code).not.toContain('from "@vidact/runtime"')
+    expect(compilation.code).toContain('import "@vidact/runtime/hydrate"')
+    expect(compilation.code).toContain('from "@vidact/runtime"')
   })
 
   it('selects isolated async React facades for every compiler target', () => {
     expect(virtualReactModule({ features: ['async'] })).toContain('@vidact/runtime/async"')
-    expect(virtualReactModule({ target: 'hydrate', features: ['async'] })).toContain(
-      '@vidact/runtime/async/hydrate',
-    )
+    const hydrate = virtualReactModule({ target: 'hydrate', features: ['async'] })
+    expect(hydrate).toContain('import "@vidact/runtime/hydrate"')
+    expect(hydrate).toContain('@vidact/runtime/async"')
     expect(virtualReactModule({ target: 'server', features: ['async'] })).toContain(
-      '@vidact/runtime/async/server',
+      '@vidact/runtime/server',
     )
     expect(virtualReactModule({ features: ['async'] })).toContain('Suspense, lazy')
+    expect(virtualReactModule({ features: ['async'] })).toContain(
+      'Suspense, lazy, use } from "@vidact/runtime/async"',
+    )
     expect(virtualReactModule({})).not.toContain('Suspense, lazy')
   })
 
@@ -180,15 +183,15 @@ describe('vidact compiler client', () => {
 
   it('selects isolated concurrent facades and exposes scheduler APIs only when enabled', () => {
     expect(virtualReactModule({ features: ['concurrent'] })).toContain('@vidact/runtime/concurrent')
-    expect(virtualReactModule({ target: 'hydrate', features: ['concurrent'] })).toContain(
-      '@vidact/runtime/concurrent/hydrate',
-    )
+    const hydrate = virtualReactModule({ target: 'hydrate', features: ['concurrent'] })
+    expect(hydrate).toContain('import "@vidact/runtime/hydrate"')
+    expect(hydrate).toContain('@vidact/runtime/concurrent"')
     expect(virtualReactModule({ target: 'server', features: ['concurrent'] })).toContain(
-      '@vidact/runtime/concurrent/server',
+      '@vidact/runtime/server',
     )
-    expect(virtualReactModule({ features: ['async', 'concurrent'] })).toContain(
-      '@vidact/runtime/async/concurrent',
-    )
+    const combined = virtualReactModule({ features: ['async', 'concurrent'] })
+    expect(combined).toContain('@vidact/runtime/async"')
+    expect(combined).toContain('@vidact/runtime/concurrent"')
     expect(virtualReactModule({ features: ['concurrent'] })).toContain(
       'startTransition, useDeferredValue, useTransition',
     )
@@ -201,11 +204,11 @@ describe('vidact compiler client', () => {
     expect(virtualReactModule({ features: ['retained-ui'] })).toContain(
       'export { Activity } from "@vidact/runtime/retained-ui"',
     )
-    expect(virtualReactModule({ target: 'hydrate', features: ['retained-ui'] })).toContain(
-      '@vidact/runtime/retained-ui/hydrate',
-    )
+    const hydrate = virtualReactModule({ target: 'hydrate', features: ['retained-ui'] })
+    expect(hydrate).toContain('import "@vidact/runtime/hydrate"')
+    expect(hydrate).toContain('@vidact/runtime/retained-ui"')
     expect(virtualReactModule({ target: 'server', features: ['retained-ui'] })).toContain(
-      '@vidact/runtime/retained-ui/server',
+      '@vidact/runtime/server',
     )
     expect(virtualReactModule({})).not.toContain('Activity')
   })
@@ -214,11 +217,11 @@ describe('vidact compiler client', () => {
     expect(virtualReactModule({ features: ['profiling'] })).toContain(
       'export { Profiler, captureOwnerStack, useDebugValue } from "@vidact/runtime/profiling"',
     )
-    expect(virtualReactModule({ target: 'hydrate', features: ['profiling'] })).toContain(
-      '@vidact/runtime/profiling/hydrate',
-    )
+    const hydrate = virtualReactModule({ target: 'hydrate', features: ['profiling'] })
+    expect(hydrate).toContain('import "@vidact/runtime/hydrate"')
+    expect(hydrate).toContain('@vidact/runtime/profiling"')
     expect(virtualReactModule({ target: 'server', features: ['profiling'] })).toContain(
-      '@vidact/runtime/profiling/server',
+      '@vidact/runtime/server',
     )
     expect(virtualReactModule({})).not.toContain('captureOwnerStack')
   })
@@ -228,13 +231,13 @@ describe('vidact compiler client', () => {
       'cache, cacheSignal',
     )
     expect(virtualReactModule({ target: 'server', features: ['framework'] })).toContain(
-      '@vidact/runtime/framework/server',
+      '@vidact/runtime/server',
     )
     expect(virtualReactDomModule({ features: ['framework'] })).toContain(
       'preconnect, prefetchDNS, preinit, preinitModule, preload, preloadModule',
     )
     expect(virtualReactDomModule({ target: 'hydrate', features: ['framework'] })).toContain(
-      '@vidact/runtime/framework/hydrate',
+      '@vidact/runtime/framework',
     )
     expect(virtualReactDomModule({})).not.toContain('preconnect')
     expect(
@@ -251,15 +254,15 @@ describe('vidact compiler client', () => {
 
   it('selects isolated Actions facades and exposes form APIs only when enabled', () => {
     expect(virtualReactModule({ features: ['actions'] })).toContain('@vidact/runtime/actions"')
-    expect(virtualReactModule({ target: 'hydrate', features: ['actions'] })).toContain(
-      '@vidact/runtime/actions/hydrate',
-    )
+    const hydrate = virtualReactModule({ target: 'hydrate', features: ['actions'] })
+    expect(hydrate).toContain('import "@vidact/runtime/hydrate"')
+    expect(hydrate).toContain('@vidact/runtime/actions"')
     expect(virtualReactModule({ target: 'server', features: ['actions'] })).toContain(
-      '@vidact/runtime/actions/server',
+      '@vidact/runtime/server',
     )
-    expect(virtualReactModule({ features: ['async', 'actions'] })).toContain(
-      '@vidact/runtime/async/actions',
-    )
+    const combined = virtualReactModule({ features: ['async', 'actions'] })
+    expect(combined).toContain('@vidact/runtime/async"')
+    expect(combined).toContain('@vidact/runtime/actions"')
     expect(virtualReactModule({ features: ['actions'] })).toContain('useActionState, useOptimistic')
     expect(virtualReactModule({ features: ['actions'] })).not.toContain('startTransition')
     expect(virtualReactModule({})).not.toContain('useActionState')

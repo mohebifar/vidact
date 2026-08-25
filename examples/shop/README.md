@@ -11,9 +11,13 @@ client-only demo:
 - fulfilled catalog markup claimed without replacement while input events are replayable;
 - owner-safe Vite HMR that replaces the hydrated client boundary;
 - category refetches that reveal a skeleton grid through `Suspense` and `use(promise)`;
-- application-owned shadcn components using the Lyra preset, Neutral tokens, and published Base UI
-  primitives compiled from `node_modules` without a package include list;
+- application-owned shadcn components using the Lyra preset, a warm Northstar token theme, and
+  published Base UI primitives compiled from `node_modules` without a package include list;
+- Tailwind utilities colocated with every layout and visual rule; `style.css` contains only the
+  Tailwind/shadcn imports, theme tokens, and standard base layer;
 - client-side search, category filters, cart quantities, totals, and mock checkout;
+- a request-scoped cart context shared by the header, product grid, and cart panel without prop
+  drilling;
 - browser assertions for surgical mutations and retained node identity, plus separate server, HMR,
   production-artifact, and production-start tests.
 

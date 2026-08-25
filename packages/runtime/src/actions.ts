@@ -6,8 +6,8 @@ import {
   registerCompiledCleanup,
   runWithCompiledContext,
   useContext,
-  type CompiledScope,
-} from './compiled.ts'
+} from './compiled/core.ts'
+import type { CompiledScope } from './compiled/types.ts'
 import {
   registerTransitionAborter,
   registerTransitionFinalizer,
@@ -76,17 +76,6 @@ const functionActions = new WeakMap<Element, FunctionFormAction>()
 const formStatusContext = createContext<FormStatusStore | undefined>(undefined)
 let actionDomInstalled = false
 let activeActionFrame: ActionFrame | undefined
-
-export * from './index.ts'
-export {
-  createCompiledDeferred,
-  createCompiledTransition,
-  flushSync,
-  startTransition,
-  useDeferredValue,
-  useTransition,
-  type CompiledTransitionSlot,
-} from './concurrent.ts'
 
 export function createCompiledActionState<State, Payload>(
   scope: CompiledScope,

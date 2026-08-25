@@ -1,9 +1,5 @@
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 
-export const HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml'
-export const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
-export const MATHML_NAMESPACE = 'http://www.w3.org/1998/Math/MathML'
-
 export const INTERNAL_NAMESPACE_PROP = '__vidactNamespace'
 export const INTERNAL_COMPONENT_SPREAD_PROP = Symbol(DEV ? 'Vidact.ComponentSpread' : undefined)
 

@@ -21,14 +21,14 @@ import {
   useActionState,
   useFormStatus,
   useOptimistic,
-} from '../../src/server-actions.ts'
+} from '../../src/server.ts'
 import {
   Profiler as ServerProfiler,
   captureOwnerStack as captureServerOwnerStack,
   jsx as profilingJsx,
   renderToStaticMarkup as renderProfilingToStaticMarkup,
   useDebugValue as useServerDebugValue,
-} from '../../src/server-profiling.ts'
+} from '../../src/server.ts'
 import {
   Activity as ServerActivity,
   cloneRenderable,
@@ -61,6 +61,9 @@ describe('server rendering', () => {
     ).toBe(
       '<main class="shell" data-label="a&quot;&lt;&amp;" hidden="" style="line-height:1.2;width:4px">Hello &lt;script&gt;&amp; goodbye<input disabled=""></main>',
     )
+    expect(
+      renderToStaticMarkup(() => <input defaultChecked defaultValue="initial" itemID="field" />),
+    ).toBe('<input checked="" value="initial" itemid="field">')
   })
 
   it('constructs and clones opaque server renderable capabilities', () => {

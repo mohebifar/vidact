@@ -1,4 +1,4 @@
-import { createRoot } from '@vidact/runtime/concurrent'
+import { createRoot } from '@vidact/runtime'
 import { useDeferredValue, useState, useTransition } from 'react'
 
 function ConcurrentCounter(): JSX.Element {

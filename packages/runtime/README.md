@@ -8,25 +8,23 @@ primitives directly.
 - `@vidact/runtime/hydrate`: client hydration and hydration JSX runtimes
 - `@vidact/runtime/server`: deterministic string/static server rendering
 - `@vidact/runtime/async`: opt-in resources, `lazy`, and staged Suspense
-- `@vidact/runtime/async/hydrate`: async hydration and pending fallback claiming
-- `@vidact/runtime/async/server`: deterministic async server boundaries
 - `@vidact/runtime/concurrent`: transitions, deferred values, and synchronous flushing
-- `@vidact/runtime/concurrent/hydrate`: concurrent client hydration
-- `@vidact/runtime/concurrent/server`: deterministic concurrent server shims
-- `@vidact/runtime/async/concurrent`: composed async and concurrent capabilities;
-  hydrate and server variants follow the same suffix convention
 - `@vidact/runtime/actions`: queued action state, optimistic layers, function
   form actions, and form status
-- `@vidact/runtime/actions/hydrate`: Actions client hydration
-- `@vidact/runtime/actions/server`: deterministic Actions state and permalink
-  form serialization
-- `@vidact/runtime/async/actions`: composed async and Actions capabilities;
-  hydrate and server variants follow the same suffix convention
+- `@vidact/runtime/retained-ui`: retained Activity connections
+- `@vidact/runtime/profiling`: compiler-owned profiling and owner stacks
+- `@vidact/runtime/framework`: browser framework metadata and resource hints
+- `@vidact/runtime/framework/protocol`: framework references and closed value serialization
 - `@vidact/runtime/framework/server`: request-scoped streams, continuations,
-  manifest-checked client references, and explicit client boundaries
+  and explicit client boundaries
 - `@vidact/runtime/framework/hydrate`: async client-module loading, event replay,
   independent boundary hydration, and boundary replacement
 - `@vidact/runtime/testing`: deterministic runtime queue draining
+
+Capabilities compose through separate imports. Hydrate builds import
+`@vidact/runtime/hydrate` plus each enabled client feature; server builds use
+`@vidact/runtime/server` plus the framework protocol or streaming entry when
+needed. There are no feature cross-product or target-alias facades.
 
 The compiler and runtime validate the `vidact-runtime-v1` protocol. Server and
 hydration builds must use matching package versions.

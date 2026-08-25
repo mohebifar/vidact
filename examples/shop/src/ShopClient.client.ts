@@ -1,7 +1,7 @@
 'use client'
 
-import { createResource } from '@vidact/runtime/async/hydrate'
-import { defineClientBoundary } from '@vidact/runtime/framework/hydrate'
+import { createResource } from '@vidact/runtime/async'
+import { defineClientBoundary } from '@vidact/runtime/framework'
 
 import type { Product } from './model.ts'
 import { ShopApp } from './ShopApp.tsx'

@@ -4,6 +4,9 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   plugins: [vidact()],
+  build: {
+    minify: false,
+  },
   test: {
     include: ['src/**/*.browser.test.ts'],
     browser: {

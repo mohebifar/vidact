@@ -5,6 +5,7 @@
 - Supersedes in part: [Opaque raw HTML subtrees](opaque-raw-html-subtrees.md)
 - Superseded in part by: [Compiler-injected DOM capability reachability](compiler-injected-dom-capabilities.md)
 - Superseded in part by: [Node-API compiler distribution and shared tooling interface](node-api-compiler-distribution-and-shared-tooling-interface.md)
+- Superseded in part by: [Capability-owned runtime entrypoints](capability-owned-runtime-entrypoints.md)
 - Amends: [Component spans and compatibility corpus](component-spans-and-compatibility-corpus.md)
 
 ## Context

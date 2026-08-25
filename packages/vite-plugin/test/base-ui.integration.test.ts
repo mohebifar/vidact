@@ -87,12 +87,8 @@ async function buildBaseUiApp(target: 'client' | 'server', bundleRuntime = false
   if (bundleRuntime) {
     aliases.push(
       {
-        find: '@vidact/runtime/profiling/server',
-        replacement: join(import.meta.dirname, '../../runtime/src/server-profiling.ts'),
-      },
-      {
         find: '@vidact/runtime/server/jsx-runtime',
-        replacement: join(import.meta.dirname, '../../runtime/src/server-jsx-runtime.ts'),
+        replacement: join(import.meta.dirname, '../../runtime/src/server.ts'),
       },
       {
         find: '@vidact/runtime/server',

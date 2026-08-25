@@ -1,50 +1,5 @@
 import { isHydrating } from '../hydration-bridge.ts'
-
-const unitlessProperties = new Set([
-  'animationIterationCount',
-  'aspectRatio',
-  'borderImageOutset',
-  'borderImageSlice',
-  'borderImageWidth',
-  'boxFlex',
-  'boxFlexGroup',
-  'boxOrdinalGroup',
-  'columnCount',
-  'columns',
-  'flex',
-  'flexGrow',
-  'flexNegative',
-  'flexOrder',
-  'flexPositive',
-  'flexShrink',
-  'floodOpacity',
-  'fontWeight',
-  'gridArea',
-  'gridColumn',
-  'gridColumnEnd',
-  'gridColumnSpan',
-  'gridColumnStart',
-  'gridRow',
-  'gridRowEnd',
-  'gridRowSpan',
-  'gridRowStart',
-  'lineClamp',
-  'lineHeight',
-  'opacity',
-  'order',
-  'orphans',
-  'scale',
-  'stopOpacity',
-  'strokeDasharray',
-  'strokeDashoffset',
-  'strokeMiterlimit',
-  'strokeOpacity',
-  'strokeWidth',
-  'tabSize',
-  'widows',
-  'zIndex',
-  'zoom',
-])
+import { UNITLESS_STYLE_PROPERTIES } from './style-properties.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 let retainedUiEnabled = typeof __VIDACT_RETAINED_UI__ !== 'undefined' && __VIDACT_RETAINED_UI__
@@ -116,7 +71,7 @@ function hydrationStyleValue(element: Element, style: CSSStyleDeclaration, name:
 function serializeStyleValue(name: string, value: unknown): string {
   if (value === null || value === undefined || typeof value === 'boolean' || value === '') return ''
   if (name.startsWith('--')) return String(value).trim()
-  if (typeof value === 'number' && value !== 0 && !unitlessProperties.has(name)) {
+  if (typeof value === 'number' && value !== 0 && !UNITLESS_STYLE_PROPERTIES.has(name)) {
     return `${value}px`
   }
   return String(value).trim()

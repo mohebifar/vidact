@@ -1,7 +1,4 @@
-export * from './async-actions.ts'
-export * from './framework-protocol.ts'
-
-import type { CompiledComponentResult } from './compiled.ts'
+import type { CompiledComponentResult } from './compiled/types.ts'
 import { installFrameworkMetadata } from './direct-dom.ts'
 import type { FrameworkValue } from './framework-protocol.ts'
 import {

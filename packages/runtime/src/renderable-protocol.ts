@@ -1,4 +1,4 @@
-const RENDERABLE = Symbol.for('vidact.v1.Renderable')
+export const RENDERABLE = Symbol.for('vidact.v1.Renderable')
 
 export interface RenderableProtocol {
   readonly [RENDERABLE]: {
@@ -20,5 +20,3 @@ export function materializeRenderable(value: RenderableProtocol): unknown {
   const internals = value[RENDERABLE]
   return internals.construct(internals.input as never)
 }
-
-export { RENDERABLE }

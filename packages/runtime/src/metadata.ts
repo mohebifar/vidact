@@ -1,4 +1,9 @@
-import { registerCompiledCleanup } from './compiled.ts'
+import { registerCompiledCleanup } from './compiled/core.ts'
+import {
+  LINK_IDENTITY_PROPS,
+  META_IDENTITY_ATTRIBUTES,
+  META_IDENTITY_PROPS,
+} from './dom/attributes.ts'
 import { applyBaseDomProp, installDomPropHandler } from './dom/properties.ts'
 
 type MetadataEntry = {
@@ -141,9 +146,9 @@ function detachMetadataOwner(owner: MetadataOwner): void {
 function isMetadataIdentityProp(elementName: string, propName: string): boolean {
   if (propName === 'precedence') return elementName === 'link' || elementName === 'style'
   if (elementName === 'meta') {
-    return ['charSet', 'name', 'property', 'httpEquiv'].includes(propName)
+    return (META_IDENTITY_PROPS as readonly string[]).includes(propName)
   }
-  if (elementName === 'link') return ['rel', 'href', 'as'].includes(propName)
+  if (elementName === 'link') return (LINK_IDENTITY_PROPS as readonly string[]).includes(propName)
   if (elementName === 'script') return propName === 'src'
   return false
 }
@@ -152,7 +157,7 @@ function metadataKey(element: Element): string {
   const name = element.localName
   if (name === 'title') return 'title'
   if (name === 'meta') {
-    for (const attribute of ['charset', 'name', 'property', 'http-equiv']) {
+    for (const attribute of META_IDENTITY_ATTRIBUTES) {
       if (element.hasAttribute(attribute))
         return `meta:${attribute}:${element.getAttribute(attribute)}`
     }

@@ -1,17 +1,16 @@
-import type { CompiledComponentResult, MountCompiledOptions } from './compiled.ts'
+import type { MountCompiledOptions } from './compiled/core.ts'
+import type { CompiledComponentResult } from './compiled/types.ts'
 import {
   decodeFrameworkValue,
-  isClientBoundaryDefinition,
   isClientReference,
   type ClientReference,
   type FrameworkValue,
-} from './framework.ts'
+} from './framework-protocol.ts'
+import { isClientBoundaryDefinition } from './framework.ts'
 import { installHydration } from './hydration.ts'
 import { hydrateRoot, type CompiledRoot } from './root.ts'
 
 installHydration()
-
-export * from './framework.ts'
 
 export interface EventReplayQueue {
   readonly dispose: () => void

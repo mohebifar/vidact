@@ -56,14 +56,14 @@ try {
     })
   })
   await page.goto(baseUrl.href, { waitUntil: 'commit' })
-  await page.waitForSelector('.shop-shell')
+  await page.waitForSelector('[data-vidact-example="shop"]')
   await clientIntercepted
   await page.evaluate(() => {
     globalThis.__shopIdentity = {
-      shell: document.querySelector('.shop-shell'),
-      search: document.querySelector('.search-field input'),
-      category: document.querySelectorAll('.category-filters button')[2],
-      product: document.querySelector('.product-card'),
+      shell: document.querySelector('[data-vidact-example="shop"]'),
+      search: document.querySelector('[data-shop-slot="catalog-search"]'),
+      category: document.querySelectorAll('[data-slot="toggle-group"] button')[2],
+      product: document.querySelector('[data-product-card]'),
     }
     globalThis.__shopHydrationRecords = []
     globalThis.__shopHydrationObserver = new MutationObserver((records) => {
@@ -84,10 +84,10 @@ try {
     globalThis.__shopHydrationObserver.disconnect()
     const identity = globalThis.__shopIdentity
     const nodes = {
-      shell: document.querySelector('.shop-shell'),
-      search: document.querySelector('.search-field input'),
-      category: document.querySelectorAll('.category-filters button')[2],
-      product: document.querySelector('.product-card'),
+      shell: document.querySelector('[data-vidact-example="shop"]'),
+      search: document.querySelector('[data-shop-slot="catalog-search"]'),
+      category: document.querySelectorAll('[data-slot="toggle-group"] button')[2],
+      product: document.querySelector('[data-product-card]'),
     }
     const retained = Object.fromEntries(
       Object.keys(identity).map((key) => [key, identity[key] === nodes[key]]),
@@ -114,7 +114,9 @@ try {
   )
 
   await page.getByRole('button', { name: 'Add Ridge Bottle to cart' }).click()
-  await page.waitForFunction(() => document.querySelector('.cart-link')?.textContent.includes('1'))
+  await page.waitForFunction(() =>
+    document.querySelector('[data-shop-slot="cart-link"]')?.textContent.includes('1'),
+  )
   const responsive = await page.evaluate(
     () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
   )

@@ -6,7 +6,7 @@ import {
   createCompiledScope,
   createCompiledState,
   mountCompiled,
-} from '../../src/compiled.ts'
+} from '../../src/compiled/core.ts'
 import { h } from '../../src/direct-dom.ts'
 import { source } from '../../src/source-mask.ts'
 import { readCompiledOwnerMetrics } from '../../src/testing.ts'

@@ -1,11 +1,11 @@
-import { hydrateRoot } from '@vidact/runtime/profiling/hydrate'
+import { hydrateRoot } from '@vidact/runtime/hydrate'
 import {
   Profiler as ServerProfiler,
   jsx as serverJsx,
   jsxs as serverJsxs,
   renderToString,
   type ServerChild,
-} from '@vidact/runtime/profiling/server'
+} from '@vidact/runtime/server'
 import {
   assertMutationEnvelope,
   captureMutations,

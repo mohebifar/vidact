@@ -35,7 +35,7 @@
     "provenance": true
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node ../../scripts/finalize-typescript-package.mjs dist",
+    "build": "node ../../scripts/clean-typescript-package.mjs dist && tsc -p tsconfig.build.json && node ../../scripts/finalize-typescript-package.mjs dist",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {

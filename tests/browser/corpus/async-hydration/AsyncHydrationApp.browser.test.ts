@@ -1,4 +1,4 @@
-import { hydrateRoot } from '@vidact/runtime/async/hydrate'
+import { hydrateRoot } from '@vidact/runtime/hydrate'
 import {
   Suspense as ServerSuspense,
   jsx as serverJsx,

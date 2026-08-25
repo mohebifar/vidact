@@ -2,6 +2,7 @@ import { hydrateRoot } from '@vidact/runtime/hydrate'
 import {
   jsx as serverJsx,
   jsxs as serverJsxs,
+  createContext as createServerContext,
   renderToString,
   useId,
   useState,
@@ -17,7 +18,9 @@ const initialItems = [
   { id: 2, label: 'two' },
 ] as const
 
-function ServerHydrationApp(): ServerChild {
+const ServerTheme = createServerContext('default')
+
+function ServerHydrationContent(): ServerChild {
   const [items] = useState(initialItems)
   const labelId = useId()
   return serverJsxs('section', {
@@ -32,9 +35,16 @@ function ServerHydrationApp(): ServerChild {
   })
 }
 
+function ServerHydrationApp(): ServerChild {
+  return serverJsx(ServerTheme.Provider, {
+    value: 'red',
+    children: serverJsx(ServerHydrationContent, null),
+  })
+}
+
 afterEach(() => document.body.replaceChildren())
 
-it('hydrates server output through the compiled hydrate target and updates surgically', async () => {
+it('hydrates through a transparent context provider and updates surgically', async () => {
   const host = document.createElement('div')
   const serverMarkup = renderToString(() => serverJsx(ServerHydrationApp, null), {
     identifierPrefix: 'e2e-',

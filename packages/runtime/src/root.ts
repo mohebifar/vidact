@@ -1,9 +1,5 @@
-import {
-  hydrateCompiled,
-  mountCompiled,
-  type CompiledComponentResult,
-  type MountCompiledOptions,
-} from './compiled.ts'
+import { hydrateCompiled, mountCompiled, type MountCompiledOptions } from './compiled/core.ts'
+import type { CompiledComponentResult } from './compiled/types.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 

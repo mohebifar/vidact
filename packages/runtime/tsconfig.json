@@ -1,4 +1,24 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"]
+  "compilerOptions": {
+    "jsx": "preserve",
+    "jsxImportSource": "@vidact/react-types",
+    "lib": ["ES2024", "ESNext.Disposable", "DOM", "DOM.Iterable"],
+    "paths": {
+      "@/*": ["./src/*"],
+      "@vidact/runtime": ["./src/index.ts"],
+      "@vidact/runtime/dom/forms": ["./src/dom-forms.ts"],
+      "@vidact/runtime/dom/namespace": ["./src/dom/namespace.ts"],
+      "@vidact/runtime/dom/styles": ["./src/dom-styles.ts"],
+      "@vidact/runtime/framework/protocol": ["./src/framework-protocol.ts"],
+      "@vidact/runtime/framework/server": ["./src/server-framework.ts"],
+      "@vidact/runtime/framework/server/jsx-dev-runtime": ["./src/server.ts"],
+      "@vidact/runtime/framework/server/jsx-runtime": ["./src/server.ts"],
+      "@vidact/runtime/jsx-runtime": ["./src/jsx-runtime.ts"],
+      "@vidact/runtime/server": ["./src/server.ts"],
+      "@vidact/runtime/server/jsx-dev-runtime": ["./src/server.ts"],
+      "@vidact/runtime/server/jsx-runtime": ["./src/server.ts"]
+    }
+  },
+  "include": ["src", "test", "vitest*.config.ts"]
 }

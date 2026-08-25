@@ -35,6 +35,11 @@ through the same equality-checked bridge used for component props. Downstream
 DOM, component props, memo values, and effects subscribe only to the consumer
 source.
 
+Context providers are transparent owned blocks during hydration. They establish
+the logical context frame while their descendants claim the server component,
+element, and child-slot ranges already present in the `vidact:v1` stream; a
+provider does not require or create an additional marker range of its own.
+
 ## Invariants
 
 - The nearest matching provider wins; unrelated context frames remain visible
@@ -47,6 +52,8 @@ source.
   active at their logical owner, not the physical DOM parent.
 - Removing a consumer owner removes its provider subscription before later
   provider writes.
+- Hydrating a provider retains its descendant server nodes and introduces no DOM
+  mutations solely for context ownership.
 - Context source IDs cannot collide with React Compiler-provided prop, state,
   or derived sources and still select the wide-mask runtime when required.
 
@@ -78,6 +85,11 @@ composition remain compiler follow-ups on this runtime contract.
 - `tests/browser/corpus/apps/context/ContextApp.browser.test.ts` proves defaults,
   nearest-provider shadowing, surgical reactive updates, cleanup, and late
   conditional inheritance.
+- `tests/browser/corpus/hydration/HydrationApp.browser.test.ts` proves that a
+  provider can hydrate transparently without replacing its server-rendered
+  descendants.
+- `examples/shop/scripts/smoke-start.mjs` verifies a hydrated framework boundary
+  whose cart consumers share a reactive provider while retaining server nodes.
 - `cargo test -p vidact-compiler`
 - `pnpm --filter @vidact/browser-corpus test`
 - `pnpm size`
