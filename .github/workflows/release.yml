@@ -114,6 +114,9 @@ jobs:
               curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.96.0 --target "$TARGET"
               npm install --global pnpm@10.19.0
               . "$HOME/.cargo/env"
+              if [ "$TARGET" = aarch64-unknown-linux-musl ]; then
+                export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=cc
+              fi
               pnpm install --frozen-lockfile
               pnpm --filter @vidact/compiler exec napi build --manifest-path ../../crates/vidact-node/Cargo.toml --output-dir dist --platform --release --strip --esm --js binding.js --dts binding.d.ts --target "$TARGET"
               pnpm --filter @vidact/compiler test
