@@ -5524,6 +5524,19 @@ fn runtime_import<'a>(
     let mut references = GeneratedReferenceFinder::default();
     references.visit_program(program);
     let framework_metadata = references.names.contains(ENABLE_FRAMEWORK_METADATA);
+    let async_runtime = references.names.contains(CREATE_ASYNC);
+    let concurrent_runtime = [CREATE_DEFERRED, CREATE_TRANSITION]
+        .into_iter()
+        .any(|name| references.names.contains(name));
+    let actions_runtime = [
+        ACTION_FORM,
+        COMPILED_FORM_ACTION,
+        CREATE_ACTION_STATE,
+        CREATE_FORM_STATUS,
+        CREATE_OPTIMISTIC,
+    ]
+    .into_iter()
+    .any(|name| references.names.contains(name));
     let specifiers = oxc_allocator::Vec::from_iter_in(
         names
             .into_iter()
@@ -5552,9 +5565,9 @@ fn runtime_import<'a>(
                 }
             } else {
                 match (
-                    options.feature_enabled(CompilerFeature::Async),
-                    options.feature_enabled(CompilerFeature::Concurrent),
-                    options.feature_enabled(CompilerFeature::Actions),
+                    async_runtime,
+                    concurrent_runtime,
+                    actions_runtime,
                     options.target() == crate::CompilerTarget::Hydrate,
                 ) {
                     (true, _, true, true) => "@vidact/runtime/async/actions/hydrate",
