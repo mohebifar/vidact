@@ -55,9 +55,12 @@ input, and allocation is request/root local.
 
 Core DOM modules call a small hydration-operations bridge. The ordinary client
 entry leaves that bridge inactive; the hydrate entry installs the versioned DOM
-scanner and claimant. This keeps one compiled owner/update ABI without pulling
-the hydrate-only scanner into client chunks. The size gate rejects any client
-fixture containing `hydration.js`.
+scanner and claimant. Structural bindings borrow current or active child-slot
+ranges through that bridge; marker selection, insertion-point shortcuts, and
+nested closing-marker discovery remain owned by the hydrate implementation.
+This keeps one compiled owner/update ABI without pulling hydrate-only scanning
+logic into client chunks. The size gate rejects any client fixture containing
+`hydration.js`.
 
 A missing marker, unsupported protocol version, tag/namespace mismatch, text
 mismatch, or unclaimable range raises a hydration mismatch. The mismatch is

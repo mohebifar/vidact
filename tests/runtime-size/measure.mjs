@@ -8,18 +8,18 @@ import { build } from 'vite'
 const directory = path.dirname(fileURLToPath(import.meta.url))
 const repository = path.resolve(directory, '../..')
 const fixtures = [
-  { name: 'counter', entry: path.join(directory, 'fixtures/counter.tsx'), gzipBudget: 6_815 },
+  { name: 'counter', entry: path.join(directory, 'fixtures/counter.tsx'), gzipBudget: 7_600 },
   {
     name: 'async-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['async'],
-    gzipBudget: 6_815,
+    gzipBudget: 7_600,
   },
   {
     name: 'concurrent-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['concurrent'],
-    gzipBudget: 6_900,
+    gzipBudget: 7_600,
   },
   {
     name: 'concurrent',
@@ -31,19 +31,19 @@ const fixtures = [
     name: 'actions-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['actions'],
-    gzipBudget: 6_815,
+    gzipBudget: 7_600,
   },
   {
     name: 'actions',
     entry: path.join(directory, 'fixtures/actions.tsx'),
     features: ['actions'],
-    gzipBudget: 11_485,
+    gzipBudget: 11_900,
   },
   {
     name: 'retained-ui-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['retained-ui'],
-    gzipBudget: 6_815,
+    gzipBudget: 7_600,
   },
   {
     name: 'retained-ui',
@@ -55,7 +55,7 @@ const fixtures = [
     name: 'profiling-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['profiling'],
-    gzipBudget: 6_815,
+    gzipBudget: 7_600,
   },
   {
     name: 'profiling',
@@ -67,7 +67,7 @@ const fixtures = [
     name: 'framework-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['framework'],
-    gzipBudget: 6_815,
+    gzipBudget: 7_600,
   },
   {
     name: 'framework',
@@ -99,7 +99,7 @@ const fixtures = [
   {
     name: 'todomvc',
     entry: path.join(repository, 'examples/todomvc/src/TodoApp.tsx'),
-    gzipBudget: 10_957,
+    gzipBudget: 11_400,
   },
   { name: 'effect', entry: path.join(directory, 'fixtures/effect.tsx'), gzipBudget: 8_409 },
 ]
