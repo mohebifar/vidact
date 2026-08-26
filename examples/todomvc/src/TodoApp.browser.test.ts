@@ -1,5 +1,6 @@
 import { mountCompiled } from '@vidact/runtime'
 import { afterEach, describe, expect, it } from 'vitest'
+import { userEvent } from 'vitest/browser'
 
 import { TodoApp } from './TodoApp.tsx'
 
@@ -12,7 +13,7 @@ afterEach(() => {
 })
 
 describe('Vidact TodoMVC', () => {
-  it('adds, toggles, filters, edits, removes, and clears array items', () => {
+  it('adds, toggles, filters, edits, removes, and clears array items', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
     dispose = mountCompiled(TodoApp, host).dispose
@@ -44,15 +45,18 @@ describe('Vidact TodoMVC', () => {
     expect(labels(host)).toEqual(['Study React Compiler'])
     expect(host.querySelector('.todo-list')?.getAttribute('data-visible-count')).toBe('1')
 
-    host
-      .querySelector('.todo-list label')
-      ?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    const editedRow = host.querySelector<HTMLElement>('.todo-list li')!
+    const editedLabel = editedRow.querySelector<HTMLLabelElement>('label')!
+    await userEvent.dblClick(editedLabel)
     const edit = host.querySelector<HTMLInputElement>('.edit')
     expect(edit).not.toBeNull()
     if (edit !== null) {
-      edit.value = 'Understand React Compiler'
-      edit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      expect(document.activeElement).toBe(edit)
+      await userEvent.clear(edit)
+      await userEvent.type(edit, 'Understand React Compiler{Enter}')
     }
+    expect(host.querySelector('.todo-list li')).toBe(editedRow)
+    expect(editedRow.querySelector('label')).toBe(editedLabel)
     expect(labels(host)).toEqual(['Understand React Compiler'])
 
     host.querySelector<HTMLButtonElement>('.clear-completed')?.click()

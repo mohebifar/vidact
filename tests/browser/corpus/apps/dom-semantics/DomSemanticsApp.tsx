@@ -187,6 +187,7 @@ export function DomSemanticsApp(): JSX.Element {
         />
       </label>
       <output data-controlled-output>{value}</output>
+      <input data-uncontrolled-default defaultValue="draft" />
       <input data-controlled-restore value="locked" />
       <input data-controlled-stop value="locked" onChange={(event) => event.stopPropagation()} />
       <input

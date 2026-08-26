@@ -129,7 +129,7 @@ export function TodoApp(): JSX.Element {
                 {editingId === todo.id && (
                   <input
                     className="edit"
-                    value={todo.title}
+                    defaultValue={todo.title}
                     aria-label={`Edit ${todo.title}`}
                     onBlur={(event: FocusEvent) =>
                       commitEdit(todo.id, (event.currentTarget as HTMLInputElement).value)
