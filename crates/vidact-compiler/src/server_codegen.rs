@@ -24,7 +24,8 @@ use crate::{
     ComponentIr, Diagnostic, DiagnosticCode, SourceSpan,
     analysis::ModuleInput,
     ast_utils::{
-        normalize_expression_bodied_component_arrows, restore_anonymous_default_component_names,
+        normalize_compiler_hook_inputs, normalize_expression_bodied_component_arrows,
+        normalize_simple_logical_assignments, restore_anonymous_default_component_names,
     },
     custom_hooks::plan_local_custom_hooks,
     lower_component,
@@ -141,6 +142,7 @@ pub fn compile_server_module_with_options(
     crate::framework_directives::validate_framework_directives(&parsed.program, options)
         .map_err(|diagnostic| vec![diagnostic])?;
     if options.feature_enabled(CompilerFeature::DependencySource) {
+        normalize_simple_logical_assignments(&allocator, &mut parsed.program);
         ServerEnvironmentNormalizer {
             ast: AstBuilder::new(&allocator),
         }
@@ -241,6 +243,22 @@ pub fn compile_server_module_with_options(
             ),
         )]);
     }
+    let scoping = semantic.semantic.into_scoping();
+    normalize_compiler_hook_inputs(&allocator, &mut parsed.program, &scoping);
+    let semantic = SemanticBuilder::new()
+        .with_build_nodes(true)
+        .with_check_syntax_error(true)
+        .build(&parsed.program);
+    if !semantic.diagnostics.is_empty() {
+        return Err(vec![Diagnostic::new(
+            crate::DiagnosticCode::AnalysisFailed,
+            format!(
+                "OXC semantic analysis failed for {} after frozen hook dependency normalization: {:?}",
+                input.filename, semantic.diagnostics
+            ),
+        )]);
+    }
+
     let react = ReactBindings::new(&parsed.program, semantic.semantic.scoping());
     let mut validator = ServerSourceValidator {
         react: &react,

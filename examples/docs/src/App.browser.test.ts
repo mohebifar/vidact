@@ -1,6 +1,7 @@
-import { mountCompiled } from '@vidact/runtime'
-import { act } from '@vidact/test-support'
+import { mountCompiled, type CompiledComponentResult } from '@vidact/runtime'
+import { assertMutationEnvelope, captureMutations } from '@vidact/test-support'
 import { afterEach, describe, expect, it } from 'vitest'
+import { userEvent } from 'vitest/browser'
 
 import { App } from './App.tsx'
 
@@ -10,72 +11,112 @@ afterEach(() => {
   dispose?.()
   dispose = undefined
   document.body.replaceChildren()
-  window.history.replaceState({}, '', '/')
+  document.documentElement.classList.remove('dark')
 })
 
-describe('Vidact documentation app', () => {
-  it('navigates between the landing page, compiled MDX docs, examples, and blog', async () => {
-    const host = await mountApp('/')
-    const header = host.querySelector('header')
+describe('Vidact shadcn documentation shell', () => {
+  it('filters navigation surgically through the shadcn Base UI input', async () => {
+    const host = await mountApp()
+    const topbar = host.querySelector<HTMLElement>('[data-testid="topbar"]')!
+    const article = host.querySelector<HTMLElement>('[data-testid="article"]')!
+    const sidebar = host.querySelector<HTMLElement>('[data-testid="sidebar"]')!
+    const search = host.querySelector<HTMLInputElement>('#docs-search')!
 
-    expect(host.querySelector('h1')?.textContent).toContain('Your component runs once')
-    expect(host.textContent).toContain('Tested in Chromium, Firefox, and WebKit')
-    expect(host.textContent).toContain('Do not take "surgical" on faith')
+    const filtered = await captureMutations(host, () => userEvent.type(search, 'installation'))
 
-    await act(() => clickLink(host, '/docs'))
-    expect(window.location.pathname).toBe('/docs')
-    expect(host.querySelector('h1')?.textContent).toBe(
-      'Build a counter that updates without rerendering',
-    )
-    expect(host.textContent).toContain("The button's text changes")
-    expect(host.querySelector('header')).toBe(header)
-
-    await act(() => clickLink(host, '/docs/mental-model'))
-    expect(host.querySelector('h1')?.textContent).toBe('Why a state write can skip the component')
-    expect(host.textContent).toContain('No subscription pass')
-
-    await act(() => clickLink(host, '/examples'))
-    expect(host.querySelector('h1')?.textContent).toContain('Run the cases that are hard to fake')
-    expect(host.textContent).toContain('TodoMVC')
-    expect(host.textContent).toContain('Async shop')
-
-    await act(() => clickLink(host, '/blog'))
-    expect(host.querySelector('h1')?.textContent).toBe(
-      'What Vidact learns before your code reaches the browser',
-    )
-    expect(host.textContent).toContain('React analysis boundary')
-    await act(() => clickLink(host, '/blog/compiler-not-runtime'))
-    expect(host.querySelector('h1')?.textContent).toBe('Why Vidact puts reactivity in the compiler')
-    expect(host.textContent).toContain('A setter already tells us what changed')
+    expect(search.value).toBe('installation')
+    expect(document.activeElement).toBe(search)
+    expect(host.querySelector('#docs-search')).toBe(search)
+    expect(sidebar.textContent).toContain('Installation')
+    expect(sidebar.textContent).not.toContain('Compatibility lab')
+    expect(host.querySelector('[data-testid="topbar"]')).toBe(topbar)
+    expect(host.querySelector('[data-testid="article"]')).toBe(article)
+    expect(host.querySelector('[data-testid="sidebar"]')).toBe(sidebar)
+    expect(() =>
+      assertMutationEnvelope(
+        filtered.records,
+        [{ type: 'childList', within: sidebar }],
+        'documentation navigation filter',
+      ),
+    ).not.toThrow()
   })
 
-  it('responds to browser history navigation', async () => {
-    const host = await mountApp('/docs')
-    expect(host.querySelector('h1')?.textContent).toBe(
-      'Build a counter that updates without rerendering',
-    )
+  it('uses Base UI buttons without replacing stable page owners', async () => {
+    const host = await mountApp()
+    const topbar = host.querySelector<HTMLElement>('[data-testid="topbar"]')!
+    const article = host.querySelector<HTMLElement>('[data-testid="article"]')!
+    const themeButton = host.querySelector<HTMLButtonElement>('[aria-label="Toggle color theme"]')!
 
-    await act(() => {
-      window.history.pushState({}, '', '/examples')
-      window.dispatchEvent(new PopStateEvent('popstate'))
-    })
+    const themed = await captureMutations(host, () => themeButton.click())
 
-    expect(host.querySelector('h1')?.textContent).toContain('Run the cases that are hard to fake')
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+    expect(themeButton.textContent).toContain('Light')
+    expect(host.querySelector('[aria-label="Toggle color theme"]')).toBe(themeButton)
+    expect(host.querySelector('[data-testid="topbar"]')).toBe(topbar)
+    expect(host.querySelector('[data-testid="article"]')).toBe(article)
+    expect(() =>
+      assertMutationEnvelope(
+        themed.records,
+        [{ type: 'characterData', within: themeButton }],
+        'theme label update',
+      ),
+    ).not.toThrow()
+  })
+
+  it('keeps the mobile navigation trigger state aligned with the owned sidebar', async () => {
+    const host = await mountApp()
+    const topbar = host.querySelector<HTMLElement>('[data-testid="topbar"]')!
+    const article = host.querySelector<HTMLElement>('[data-testid="article"]')!
+    const sidebar = host.querySelector<HTMLElement>('[data-testid="sidebar"]')!
+    const trigger = host.querySelector<HTMLButtonElement>('[aria-label="Toggle navigation"]')!
+
+    const opened = await captureMutations(host, () => trigger.click())
+
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    expect(sidebar.classList.contains('sidebar-open')).toBe(true)
+    expect(host.querySelector('[aria-label="Close navigation"]')).not.toBeNull()
+    expect(host.querySelector('[data-testid="topbar"]')).toBe(topbar)
+    expect(host.querySelector('[data-testid="article"]')).toBe(article)
+    expect(host.querySelector('[data-testid="sidebar"]')).toBe(sidebar)
+    expect(() =>
+      assertMutationEnvelope(
+        opened.records,
+        [
+          { type: 'attributes', within: topbar },
+          { type: 'attributes', within: sidebar },
+          { type: 'childList', within: host },
+        ],
+        'mobile navigation open',
+      ),
+    ).not.toThrow()
+
+    const close = host.querySelector<HTMLButtonElement>('[aria-label="Close navigation"]')!
+    const closed = await captureMutations(host, () => close.click())
+
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(sidebar.classList.contains('sidebar-open')).toBe(false)
+    expect(host.querySelector('[aria-label="Close navigation"]')).toBeNull()
+    expect(host.querySelector('[data-testid="topbar"]')).toBe(topbar)
+    expect(host.querySelector('[data-testid="article"]')).toBe(article)
+    expect(host.querySelector('[data-testid="sidebar"]')).toBe(sidebar)
+    expect(() =>
+      assertMutationEnvelope(
+        closed.records,
+        [
+          { type: 'attributes', within: topbar },
+          { type: 'attributes', within: sidebar },
+          { type: 'childList', within: host },
+        ],
+        'mobile navigation close',
+      ),
+    ).not.toThrow()
   })
 })
 
-async function mountApp(path: string): Promise<HTMLElement> {
-  window.history.replaceState({}, '', path)
+async function mountApp(): Promise<HTMLElement> {
   const host = document.createElement('div')
   document.body.appendChild(host)
-  await act(() => {
-    dispose = mountCompiled(App, host).dispose
-  })
+  dispose = mountCompiled(App as unknown as () => CompiledComponentResult, host).dispose
+  await Promise.resolve()
   return host
-}
-
-function clickLink(host: ParentNode, path: string): void {
-  const link = host.querySelector<HTMLAnchorElement>(`a[href="${path}"]`)
-  expect(link).not.toBeNull()
-  link?.click()
 }

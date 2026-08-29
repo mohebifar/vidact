@@ -65,6 +65,31 @@ fn lowers_element_valued_render_props_to_server_capabilities() {
 }
 
 #[test]
+fn lowers_clone_element_child_replacement_to_server_capabilities() {
+    let compilation = compile_server_module(ModuleInput {
+        filename: "ServerRenderableChildren.tsx",
+        source: r#"
+            import { cloneElement } from 'react';
+            function Slot({ render, label }) {
+                return cloneElement(render, null, <strong>{label}</strong>);
+            }
+            export function ServerRenderableChildren() {
+                return <Slot label="Replacement" render={<a href="/original">Authored</a>} />;
+            }
+        "#,
+    })
+    .expect("server renderable capabilities should own one explicit replacement child");
+
+    assert!(
+        compilation
+            .code
+            .contains("cloneRenderableComponent as __vidactCloneRenderableComponent")
+    );
+    assert!(compilation.code.contains("childrenOverride"));
+    assert!(!compilation.code.contains("cloneElement("));
+}
+
+#[test]
 fn removes_browser_only_hook_branches_from_dependency_server_source() {
     let compilation = compile_server_module_with_options(
         ModuleInput {

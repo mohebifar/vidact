@@ -66,6 +66,13 @@ ordinary binding, prop, memo, and effect propagation. Cross-consumer batching,
 reactive resubscription, error-boundary routing, and server snapshot selection
 remain follow-ups on the root scheduler and hydration contracts.
 
+The local shadcn Popover demonstrates the bounded application pattern. A
+framework-neutral observer is constructed inside the Popover root, and that
+root makes the only direct `useSyncExternalStore` call. Compiled context carries
+the current snapshot and imperative actions to child owners. Calling the hook
+from those consumers with context-derived methods remains unsupported because
+those arguments are reactive and would require resubscription lowering.
+
 ## Verification
 
 - `crates/vidact-compiler/tests/surgical_codegen.rs` verifies semantic lowering,
@@ -75,5 +82,8 @@ remain follow-ups on the root scheduler and hydration contracts.
 - `tests/browser/corpus/apps/external-store/ExternalStoreApp.browser.test.ts`
   proves subscribe-time rechecking, surgical publication, unrelated-source
   isolation, and disposal unsubscribe behavior.
+- `examples/docs/src/PopoverProof.browser.test.ts` proves the one-root-
+  subscription pattern across controlled state, a portal open interval, and
+  owner disposal.
 - `cargo test -p vidact-compiler`
 - `pnpm --filter @vidact/browser-corpus test`

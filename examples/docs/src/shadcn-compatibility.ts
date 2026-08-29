@@ -1,0 +1,75 @@
+export const ownerCertifiedShadcnComponents = {
+  button: 'certified',
+  collapsible: 'certified published Base UI; retained root and trigger owners',
+  input: 'certified',
+  popover: 'certified local implementation; one owned root subscription and open-interval portal',
+} as const
+
+export const productionOnlyShadcnComponents = {
+  accordion: 'production build only; uses compiler-owned memo semantics and inline icons',
+  alert: 'mounted statically in the docs shell',
+  aspectRatio: 'production build only',
+  attachment: 'production build only; published useRender is source-linked into its caller',
+  avatar: 'mounts with provider context; reactive render output still needs an identity proof',
+  badge: 'production build only; published useRender is source-linked into its caller',
+  breadcrumb: 'production build only; uses inline icons instead of Phosphor IconBase',
+  bubble: 'production build only; published useRender is source-linked into its caller',
+  buttonGroup: 'production build only; published useRender is source-linked into its caller',
+  card: 'mounted statically in the docs shell',
+  checkbox: 'production build only; simple logical assignment is normalized before analysis',
+  empty: 'production build only',
+  field: 'production build only',
+  inputGroup: 'production build only',
+  item: 'production build only; published useRender is source-linked into its caller',
+  kbd: 'mounted statically in the docs shell',
+  label: 'production build only',
+  message: 'production build only',
+  marker: 'production build only; published useRender is source-linked into its caller',
+  nativeSelect: 'production build only; uses an inline icon',
+  pagination: 'production build only; uses inline icons',
+  progress: 'production build only; Vidact owns explicit memo identity',
+  scrollArea: 'production build only; Vidact owns explicit memo identity',
+  separator: 'mounted statically in the docs shell',
+  skeleton: 'production build only',
+  spinner: 'production build only; uses an inline icon',
+  switch: 'production build only',
+  table: 'production build only',
+  textarea: 'production build only',
+  toggle: 'production build only',
+  toggleGroup: 'production build only',
+} as const
+
+export const externalReactPackageComponents = {
+  calendar: 'react-day-picker',
+  carousel: 'embla-carousel-react',
+  chart: 'recharts',
+  command: 'cmdk',
+  inputOtp: 'input-otp',
+  questionnaire: '@shadcn/react',
+  resizable: 'react-resizable-panels',
+  messageScroller: '@shadcn/react',
+} as const
+
+export const crossModuleHookComponents = {
+  direction: '@base-ui/react/direction-provider',
+} as const
+
+export const unsupportedBaseUiComponents = {
+  alertDialog: 'hook-bearing Store.useState method abstraction',
+  combobox: 'hook-bearing Store.useState method abstraction',
+  contextMenu: 'render-time useRefWithInit hook-object mutation',
+  dialog: 'hook-bearing Store.useState method abstraction',
+  drawer: 'hook-bearing Store.useState method abstraction',
+  dropdownMenu: 'Base UI fastComponentRef hook-replay wrapper',
+  hoverCard: 'Base UI fastComponentRef hook-replay wrapper',
+  menubar: 'Base UI fastComponentRef hook-replay wrapper',
+  navigationMenu: 'hook-bearing Store.useState method abstraction',
+  radioGroup: 'forwarded ref mutation is rejected as component-prop mutation',
+  select: 'hook-bearing Store.useState method abstraction',
+  sidebar: 'reaches blocked Sheet and Tooltip graphs',
+  sheet: 'hook-bearing Store.useState method abstraction',
+  slider: 'mutation of a hook-returned value during render',
+  tabs: 'mutation of a hook-returned value during render',
+  toast: 'hook-bearing Store.useState method abstraction',
+  tooltip: 'Base UI fastComponentRef hook-replay wrapper',
+} as const

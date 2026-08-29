@@ -97,15 +97,29 @@ export function renderableMarker(value: unknown): undefined {
 
 export function cloneRenderable(
   value: unknown,
-  overrides: Record<string, unknown> = {},
+  overrides: Record<string, unknown> | null = {},
+  childrenOverride?: ServerChild,
 ): ServerChild {
   if (!isRenderable(value)) throw new TypeError('expected a compiled server renderable')
   const renderable = value[SERVER_RENDERABLE]
-  return renderable.construct({ ...renderable.input, ...overrides })
+  const input = { ...renderable.input, ...overrides }
+  if (arguments.length >= 3) input.children = childrenOverride
+  return renderable.construct(input)
 }
 
 export function cloneRenderableComponent(props: Record<string, unknown>): ServerChild {
-  return cloneRenderable(props.value, props.overrides as Record<string, unknown> | undefined)
+  if (Object.hasOwn(props, 'childrenOverride')) {
+    return cloneRenderable(
+      props.value,
+      props.overrides as Record<string, unknown> | null | undefined,
+      props.childrenOverride as ServerChild,
+    )
+  }
+  return cloneRenderable(props.value, props.overrides as Record<string, unknown> | null | undefined)
+}
+
+export function keyedFragmentComponent(props: Record<string, unknown>): ServerChild {
+  return props.children as ServerChild
 }
 
 export function renderableProps(input: Record<string, unknown>): Record<string, unknown> {
@@ -130,7 +144,8 @@ export function dynamicIntrinsicComponent(props: Record<string, unknown>): Serve
   if (typeof props.tag !== 'string') {
     throw new TypeError('dynamic intrinsic construction requires a string tag')
   }
-  const input = props.props as Record<string, unknown>
+  const input = { ...(props.props as Record<string, unknown>) }
+  if (Object.hasOwn(props, 'childrenOverride')) input.children = props.childrenOverride
   return jsx(props.tag, {
     ...renderableProps(input),
     children: renderableChildren(input),
@@ -221,6 +236,7 @@ let activeFrameworkRender: ServerFrameworkRenderContext | undefined
 const serverBuiltins = new WeakSet<ServerComponent>()
 serverBuiltins.add(dynamicIntrinsicComponent)
 serverBuiltins.add(cloneRenderableComponent)
+serverBuiltins.add(keyedFragmentComponent)
 const serverPromiseResources = new WeakMap<object, ServerAsyncResource<unknown>>()
 
 const FRAMEWORK_HEAD_PLACEHOLDER = '<!--vidact-framework:v1:head-->'

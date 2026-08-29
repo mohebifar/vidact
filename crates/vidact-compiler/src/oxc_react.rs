@@ -32,7 +32,10 @@ use crate::{
 mod classifier;
 mod def_use;
 
-use crate::ast_utils::{component_name_for_span, normalize_expression_bodied_component_arrows};
+use crate::ast_utils::{
+    component_name_for_span, normalize_compiler_hook_inputs,
+    normalize_expression_bodied_component_arrows,
+};
 use crate::custom_hooks::plan_local_custom_hooks;
 use crate::lowered_react::{may_contain_lowered_react, normalize_lowered_react};
 use crate::{CompilationOptions, CompilerFeature};
@@ -109,6 +112,19 @@ impl ReactAnalysisAdapter for OxcReactAnalysisAdapter {
             ))]);
         }
 
+        let scoping = semantic.semantic.into_scoping();
+        normalize_compiler_hook_inputs(&allocator, &mut parsed.program, &scoping);
+        let semantic = SemanticBuilder::new()
+            .with_build_nodes(true)
+            .with_check_syntax_error(true)
+            .build(&parsed.program);
+        if !semantic.diagnostics.is_empty() {
+            return Err(vec![analysis_error(format!(
+                "OXC semantic analysis failed for {} after frozen hook dependency normalization: {:?}",
+                input.filename, semantic.diagnostics
+            ))]);
+        }
+
         analyze_program(
             input,
             &parsed.program,
@@ -164,6 +180,12 @@ fn run_react_analysis(
             .environment
             .validate_exhaustive_memoization_dependencies = false;
         options.environment.validate_hooks_usage = false;
+        options
+            .environment
+            .validate_preserve_existing_memoization_guarantees = false;
+        options
+            .environment
+            .enable_preserve_existing_memoization_guarantees = false;
     }
     match compile(program, semantic, allocator, options) {
         CompileResult::Success {
@@ -248,10 +270,8 @@ fn lower_snapshot(
         .ok_or_else(|| {
             analysis_error("React Compiler did not provide a source span for a component")
         })?;
-    let component_name = analysis
-        .name
-        .as_deref()
-        .or_else(|| component_name_for_span(program, component_span))
+    let component_name = component_name_for_span(program, component_span)
+        .or(analysis.name.as_deref())
         .unwrap_or("AnonymousComponent");
     let mut control_flow = lower_control_flow(&analysis.control_flow, &analysis.render_writes);
     let mut syntax = classify_component(

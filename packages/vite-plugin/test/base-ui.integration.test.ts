@@ -5,14 +5,14 @@ import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { originalPositionFor, TraceMap } from '@jridgewell/trace-mapping'
-import { build } from 'vite'
+import { build, createServer } from 'vite'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { renderToStaticMarkup } from '../../runtime/src/server.ts'
 import { vidact } from '../src/index.ts'
 
-const shopRequire = createRequire(join(import.meta.dirname, '../../../examples/shop/package.json'))
-const baseUiRoot = dirname(shopRequire.resolve('@base-ui/react/package.json'))
+const docsRequire = createRequire(join(import.meta.dirname, '../../../examples/docs/package.json'))
+const baseUiRoot = dirname(docsRequire.resolve('@base-ui/react/package.json'))
 const temporaryDirectories: string[] = []
 
 afterEach(async () => {
@@ -24,13 +24,13 @@ afterEach(async () => {
 })
 
 async function transformBaseUiEntry(
-  subpath: 'button' | 'input' | 'toggle-group',
+  subpath: 'avatar' | 'button' | 'collapsible' | 'input' | 'toggle-group',
   target: 'client' | 'server',
 ) {
   const entry = join(baseUiRoot, subpath, 'index.mjs')
   const source = await readFile(entry, 'utf8')
   const transform = Reflect.get(
-    vidact({ target, features: ['css-insertion', 'profiling'] }),
+    vidact({ target, features: ['concurrent', 'css-insertion', 'profiling'] }),
     'transform',
   ) as (
     this: {
@@ -152,6 +152,63 @@ describe('Base UI dependency compilation', () => {
 
     expect(original.source).toContain('/@base-ui/utils/useStableCallback.mjs')
     expect(original.line).toBe(42)
+  })
+
+  it('serves helper-bearing dependency capsules through the development pipeline', async () => {
+    const direct = await transformBaseUiEntry('avatar', 'client')
+    expect(direct?.code).not.toContain('\\0rolldown/runtime.js')
+    expect(JSON.stringify(direct?.map)).not.toContain('rolldown/runtime.js')
+
+    const server = await createServer({
+      root: join(import.meta.dirname, '../../../examples/docs'),
+      configFile: false,
+      logLevel: 'silent',
+      plugins: [vidact({ features: ['concurrent', 'css-insertion', 'profiling'] })],
+      resolve: {
+        alias: [
+          {
+            find: '@',
+            replacement: join(import.meta.dirname, '../../../examples/docs/src'),
+          },
+          {
+            find: /^@vidact\/runtime\/(.+)$/,
+            replacement: `${join(import.meta.dirname, '../../runtime/src')}/$1.ts`,
+          },
+          {
+            find: '@vidact/runtime',
+            replacement: join(import.meta.dirname, '../../runtime/src/index.ts'),
+          },
+        ],
+      },
+      server: { middlewareMode: true },
+    })
+    try {
+      const result = await server.transformRequest(join(baseUiRoot, 'avatar', 'index.mjs'))
+
+      expect(result?.code).toContain('__vidactCreateState')
+      expect(result?.code).not.toContain('react/jsx-runtime')
+      expect(result?.code).not.toContain('\\0rolldown/runtime.js')
+
+      const sourceLinked = await server.transformRequest(
+        join(import.meta.dirname, '../../../examples/docs/src/components/ui/avatar.tsx'),
+      )
+      expect(sourceLinked?.code).toContain('__vidactCreateState')
+      expect(sourceLinked?.code).not.toContain('react/jsx-runtime')
+      expect(sourceLinked?.code).not.toContain('\\0rolldown/runtime.js')
+
+      const sourceEntry = join(
+        import.meta.dirname,
+        '../../../examples/docs/src/components/ui/avatar.tsx',
+      )
+      const runtime = await server.pluginContainer.resolveId(
+        'vidact:rolldown/runtime.js',
+        sourceEntry,
+      )
+      expect(runtime?.id).toBe('\0vidact:dependency-runtime')
+      expect(await server.pluginContainer.load(runtime!.id)).toBe('export {}')
+    } finally {
+      await server.close()
+    }
   })
 
   for (const target of ['client', 'server'] as const) {

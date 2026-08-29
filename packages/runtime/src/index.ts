@@ -30,6 +30,8 @@ export {
   keyed,
   mountCompiled,
   mountCompiledRef,
+  objectRest,
+  runWithCompiledContext,
   use,
   useCallback,
   useContext,
@@ -57,7 +59,6 @@ export type {
 } from './compiled/types.ts'
 export { compiledComponentSpread } from './component-spread.ts'
 export {
-  createElement,
   Fragment,
   h,
   type DirectChild,
@@ -71,10 +72,12 @@ export {
   cloneRenderable,
   cloneRenderableComponent,
   createReactElement,
+  createReactElement as createElement,
   createRenderable,
   dynamicIntrinsicComponent,
   forwardedRef,
   isRenderable,
+  keyedFragmentComponent,
   renderableChildren,
   renderableMarker,
   renderableProps,

@@ -1,15 +1,11 @@
-import { mountCompiled, mountHotRoot } from '@vidact/runtime'
+import { mountCompiled, type CompiledComponentResult } from '@vidact/runtime'
 
 import { App } from './App.tsx'
+import './shadcn-corpus.ts'
 
 import './style.css'
 
 const host = document.querySelector<HTMLElement>('#app')
-if (host === null) throw new Error('Vidact docs host element is missing')
+if (host === null) throw new Error('Missing docs application root.')
 
-if (import.meta.hot === undefined) {
-  mountCompiled(App, host)
-} else {
-  import.meta.hot.accept()
-  mountHotRoot(import.meta.hot, host, App)
-}
+mountCompiled(App as unknown as () => CompiledComponentResult, host)

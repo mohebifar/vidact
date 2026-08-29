@@ -149,10 +149,11 @@ range and ownership.
 Refs are queued while elements are constructed, claimed by the active owner,
 and committed after insertion. Callback-returned cleanup takes precedence over
 a fallback `ref(null)` clear. Object refs clear only if they still point at the
-element being disposed. A compiled ref binding stages its next attachment before
-clearing the previous ref. A thrown attachment leaves the previous ref owned and
-active; successful transitions retain the host element and transfer cleanup to
-the next ref. Imperative handles use the same attachment primitive. Their first
+element being disposed. A compiled ref binding clears the previous ref before
+attaching its replacement, matching callback-ref replacement order. If the next
+attachment throws, it reattaches the previous ref before publication fails;
+successful transitions retain the host element and transfer cleanup to the next
+ref. Imperative handles use the same attachment primitive. Their first
 value commits at the owning component's end marker; dependency-driven
 replacements are publication finalizers. Both therefore run after descendant
 host refs and DOM updates and before a future layout-effect phase. A failed
@@ -189,6 +190,8 @@ back.
 - An owned block still has exactly one legal mount.
 - Refs attach after insertion and clear with their element owner; keyed moves do
   not reattach an unchanged element.
+- A changed host callback ref detaches before its replacement attaches, and a
+  failed replacement restores the previous callback ownership.
 - A component `ref` prop reaches the child without `forwardRef`, attaches after
   host insertion, and clears when the child owner is disposed.
 - An imperative handle is unavailable during construction, publishes after

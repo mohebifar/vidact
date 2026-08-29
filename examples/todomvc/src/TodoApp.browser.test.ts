@@ -49,12 +49,10 @@ describe('Vidact TodoMVC', () => {
     const editedLabel = editedRow.querySelector<HTMLLabelElement>('label')!
     await userEvent.dblClick(editedLabel)
     const edit = host.querySelector<HTMLInputElement>('.edit')
-    expect(edit).not.toBeNull()
-    if (edit !== null) {
-      expect(document.activeElement).toBe(edit)
-      await userEvent.clear(edit)
-      await userEvent.type(edit, 'Understand React Compiler{Enter}')
-    }
+    if (edit === null) throw new Error('Expected the edit input to mount.')
+    expect(document.activeElement).toBe(edit)
+    await userEvent.clear(edit)
+    await userEvent.type(edit, 'Understand React Compiler{Enter}')
     expect(host.querySelector('.todo-list li')).toBe(editedRow)
     expect(editedRow.querySelector('label')).toBe(editedLabel)
     expect(labels(host)).toEqual(['Understand React Compiler'])

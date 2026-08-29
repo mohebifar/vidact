@@ -7,43 +7,45 @@ import { build } from 'vite'
 
 const directory = path.dirname(fileURLToPath(import.meta.url))
 const repository = path.resolve(directory, '../..')
+// Runtime protocol v2 makes classic createElement values opaque and owner-preserving.
+// Keep the shared baseline aligned with that capability while retaining narrow ceilings.
 const fixtures = [
-  { name: 'counter', entry: path.join(directory, 'fixtures/counter.tsx'), gzipBudget: 7_600 },
+  { name: 'counter', entry: path.join(directory, 'fixtures/counter.tsx'), gzipBudget: 8_350 },
   {
     name: 'async-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['async'],
-    gzipBudget: 7_600,
+    gzipBudget: 8_350,
   },
   {
     name: 'concurrent-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['concurrent'],
-    gzipBudget: 7_600,
+    gzipBudget: 8_350,
   },
   {
     name: 'concurrent',
     entry: path.join(directory, 'fixtures/concurrent.tsx'),
     features: ['concurrent'],
-    gzipBudget: 9_765,
+    gzipBudget: 10_050,
   },
   {
     name: 'actions-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['actions'],
-    gzipBudget: 7_600,
+    gzipBudget: 8_350,
   },
   {
     name: 'actions',
     entry: path.join(directory, 'fixtures/actions.tsx'),
     features: ['actions'],
-    gzipBudget: 11_900,
+    gzipBudget: 12_700,
   },
   {
     name: 'retained-ui-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['retained-ui'],
-    gzipBudget: 7_600,
+    gzipBudget: 8_350,
   },
   {
     name: 'retained-ui',
@@ -55,7 +57,7 @@ const fixtures = [
     name: 'profiling-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['profiling'],
-    gzipBudget: 7_600,
+    gzipBudget: 8_350,
   },
   {
     name: 'profiling',
@@ -67,7 +69,7 @@ const fixtures = [
     name: 'framework-unused',
     entry: path.join(directory, 'fixtures/counter.tsx'),
     features: ['framework'],
-    gzipBudget: 7_600,
+    gzipBudget: 8_350,
   },
   {
     name: 'framework',
@@ -78,9 +80,9 @@ const fixtures = [
   {
     name: 'control-flow',
     entry: path.join(directory, 'fixtures/control-flow.tsx'),
-    gzipBudget: 8_526,
+    gzipBudget: 8_800,
   },
-  { name: 'dom-form', entry: path.join(directory, 'fixtures/dom-form.tsx'), gzipBudget: 8_500 },
+  { name: 'dom-form', entry: path.join(directory, 'fixtures/dom-form.tsx'), gzipBudget: 9_250 },
   {
     name: 'dom-namespace',
     entry: path.join(directory, 'fixtures/dom-namespace.tsx'),
@@ -89,19 +91,19 @@ const fixtures = [
   {
     name: 'dom-style',
     entry: path.join(directory, 'fixtures/dom-style.tsx'),
-    gzipBudget: 8_500,
+    gzipBudget: 8_650,
   },
   {
     name: 'keyed-list',
     entry: path.join(directory, 'fixtures/keyed-list.tsx'),
-    gzipBudget: 9_318,
+    gzipBudget: 9_600,
   },
   {
     name: 'todomvc',
     entry: path.join(repository, 'examples/todomvc/src/TodoApp.tsx'),
-    gzipBudget: 11_400,
+    gzipBudget: 12_150,
   },
-  { name: 'effect', entry: path.join(directory, 'fixtures/effect.tsx'), gzipBudget: 8_409 },
+  { name: 'effect', entry: path.join(directory, 'fixtures/effect.tsx'), gzipBudget: 8_700 },
 ]
 
 const measurements = await Promise.all(fixtures.map(measureFixture))

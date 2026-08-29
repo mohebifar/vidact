@@ -23,8 +23,11 @@ use crate::{
     Diagnostic, DiagnosticCode, SourceSpan,
     analysis::{ModuleInput, SourceId, SourceKind},
     ast_utils::{
-        component_function_parts_mut, is_event_attribute, is_supported_react_event_attribute,
-        normalize_expression_bodied_component_arrows, restore_anonymous_default_component_names,
+        OBJECT_REST, component_function_parts_mut, is_event_attribute,
+        is_supported_react_event_attribute, normalize_compiler_hook_inputs,
+        normalize_expression_bodied_component_arrows, normalize_identifier_object_destructuring,
+        normalize_precomputed_provider_children, normalize_simple_logical_assignments,
+        restore_anonymous_default_component_names,
     },
     custom_hooks::plan_local_custom_hooks,
     ir::{ComponentIr, lower_component},
@@ -61,6 +64,7 @@ const COMPILED_ROOT: &str = "__vidactCompiledRoot";
 const CLONE_RENDERABLE: &str = "__vidactCloneRenderable";
 const CLONE_RENDERABLE_COMPONENT: &str = "__vidactCloneRenderableComponent";
 const CREATE_RENDERABLE: &str = "__vidactCreateRenderable";
+const RUN_WITH_CONTEXT: &str = "__vidactRunWithContext";
 const CHOOSE: &str = "__vidactChoose";
 const CREATE_ASYNC: &str = "__vidactCreateAsync";
 const CREATE_ACTION_STATE: &str = "__vidactCreateActionState";
@@ -82,6 +86,7 @@ const CREATE_OPTIMISTIC: &str = "__vidactCreateOptimistic";
 const DEFERRED: &str = "__vidactDeferred";
 const DISPATCH: &str = "__vidactDispatch";
 const DYNAMIC_INTRINSIC_COMPONENT: &str = "__vidactDynamicIntrinsicComponent";
+const KEYED_FRAGMENT_COMPONENT: &str = "__vidactKeyedFragmentComponent";
 const ENABLE_FRAMEWORK_METADATA: &str = "__vidactEnableFrameworkMetadata";
 const ENABLE_DOM_FORMS: &str = "__vidactEnableDomForms";
 const ENABLE_DOM_NAMESPACE: &str = "__vidactEnableDomNamespace";
@@ -147,6 +152,9 @@ pub fn compile_surgical_module_with_ir_and_options(
     }
     crate::framework_directives::validate_framework_directives(&parsed.program, options)
         .map_err(|diagnostic| vec![diagnostic])?;
+    if options.feature_enabled(CompilerFeature::DependencySource) {
+        normalize_simple_logical_assignments(&allocator, &mut parsed.program);
+    }
     let anonymous_defaults =
         normalize_expression_bodied_component_arrows(&allocator, &mut parsed.program);
     let semantic = SemanticBuilder::new()
@@ -189,6 +197,7 @@ pub fn compile_surgical_module_with_ir_and_options(
             .map_err(|diagnostic| vec![diagnostic])?;
     }
     if options.feature_enabled(CompilerFeature::DependencySource) {
+        normalize_identifier_object_destructuring(&allocator, &mut parsed.program);
         let generated = Codegen::new()
             .with_options(CodegenOptions {
                 source_map_path: Some(Path::new(input.filename).to_path_buf()),
@@ -243,6 +252,19 @@ pub fn compile_surgical_module_with_ir_and_options(
         ))]);
     }
 
+    let scoping = semantic.semantic.into_scoping();
+    normalize_compiler_hook_inputs(&allocator, &mut parsed.program, &scoping);
+    let semantic = SemanticBuilder::new()
+        .with_build_nodes(true)
+        .with_check_syntax_error(true)
+        .build(&parsed.program);
+    if !semantic.diagnostics.is_empty() {
+        return Err(vec![analysis_error(format!(
+            "OXC semantic analysis failed for {} after frozen hook dependency normalization: {:?}",
+            input.filename, semantic.diagnostics
+        ))]);
+    }
+
     let react = ReactBindings::new(&parsed.program, semantic.semantic.scoping());
     let mut class_component = ReactClassComponentFinder {
         react: &react,
@@ -291,6 +313,20 @@ pub fn compile_surgical_module_with_ir_and_options(
     })?;
     if components.is_empty() {
         return Err(vec![unsupported("surgical codegen found no component")]);
+    }
+    drop(semantic);
+    if options.feature_enabled(CompilerFeature::DependencySource) {
+        normalize_precomputed_provider_children(&allocator, &mut parsed.program);
+    }
+    let semantic = SemanticBuilder::new()
+        .with_build_nodes(true)
+        .with_check_syntax_error(true)
+        .build(&parsed.program);
+    if !semantic.diagnostics.is_empty() {
+        return Err(vec![analysis_error(format!(
+            "OXC semantic analysis failed for {} after provider construction normalization: {:?}",
+            input.filename, semantic.diagnostics
+        ))]);
     }
     let scoping = semantic.semantic.into_scoping();
     transform_program(
@@ -1393,7 +1429,7 @@ fn transform_component<'a>(
                     id_sources.insert(source);
                 }
             } else if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
-                && let Some(source) = lookup_source(&source_ids, identifier.name.as_str())
+                && let Some(source) = source_ids.get(identifier.name.as_str()).copied()
                 && let Some(symbol) = identifier.symbol_id.get()
             {
                 source_symbols.insert(symbol, source);
@@ -1740,6 +1776,7 @@ fn transform_component<'a>(
             }
         });
     }
+    let mut synthetic_updater_statements = oxc_allocator::Vec::new_in(&ast);
     for derivation in &synthetic_derivations {
         let reads = dependencies(
             &derivation.expression,
@@ -1757,7 +1794,7 @@ fn transform_component<'a>(
             .into_iter()
             .filter(|source| *source != derivation.source)
             .collect::<Vec<_>>();
-        updater_statements.push(register_derived(
+        synthetic_updater_statements.push(register_derived(
             &ast,
             derivation.name,
             derivation.expression.clone_in_with_semantic_ids(allocator),
@@ -1765,6 +1802,8 @@ fn transform_component<'a>(
             &[derivation.source],
         ));
     }
+    synthetic_updater_statements.extend(updater_statements);
+    let updater_statements = synthetic_updater_statements;
     let updater_count = updater_statements.len();
     for (offset, statement) in updater_statements.into_iter().enumerate() {
         body.statements.insert(render_start + offset, statement);
@@ -2290,7 +2329,7 @@ fn transform_state_declarator<'a>(
     let Some(Expression::CallExpression(call)) = &declarator.init else {
         unreachable!();
     };
-    let arguments = call
+    let mut arguments = call
         .arguments
         .iter()
         .map(|argument| {
@@ -2305,7 +2344,7 @@ fn transform_state_declarator<'a>(
         })
         .collect::<Result<Vec<_>, _>>()?;
     match (hook, arguments.len()) {
-        (StateHook::State, 1) | (StateHook::Reducer, 2 | 3) => {}
+        (StateHook::State, 0 | 1) | (StateHook::Reducer, 2 | 3) => {}
         (StateHook::State, _) => {
             return Err(unsupported("useState requires exactly one initializer")
                 .with_span(SourceSpan::new(call.span.start, call.span.end)));
@@ -2316,6 +2355,9 @@ fn transform_state_declarator<'a>(
             )
             .with_span(SourceSpan::new(call.span.start, call.span.end)));
         }
+    }
+    if hook == StateHook::State && arguments.is_empty() {
+        arguments.push(ident(ast, "undefined"));
     }
     declarator.id = BindingPattern::new_binding_identifier(SPAN, value_name, ast);
     let mut runtime_arguments = vec![ident(ast, SCOPE), mask(ast, &[value_source])];
@@ -2957,6 +2999,126 @@ enum ReactiveSpreadKind {
     Intrinsic,
 }
 
+fn coalesce_props_before_reactive_spread<'a>(
+    ast: &AstBuilder<'a>,
+    element: &mut JSXElement<'a>,
+    spread_index: usize,
+    scoping: &Scoping,
+    source_symbols: &BTreeMap<SymbolId, SourceId>,
+    item_source_symbols: &BTreeMap<SymbolId, SourceId>,
+) -> Result<(), Diagnostic> {
+    let JSXAttributeItem::SpreadAttribute(reactive_spread) =
+        &element.opening_element.attributes[spread_index]
+    else {
+        unreachable!("reactive spread index must point at a spread attribute");
+    };
+    let spread_span = reactive_spread.span;
+    let mut properties = oxc_allocator::Vec::new_in(ast);
+
+    for (index, item) in element.opening_element.attributes[..=spread_index]
+        .iter()
+        .enumerate()
+    {
+        match item {
+            JSXAttributeItem::SpreadAttribute(spread) => {
+                if index < spread_index {
+                    return Err(unsupported(
+                        "a non-reactive spread before a reactive JSX spread requires a cached ownership layer",
+                    )
+                    .with_span(SourceSpan::new(spread.span.start, spread.span.end)));
+                }
+                properties.push(ObjectPropertyKind::new_spread_property(
+                    spread.span,
+                    spread.argument.clone_in_with_semantic_ids(ast.allocator()),
+                    ast,
+                ));
+            }
+            JSXAttributeItem::Attribute(attribute) => {
+                let JSXAttributeName::Identifier(name) = &attribute.name else {
+                    return Err(unsupported(
+                        "ordered reactive JSX spreads require ordinary prop names",
+                    )
+                    .with_span(SourceSpan::new(attribute.span.start, attribute.span.end)));
+                };
+                if matches!(
+                    name.name.as_str(),
+                    "key" | "ref" | "children" | "dangerouslySetInnerHTML"
+                ) {
+                    return Err(unsupported(format!(
+                        "{name} before a reactive JSX spread requires dedicated ownership semantics",
+                    ))
+                    .with_span(SourceSpan::new(attribute.span.start, attribute.span.end)));
+                }
+                let value = match &attribute.value {
+                    None => Expression::new_boolean_literal(attribute.span, true, ast),
+                    Some(JSXAttributeValue::StringLiteral(value)) => {
+                        Expression::StringLiteral(value.clone_in_with_semantic_ids(ast.allocator()))
+                    }
+                    Some(JSXAttributeValue::ExpressionContainer(container)) => {
+                        let expression = container.expression.as_expression().ok_or_else(|| {
+                            unsupported("ordered reactive JSX spread prop must have a value")
+                                .with_span(SourceSpan::new(
+                                    container.span.start,
+                                    container.span.end,
+                                ))
+                        })?;
+                        let replay_safe =
+                            !dependencies(expression, scoping, source_symbols, item_source_symbols)
+                                .is_empty()
+                                || matches!(
+                                    expression.without_parentheses(),
+                                    Expression::Identifier(_)
+                                        | Expression::BooleanLiteral(_)
+                                        | Expression::NullLiteral(_)
+                                        | Expression::NumericLiteral(_)
+                                        | Expression::BigIntLiteral(_)
+                                        | Expression::StringLiteral(_)
+                                );
+                        if !replay_safe {
+                            return Err(unsupported(
+                                "a non-reactive expression before a reactive JSX spread would be re-evaluated during updates",
+                            )
+                            .with_span(SourceSpan::new(container.span.start, container.span.end)));
+                        }
+                        expression.clone_in_with_semantic_ids(ast.allocator())
+                    }
+                    Some(JSXAttributeValue::Element(_) | JSXAttributeValue::Fragment(_)) => {
+                        return Err(unsupported(
+                            "element-valued props before a reactive JSX spread are unsupported",
+                        )
+                        .with_span(SourceSpan::new(attribute.span.start, attribute.span.end)));
+                    }
+                };
+                properties.push(ObjectPropertyKind::new_object_property(
+                    attribute.span,
+                    PropertyKind::Init,
+                    PropertyKey::new_string_literal(name.span, name.name, None, ast),
+                    value,
+                    false,
+                    false,
+                    false,
+                    ast,
+                ));
+            }
+        }
+    }
+
+    let merged = Expression::new_object_expression(element.span, properties, ast);
+    let mut attributes = oxc_allocator::Vec::new_in(ast);
+    attributes.push(JSXAttributeItem::new_spread_attribute(
+        spread_span,
+        merged,
+        ast,
+    ));
+    attributes.extend(
+        element.opening_element.attributes[spread_index + 1..]
+            .iter()
+            .map(|item| item.clone_in_with_semantic_ids(ast.allocator())),
+    );
+    element.opening_element.attributes = attributes;
+    Ok(())
+}
+
 impl<'a> JsxBindingTransformer<'a, '_, '_> {
     fn lower_renderable_attribute(
         &mut self,
@@ -3316,18 +3478,20 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
 
     fn visit_call_expression(&mut self, call: &mut CallExpression<'a>) {
         if self.react.is_clone_element_call(call) {
-            if !(1..=2).contains(&call.arguments.len())
+            if !(1..=3).contains(&call.arguments.len())
                 || call.arguments.iter().any(Argument::is_spread)
             {
                 self.diagnostic = Some(
-                    unsupported("cloneElement requires a renderable and optional props object")
-                        .with_span(SourceSpan::new(call.span.start, call.span.end)),
+                    unsupported(
+                        "cloneElement supports a renderable, optional props object, and one replacement child",
+                    )
+                    .with_span(SourceSpan::new(call.span.start, call.span.end)),
                 );
                 return;
             }
             walk_call_expression_mut(self, call);
-            if let Some(overrides) = call.arguments.get_mut(1) {
-                let expression = overrides
+            for index in 1..call.arguments.len() {
+                let expression = call.arguments[index]
                     .as_expression_mut()
                     .expect("spread arguments were rejected");
                 let reads = dependencies(
@@ -3764,7 +3928,7 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             self.diagnostic = Some(diagnostic);
             return;
         }
-        let reactive_spreads = element
+        let mut reactive_spreads = element
             .opening_element
             .attributes
             .iter()
@@ -3783,6 +3947,32 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
                 .then_some((index, spread.span.start))
             })
             .collect::<Vec<_>>();
+        if reactive_spreads.len() == 1 {
+            let (spread_index, spread_start) = reactive_spreads[0];
+            let has_preceding_prop = element.opening_element.attributes[..spread_index]
+                .iter()
+                .any(|item| match item {
+                    JSXAttributeItem::SpreadAttribute(_) => true,
+                    JSXAttributeItem::Attribute(attribute) => !attribute.is_identifier("key"),
+                });
+            let has_following_spread = element.opening_element.attributes[spread_index + 1..]
+                .iter()
+                .any(|item| matches!(item, JSXAttributeItem::SpreadAttribute(_)));
+            if has_preceding_prop && !has_following_spread {
+                if let Err(diagnostic) = coalesce_props_before_reactive_spread(
+                    self.ast,
+                    element,
+                    spread_index,
+                    self.scoping,
+                    self.source_symbols,
+                    self.item_source_symbols,
+                ) {
+                    self.diagnostic = Some(diagnostic);
+                    return;
+                }
+                reactive_spreads = vec![(0, spread_start)];
+            }
+        }
         if !reactive_spreads.is_empty() {
             if reactive_spreads.len() != 1 {
                 self.diagnostic = Some(
@@ -3890,18 +4080,29 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
                     self.item_source_symbols,
                 );
                 self.visit_expression(expression);
+                let inline_handler = matches!(
+                    expression.without_parentheses(),
+                    Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
+                );
                 let handler = expression.clone_in_with_semantic_ids(self.ast.allocator());
-                let event = call_name(self.ast, COMPILED_EVENT, [ident(self.ast, SCOPE), handler]);
-                if reads.is_empty() {
-                    *expression = event;
+                if reads.is_empty() || inline_handler {
+                    *expression =
+                        call_name(self.ast, COMPILED_EVENT, [ident(self.ast, SCOPE), handler]);
                 } else {
                     let mut arguments = vec![
                         ident(self.ast, SCOPE),
                         dependency_mask(self.ast, &reads.parent),
-                        arrow_expression(self.ast, [], event),
+                        arrow_expression(self.ast, [], handler),
                     ];
                     append_item_dependency(self.ast, &mut arguments, &reads);
-                    *expression = call_name(self.ast, BINDING, arguments);
+                    *expression = call_name(
+                        self.ast,
+                        COMPILED_EVENT,
+                        [
+                            ident(self.ast, SCOPE),
+                            call_name(self.ast, BINDING, arguments),
+                        ],
+                    );
                 }
             }
             return;
@@ -5504,14 +5705,17 @@ fn runtime_imports<'a>(
         ("createCompiledState", CREATE_STATE),
         ("createCompiledTransition", CREATE_TRANSITION),
         ("createRenderable", CREATE_RENDERABLE),
+        ("runWithCompiledContext", RUN_WITH_CONTEXT),
         ("deferred", DEFERRED),
         ("dispatch", DISPATCH),
         ("dynamicIntrinsicComponent", DYNAMIC_INTRINSIC_COMPONENT),
+        ("keyedFragmentComponent", KEYED_FRAGMENT_COMPONENT),
         ("enableFrameworkMetadata", ENABLE_FRAMEWORK_METADATA),
         ("forwardedRef", FORWARDED_REF),
         ("indexed", INDEXED),
         ("keyed", KEYED),
         ("nestedProp", NESTED_PROP),
+        ("objectRest", OBJECT_REST),
         ("isRenderable", IS_RENDERABLE),
         ("renderableChildren", RENDERABLE_CHILDREN),
         ("renderableMarker", RENDERABLE_MARKER),

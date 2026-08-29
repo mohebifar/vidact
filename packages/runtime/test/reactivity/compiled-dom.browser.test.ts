@@ -17,6 +17,7 @@ import {
   createCompiledProp,
   createCompiledScope,
   createCompiledState,
+  createReactElement,
   type DirectComponent,
   Fragment,
   h,
@@ -112,9 +113,9 @@ describe('compiled DOM corpus', () => {
       expect(renderableToArray(render)).toEqual([render])
       expect(renderableMarker(render)).toBeUndefined()
       expect(() => renderableToArray({ props: {} })).toThrow('compiled renderable capability')
-      return compiledRoot(scope, () =>
-        cloneRenderable(render, binding(scope, overridesSource, overrides.get)),
-      )
+      const clone = cloneRenderable(render, binding(scope, overridesSource, overrides.get))
+      expect(isRenderable(clone)).toBe(true)
+      return compiledRoot(scope, () => clone)
     }, host)
 
     const anchor = host.querySelector('a')!
@@ -153,6 +154,48 @@ describe('compiled DOM corpus', () => {
     ).not.toThrow()
 
     mounted.dispose()
+  })
+
+  it('reconciles repeated renderable descriptors from the same intrinsic family', async () => {
+    const activeSource = source(0)
+    let setActive!: ReturnType<typeof createCompiledState<boolean>>['set']
+    const host = document.createElement('div')
+    document.body.append(host)
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const active = createCompiledState(scope, activeSource, false)
+      setActive = active.set
+      return compiledRoot(scope, () =>
+        binding(scope, activeSource, () =>
+          createReactElement(
+            'button',
+            { 'aria-pressed': active.get() },
+            active.get() ? 'Active' : 'Inactive',
+          ),
+        ),
+      )
+    }, host)
+    const button = host.querySelector('button')!
+    button.focus()
+
+    const capture = await captureMutations(host, () => setActive(true))
+
+    expect(host.querySelector('button')).toBe(button)
+    expect(document.activeElement).toBe(button)
+    expect(button.getAttribute('aria-pressed')).toBe('true')
+    expect(button.textContent).toBe('Active')
+    expect(() =>
+      assertMutationEnvelope(
+        capture.records,
+        [
+          { type: 'attributes', target: button, attributeName: 'aria-pressed' },
+          { type: 'characterData', within: button },
+        ],
+        'same-family renderable update',
+      ),
+    ).not.toThrow()
+    mounted.dispose()
+    host.remove()
   })
 
   it('applies nested container defaults and rejects unguarded nullish destructuring', () => {
@@ -1013,11 +1056,40 @@ describe('compiled DOM corpus', () => {
     }, host)
 
     expect(() => setBroken(true)).toThrow('reactive ref failed')
-    expect(previousCleanups).toBe(0)
+    expect(previousCleanups).toBe(1)
     expect(host.querySelector('input')).not.toBeNull()
 
     mounted.dispose()
-    expect(previousCleanups).toBe(1)
+    expect(previousCleanups).toBe(2)
+  })
+
+  it('detaches the previous reactive callback ref before attaching its replacement', () => {
+    const refSource = source(0)
+    let setAlternate!: ReturnType<typeof createCompiledState<boolean>>['set']
+    const trace: string[] = []
+    const primaryRef = (node: Element | null): void => {
+      trace.push(`primary:${node === null ? 'detach' : 'attach'}`)
+    }
+    const alternateRef = (node: Element | null): void => {
+      trace.push(`alternate:${node === null ? 'detach' : 'attach'}`)
+    }
+    const host = document.createElement('div')
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const alternate = createCompiledState(scope, refSource, false)
+      setAlternate = alternate.set
+      return compiledRoot(scope, () =>
+        h('input', {
+          ref: binding(scope, refSource, () => (alternate.get() ? alternateRef : primaryRef)),
+        }),
+      )
+    }, host)
+
+    setAlternate(true)
+    expect(trace).toEqual(['primary:attach', 'primary:detach', 'alternate:attach'])
+
+    mounted.dispose()
+    expect(trace.at(-1)).toBe('alternate:detach')
   })
 
   it('rolls back DOM and retains the previous imperative handle when its factory throws', () => {
