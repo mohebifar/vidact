@@ -27,7 +27,7 @@ use crate::{
         normalize_compiler_hook_inputs, normalize_expression_bodied_component_arrows,
         normalize_simple_logical_assignments, restore_anonymous_default_component_names,
     },
-    custom_hooks::plan_local_custom_hooks,
+    custom_hooks::{normalize_dependency_class_hook_methods, plan_local_custom_hooks},
     lower_component,
     lowered_react::{may_contain_lowered_react, normalize_lowered_react},
     options::{CompilationOptions, CompilerFeature, CompilerTarget},
@@ -143,6 +143,7 @@ pub fn compile_server_module_with_options(
         .map_err(|diagnostic| vec![diagnostic])?;
     if options.feature_enabled(CompilerFeature::DependencySource) {
         normalize_simple_logical_assignments(&allocator, &mut parsed.program);
+        normalize_dependency_class_hook_methods(&allocator, &mut parsed.program);
         ServerEnvironmentNormalizer {
             ast: AstBuilder::new(&allocator),
         }
@@ -185,9 +186,13 @@ pub fn compile_server_module_with_options(
     } else {
         semantic
     };
-    let custom_hooks =
-        plan_local_custom_hooks(&allocator, &parsed.program, semantic.semantic.scoping())
-            .map_err(|diagnostic| vec![diagnostic])?;
+    let custom_hooks = plan_local_custom_hooks(
+        &allocator,
+        &parsed.program,
+        semantic.semantic.scoping(),
+        options.feature_enabled(CompilerFeature::DependencySource),
+    )
+    .map_err(|diagnostic| vec![diagnostic])?;
     drop(semantic);
     if let Some(custom_hooks) = custom_hooks {
         custom_hooks

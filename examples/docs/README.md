@@ -1,26 +1,18 @@
-# Vidact docs starter
+# Vidact documentation website
 
-A minimal Fumadocs-style documentation shell built from the official shadcn Base
-UI registry and compiled to Vidact's direct DOM runtime.
+The user documentation for Vidact, organized with the Diátaxis framework and built with Vidact
+Start, Fumadocs Core, and Tailwind CSS. Fumadocs supplies the headless page tree and document
+lookup. The application shell and local components compile to Vidact without Fumadocs UI, Base
+UI, or React interop.
 
-This is not a port of `fumadocs-ui`. The production entry imports all 35 modules
-that currently produce a React-free bundle. Button, Input, published Base UI
-Collapsible, and the local Popover have browser interaction plus stable-owner
-proof. Popover replaces the
-copied Base UI wrapper without patching the dependency and uses one owner-aware
-root subscription. The docs shell also mounts Alert, Card, Kbd, and Separator
-statically. Avatar mounts under its provider, while its reactive image-status
-path remains build-only. `src/shadcn-compatibility.ts` records these distinctions
-for the 35 React-free modules and the first known boundary for the other 26
-registry components.
+The site contains learning-oriented tutorials, task-focused how-to guides, public API reference,
+and explanations of Vidact's compilation, reactivity, ownership, and framework model.
+Documentation lives in `content/docs/**/*.mdx`. The server parses MDX into serializable blocks and
+uses a narrowly configured Shiki instance for syntax tokens; the browser renders those blocks with
+Vidact-owned components.
 
 ```sh
 pnpm --filter @vidact/example-docs dev
-pnpm --filter @vidact/example-docs test
-pnpm --filter @vidact/example-docs build
-pnpm --filter @vidact/example-docs audit:shadcn
 ```
 
-The build finishes by scanning every emitted JavaScript bundle and fails if it
-finds a React package import, React element tag, React DOM renderer, or compat
-adapter.
+The development server listens on `http://127.0.0.1:5173` by default.

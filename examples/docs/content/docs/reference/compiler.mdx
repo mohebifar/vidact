@@ -1,0 +1,34 @@
+---
+title: @vidact/compiler
+description: Node API and command-line reference for direct compiler use.
+group: Reference
+kind: Reference
+---
+
+## Compile source
+
+```ts
+import { compile } from '@vidact/compiler'
+
+const result = await compile(source, {
+  filename: '/src/App.tsx',
+  target: 'client',
+  features: [],
+})
+```
+
+| Option | Required | Values |
+| --- | --- | --- |
+| `filename` | Yes | Source filename for analysis and diagnostics |
+| `target` | No | `client`, `hydrate`, or `server` |
+| `features` | No | Array of Vidact feature names |
+
+## Operations and results
+
+| Operation | Result |
+| --- | --- |
+| `compile` / `compileSync` | Code, map, configuration, analysis, and protocols |
+| `analyze` / `analyzeSync` | Component and reactive-flow analysis |
+| `vidactc` | CLI over the packaged native compiler |
+
+Prefer asynchronous calls in long-running tools so native compiler work does not block the JavaScript thread.

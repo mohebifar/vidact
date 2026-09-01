@@ -7,7 +7,7 @@ use oxc_allocator::{Allocator, CloneIn, GetAllocator, TakeIn};
 use oxc_ast::{ast::*, builder::AstBuilder};
 use oxc_ast_visit::{
     Visit, VisitMut,
-    walk::{walk_call_expression, walk_class},
+    walk::{walk_call_expression, walk_class, walk_static_member_expression},
     walk_mut::{
         walk_call_expression as walk_call_expression_mut, walk_expression as walk_expression_mut,
         walk_jsx_attribute, walk_jsx_element, walk_jsx_spread_attribute,
@@ -29,7 +29,7 @@ use crate::{
         normalize_precomputed_provider_children, normalize_simple_logical_assignments,
         restore_anonymous_default_component_names,
     },
-    custom_hooks::plan_local_custom_hooks,
+    custom_hooks::{normalize_dependency_class_hook_methods, plan_local_custom_hooks},
     ir::{ComponentIr, lower_component},
     lowered_react::{may_contain_lowered_react, normalize_lowered_react},
     options::{CompilationOptions, CompilerFeature},
@@ -154,6 +154,7 @@ pub fn compile_surgical_module_with_ir_and_options(
         .map_err(|diagnostic| vec![diagnostic])?;
     if options.feature_enabled(CompilerFeature::DependencySource) {
         normalize_simple_logical_assignments(&allocator, &mut parsed.program);
+        normalize_dependency_class_hook_methods(&allocator, &mut parsed.program);
     }
     let anonymous_defaults =
         normalize_expression_bodied_component_arrows(&allocator, &mut parsed.program);
@@ -187,9 +188,13 @@ pub fn compile_surgical_module_with_ir_and_options(
         semantic
     };
 
-    let custom_hooks =
-        plan_local_custom_hooks(&allocator, &parsed.program, semantic.semantic.scoping())
-            .map_err(|diagnostic| vec![diagnostic])?;
+    let custom_hooks = plan_local_custom_hooks(
+        &allocator,
+        &parsed.program,
+        semantic.semantic.scoping(),
+        options.feature_enabled(CompilerFeature::DependencySource),
+    )
+    .map_err(|diagnostic| vec![diagnostic])?;
     drop(semantic);
     if let Some(custom_hooks) = custom_hooks {
         custom_hooks
@@ -1219,6 +1224,8 @@ fn transform_component<'a>(
     let mut render_start = render_suffix_start(body)?;
     let mut source_symbols = BTreeMap::<SymbolId, SourceId>::new();
     let mut state_symbols = BTreeMap::<SymbolId, StateReference<'a>>::new();
+    let mut state_setter_sources = BTreeMap::<SymbolId, SourceId>::new();
+    let mut state_value_sources = BTreeMap::<SymbolId, SourceId>::new();
     let mut context_sources = BTreeSet::<SourceId>::new();
     let mut external_sources = BTreeSet::<SourceId>::new();
     let mut effect_event_sources = BTreeSet::<SourceId>::new();
@@ -1269,6 +1276,7 @@ fn transform_component<'a>(
                 state_binding_symbols(declarator, &source_ids, &react)?
             {
                 source_symbols.insert(value.symbol, value.source);
+                state_value_sources.insert(value.symbol, value.source);
                 state_symbols.insert(
                     value.symbol,
                     StateReference {
@@ -1285,6 +1293,7 @@ fn transform_component<'a>(
                         path: Vec::new(),
                     },
                 );
+                state_setter_sources.insert(setter.symbol, value.source);
             } else if let Some((pending, starter)) =
                 transition_binding_symbols(declarator, &source_ids, &react)?
             {
@@ -1449,6 +1458,8 @@ fn transform_component<'a>(
             &mut next_source,
             &mut source_ids,
             &mut source_symbols,
+            &mut state_symbols,
+            &mut memo_sources,
             &item_source_symbols,
         )
     } else {
@@ -1686,6 +1697,41 @@ fn transform_component<'a>(
 
     let derivations = derived_expressions(body, ir, allocator);
     let render_start = render_start + 1 + prop_bindings.len();
+    let mut render_sync_updater_statements = oxc_allocator::Vec::new_in(&ast);
+    for statement in &body.statements[..render_start] {
+        if !matches!(statement, Statement::IfStatement(_)) {
+            continue;
+        }
+        let writes = immediate_state_setter_writes(
+            statement,
+            scoping,
+            &state_setter_sources,
+            &state_value_sources,
+        );
+        if writes.is_empty() {
+            continue;
+        }
+        let reads = statement_dependencies(
+            std::slice::from_ref(statement),
+            scoping,
+            &source_symbols,
+            &item_source_symbols,
+        );
+        if !reads.item.is_empty() {
+            return Err(unsupported(
+                "render-phase state synchronization cannot capture keyed item slots",
+            ));
+        }
+        if reads.parent.is_empty() {
+            continue;
+        }
+        render_sync_updater_statements.push(register_derived_statements(
+            &ast,
+            [statement.clone_in_with_semantic_ids(allocator)],
+            &reads.parent.into_iter().collect::<Vec<_>>(),
+            &writes.into_iter().collect::<Vec<_>>(),
+        ));
+    }
     let mut updater_statements = oxc_allocator::Vec::new_in(&ast);
     for updater in &ir.updaters {
         if updater.kind != crate::analysis::UpdaterKind::Derived {
@@ -1777,6 +1823,7 @@ fn transform_component<'a>(
         });
     }
     let mut synthetic_updater_statements = oxc_allocator::Vec::new_in(&ast);
+    synthetic_updater_statements.extend(render_sync_updater_statements);
     for derivation in &synthetic_derivations {
         let reads = dependencies(
             &derivation.expression,
@@ -2805,25 +2852,44 @@ fn transform_external_store_declarator<'a>(
         )
         .with_span(SourceSpan::new(hook_call.span.start, hook_call.span.end)));
     }
+    let mut reactive_reads = DependencyReads::default();
     for argument in &hook_call.arguments {
         let expression = argument
             .as_expression()
             .expect("spread arguments were rejected");
         let reads = dependencies(expression, scoping, source_symbols, item_source_symbols);
-        if !reads.parent.is_empty() || !reads.item.is_empty() {
-            return Err(unsupported(
-                "reactive useSyncExternalStore arguments require resubscription lowering",
-            )
-            .with_span(SourceSpan::from_oxc(expression.span())));
-        }
+        reactive_reads.parent.extend(reads.parent);
+        reactive_reads.item.extend(reads.item);
     }
     let mut arguments = vec![ident(ast, SCOPE), mask(ast, &[value.source])];
-    arguments.extend(hook_call.arguments.iter().map(|argument| {
-        argument
-            .as_expression()
-            .expect("spread arguments were rejected")
-            .clone_in_with_semantic_ids(ast.allocator())
-    }));
+    if reactive_reads.is_empty() {
+        arguments.extend(hook_call.arguments.iter().map(|argument| {
+            argument
+                .as_expression()
+                .expect("spread arguments were rejected")
+                .clone_in_with_semantic_ids(ast.allocator())
+        }));
+    } else {
+        let store_arguments = oxc_allocator::Vec::from_iter_in(
+            hook_call.arguments.iter().map(|argument| {
+                ArrayExpressionElement::from(
+                    argument
+                        .as_expression()
+                        .expect("spread arguments were rejected")
+                        .clone_in_with_semantic_ids(ast.allocator()),
+                )
+            }),
+            ast,
+        );
+        let evaluate = Expression::new_array_expression(hook_call.span, store_arguments, ast);
+        let mut binding_arguments = vec![
+            ident(ast, SCOPE),
+            dependency_mask(ast, &reactive_reads.parent),
+            arrow_expression(ast, [], evaluate),
+        ];
+        append_item_dependency(ast, &mut binding_arguments, &reactive_reads);
+        arguments.push(call_name(ast, BINDING, binding_arguments));
+    }
     declarator.init = Some(call_name(ast, CREATE_EXTERNAL_STORE, arguments));
     Ok(())
 }
@@ -3021,7 +3087,15 @@ fn coalesce_props_before_reactive_spread<'a>(
     {
         match item {
             JSXAttributeItem::SpreadAttribute(spread) => {
-                if index < spread_index {
+                if index < spread_index
+                    && dependencies(
+                        &spread.argument,
+                        scoping,
+                        source_symbols,
+                        item_source_symbols,
+                    )
+                    .is_empty()
+                {
                     return Err(unsupported(
                         "a non-reactive spread before a reactive JSX spread requires a cached ownership layer",
                     )
@@ -3042,7 +3116,7 @@ fn coalesce_props_before_reactive_spread<'a>(
                 };
                 if matches!(
                     name.name.as_str(),
-                    "key" | "ref" | "children" | "dangerouslySetInnerHTML"
+                    "key" | "children" | "dangerouslySetInnerHTML"
                 ) {
                     return Err(unsupported(format!(
                         "{name} before a reactive JSX spread requires dedicated ownership semantics",
@@ -3656,15 +3730,13 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
                     );
                     return;
                 };
-                if array.elements.iter().any(|element| {
-                    matches!(
-                        element,
-                        ArrayExpressionElement::SpreadElement(_)
-                            | ArrayExpressionElement::Elision(_)
-                    )
-                }) {
+                if array
+                    .elements
+                    .iter()
+                    .any(|element| matches!(element, ArrayExpressionElement::Elision(_)))
+                {
                     self.diagnostic = Some(
-                        unsupported("effect dependencies must have a static length")
+                        unsupported("effect dependencies cannot contain elisions")
                             .with_span(SourceSpan::from_oxc(dependencies.span())),
                     );
                     return;
@@ -3947,8 +4019,10 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
                 .then_some((index, spread.span.start))
             })
             .collect::<Vec<_>>();
-        if reactive_spreads.len() == 1 {
-            let (spread_index, spread_start) = reactive_spreads[0];
+        if !reactive_spreads.is_empty() {
+            let (spread_index, spread_start) = *reactive_spreads
+                .last()
+                .expect("a non-empty reactive spread list has a final spread");
             let has_preceding_prop = element.opening_element.attributes[..spread_index]
                 .iter()
                 .any(|item| match item {
@@ -4906,6 +4980,8 @@ fn collect_missing_derivations<'a>(
     next_source: &mut u32,
     source_ids: &mut BTreeMap<&'a str, SourceId>,
     source_symbols: &mut BTreeMap<SymbolId, SourceId>,
+    state_symbols: &mut BTreeMap<SymbolId, StateReference<'a>>,
+    memo_sources: &mut BTreeSet<SourceId>,
     item_source_symbols: &BTreeMap<SymbolId, SourceId>,
 ) -> Vec<SyntheticDerivation<'a>> {
     let mut derivations = Vec::new();
@@ -4928,8 +5004,40 @@ fn collect_missing_derivations<'a>(
                 let Some(initializer) = &declarator.init else {
                     continue;
                 };
+                if let Expression::CallExpression(call) = initializer
+                    && react.memo_hook_call(call).is_some()
+                {
+                    let Some(dependency_expression) =
+                        call.arguments.get(1).and_then(Argument::as_expression)
+                    else {
+                        continue;
+                    };
+                    let reads = dependencies(
+                        dependency_expression,
+                        scoping,
+                        source_symbols,
+                        item_source_symbols,
+                    );
+                    if reads.parent.is_empty() || !reads.item.is_empty() {
+                        continue;
+                    }
+                    let source = SourceId::new(*next_source);
+                    *next_source += 1;
+                    let name = allocator.alloc_str(identifier.name.as_str());
+                    source_ids.insert(name, source);
+                    source_symbols.insert(symbol, source);
+                    state_symbols.insert(
+                        symbol,
+                        StateReference {
+                            state_name: name,
+                            setter: false,
+                            path: Vec::new(),
+                        },
+                    );
+                    memo_sources.insert(source);
+                    continue;
+                }
                 if matches!(initializer, Expression::CallExpression(call) if react.state_hook_call(call).is_some()
-                    || react.memo_hook_call(call).is_some()
                     || react.context_hook_call(call).is_some()
                     || react.effect_hook_call(call).is_some()
                     || react.is_sync_external_store_call(call))
@@ -5266,6 +5374,13 @@ struct ImmediateDependencyFinder<'s> {
     reads: DependencyReads,
 }
 
+struct ImmediateStateSetterWriteFinder<'s> {
+    scoping: &'s Scoping,
+    setter_sources: &'s BTreeMap<SymbolId, SourceId>,
+    state_value_sources: &'s BTreeMap<SymbolId, SourceId>,
+    writes: BTreeSet<SourceId>,
+}
+
 impl<'a> Visit<'a> for DependencyFinder<'_> {
     fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
         let Some(reference) = identifier.reference_id.get() else {
@@ -5302,6 +5417,52 @@ impl<'a> Visit<'a> for ImmediateDependencyFinder<'_> {
     fn visit_function(&mut self, _function: &Function<'a>, _flags: ScopeFlags) {}
 
     fn visit_arrow_function_expression(&mut self, _function: &ArrowFunctionExpression<'a>) {}
+}
+
+impl<'a> Visit<'a> for ImmediateStateSetterWriteFinder<'_> {
+    fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
+        let Some(reference) = identifier.reference_id.get() else {
+            return;
+        };
+        let Some(symbol) = self.scoping.get_reference(reference).symbol_id() else {
+            return;
+        };
+        if let Some(source) = self.setter_sources.get(&symbol) {
+            self.writes.insert(*source);
+        }
+    }
+
+    fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
+        if member.property.name == "set"
+            && let Expression::Identifier(identifier) = &member.object
+            && let Some(reference) = identifier.reference_id.get()
+            && let Some(symbol) = self.scoping.get_reference(reference).symbol_id()
+            && let Some(source) = self.state_value_sources.get(&symbol)
+        {
+            self.writes.insert(*source);
+        }
+        walk_static_member_expression(self, member);
+    }
+
+    fn visit_function(&mut self, _function: &Function<'a>, _flags: ScopeFlags) {}
+
+    fn visit_arrow_function_expression(&mut self, _function: &ArrowFunctionExpression<'a>) {}
+}
+
+fn immediate_state_setter_writes(
+    statement: &Statement<'_>,
+    scoping: &Scoping,
+    setter_sources: &BTreeMap<SymbolId, SourceId>,
+    state_value_sources: &BTreeMap<SymbolId, SourceId>,
+) -> BTreeSet<SourceId> {
+    let mut finder = ImmediateStateSetterWriteFinder {
+        scoping,
+        setter_sources,
+        state_value_sources,
+        writes: BTreeSet::new(),
+    };
+    finder.visit_statement(statement);
+    finder.writes
 }
 
 fn dependencies(

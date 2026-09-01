@@ -1,0 +1,43 @@
+---
+title: Build controlled forms
+description: Handle native form events while keeping controlled values consistent.
+group: How-to guides
+kind: How-to guide
+---
+
+## Control an input
+
+```tsx
+const [query, setQuery] = useState('')
+
+<input
+  value={query}
+  onChange={(event: Event) =>
+    setQuery((event.currentTarget as HTMLInputElement).value)
+  }
+/>
+```
+
+Handlers receive native DOM events. Text input and textarea `onChange` runs from the native `input` event and observes the browser-edited value before controlled restoration.
+
+## Choose the event source
+
+| Control | Change source |
+| --- | --- |
+| Text input and textarea | Native `input` event |
+| Checkbox and radio | Native `change` event |
+| Select and multiple select | Native `change` event |
+| File input | Native `change`; do not control its value |
+
+## Handle submission
+
+```tsx
+const submit = (event: SubmitEvent) => {
+  event.preventDefault()
+  save(new FormData(event.currentTarget as HTMLFormElement))
+}
+
+<form onSubmit={submit}>...</form>
+```
+
+Enable `actions` for function-valued actions, `useActionState`, `useOptimistic`, and `useFormStatus`.

@@ -7,8 +7,8 @@ use oxc_ast::{
         AssignmentExpression, AssignmentTarget, BindingPattern, CallExpression, Declaration,
         ExportDefaultDeclarationKind, Expression, FormalParameterKind, FormalParameters, Function,
         FunctionBody, JSXAttributeItem, JSXAttributeName, JSXAttributeValue, JSXChild, JSXElement,
-        JSXElementName, JSXMemberExpressionObject, MemberExpression, Program, Statement,
-        VariableDeclaration, VariableDeclarator,
+        JSXElementName, JSXFragment, JSXMemberExpressionObject, MemberExpression, Program,
+        Statement, VariableDeclaration, VariableDeclarator,
     },
     builder::AstBuilder,
 };
@@ -128,18 +128,10 @@ struct IdentifierObjectDestructuringNormalizer<'a> {
 }
 
 impl<'a> IdentifierObjectDestructuringNormalizer<'a> {
-    fn normalize_body(&mut self, parameters: &FormalParameters<'a>, body: &mut FunctionBody<'a>) {
-        let parameter = parameters.items.first().and_then(|parameter| {
-            let BindingPattern::BindingIdentifier(identifier) = &parameter.pattern else {
-                return None;
-            };
-            Some(identifier.name.to_string())
-        });
+    fn normalize_body(&mut self, body: &mut FunctionBody<'a>) {
         let mut next = oxc_allocator::Vec::new_in(&self.ast);
         for statement in body.statements.drain(..) {
-            let Some(flattened) =
-                flatten_identifier_object_statement(&self.ast, &statement, parameter.as_deref())
-            else {
+            let Some(flattened) = flatten_identifier_object_statement(&self.ast, &statement) else {
                 next.push(statement);
                 continue;
             };
@@ -153,14 +145,14 @@ impl<'a> IdentifierObjectDestructuringNormalizer<'a> {
 impl<'a> VisitMut<'a> for IdentifierObjectDestructuringNormalizer<'a> {
     fn visit_function(&mut self, function: &mut Function<'a>, flags: ScopeFlags) {
         if let Some(body) = &mut function.body {
-            self.normalize_body(&function.params, body);
+            self.normalize_body(body);
         }
         walk_function(self, function, flags);
     }
 
     fn visit_arrow_function_expression(&mut self, function: &mut ArrowFunctionExpression<'a>) {
         if let Some(body) = function.body.as_function_body_mut() {
-            self.normalize_body(&function.params, body);
+            self.normalize_body(body);
         }
         walk_arrow_function_expression(self, function);
     }
@@ -169,7 +161,6 @@ impl<'a> VisitMut<'a> for IdentifierObjectDestructuringNormalizer<'a> {
 fn flatten_identifier_object_statement<'a>(
     ast: &AstBuilder<'a>,
     statement: &Statement<'a>,
-    object_parameter: Option<&str>,
 ) -> Option<Vec<Statement<'a>>> {
     let Statement::VariableDeclaration(declaration) = statement else {
         return None;
@@ -185,9 +176,6 @@ fn flatten_identifier_object_statement<'a>(
         return None;
     };
     let input_name = initializer.name.to_string();
-    if object_parameter != Some(input_name.as_str()) {
-        return None;
-    }
 
     let mut excluded = Vec::with_capacity(pattern.properties.len());
     let mut statements =
@@ -384,6 +372,18 @@ impl<'a> PrecomputedProviderChildNormalizer<'a> {
                 &self.ast,
             );
         }
+        let write_name = source_name.as_deref().unwrap_or(&child_name);
+        move_provider_value_before_construction(body, write_name, &value);
+        if let Some(write_index) = provider_child_write_index(body, write_name) {
+            contextualize_precomputed_jsx_inputs(
+                &self.ast,
+                body,
+                write_index,
+                write_name,
+                &context,
+                &value,
+            );
+        }
         if let Some(source_name) = source_name {
             let mut wrapper = NamedProviderChildWriteWrapper {
                 ast: &self.ast,
@@ -414,6 +414,9 @@ impl<'a> PrecomputedProviderChildNormalizer<'a> {
                 let Some(initializer) = &mut declarator.init else {
                     continue;
                 };
+                if is_forwarded_children_member(initializer) {
+                    return;
+                }
                 if matches!(
                     initializer.without_parentheses(),
                     Expression::CallExpression(call)
@@ -426,6 +429,167 @@ impl<'a> PrecomputedProviderChildNormalizer<'a> {
                 return;
             }
         }
+    }
+}
+
+fn move_provider_value_before_construction(
+    body: &mut FunctionBody<'_>,
+    provider_child_name: &str,
+    value: &Expression<'_>,
+) {
+    let Expression::Identifier(value_identifier) = value.without_parentheses() else {
+        return;
+    };
+    let value_name = value_identifier.name.as_str();
+    let Some(value_index) = body
+        .statements
+        .iter()
+        .position(|statement| statement_declares_identifier(statement, value_name))
+    else {
+        return;
+    };
+    let Some(construction_index) = body
+        .statements
+        .iter()
+        .take(value_index)
+        .enumerate()
+        .find_map(|(index, statement)| {
+            let Statement::VariableDeclaration(declaration) = statement else {
+                return None;
+            };
+            let [declarator] = declaration.declarations.as_slice() else {
+                return None;
+            };
+            let is_child = matches!(
+                &declarator.id,
+                BindingPattern::BindingIdentifier(identifier)
+                    if identifier.name.as_str() == provider_child_name
+            );
+            let contains_jsx = declarator
+                .init
+                .as_ref()
+                .is_some_and(expression_contains_jsx);
+            (is_child || contains_jsx).then_some(index)
+        })
+    else {
+        return;
+    };
+    let Some(value_initializer) = body.statements.get(value_index).and_then(|statement| {
+        let Statement::VariableDeclaration(declaration) = statement else {
+            return None;
+        };
+        declaration.declarations.iter().find_map(|declarator| {
+            matches!(
+                &declarator.id,
+                BindingPattern::BindingIdentifier(identifier)
+                    if identifier.name.as_str() == value_name
+            )
+            .then(|| declarator.init.as_ref())
+            .flatten()
+        })
+    }) else {
+        return;
+    };
+    let mut references = ProviderValueReferenceFinder::default();
+    references.visit_expression(value_initializer);
+    let dependencies_ready = references.names.iter().all(|name| {
+        body.statements
+            .iter()
+            .position(|statement| statement_declares_identifier(statement, name))
+            .is_none_or(|index| index < construction_index)
+    });
+    if !dependencies_ready {
+        return;
+    }
+    let statement = body.statements.remove(value_index);
+    body.statements.insert(construction_index, statement);
+}
+
+fn statement_declares_identifier(statement: &Statement<'_>, name: &str) -> bool {
+    let Statement::VariableDeclaration(declaration) = statement else {
+        return false;
+    };
+    declaration.declarations.iter().any(|declarator| {
+        matches!(
+            &declarator.id,
+            BindingPattern::BindingIdentifier(identifier) if identifier.name.as_str() == name
+        )
+    })
+}
+
+#[derive(Default)]
+struct ProviderValueReferenceFinder {
+    names: BTreeSet<String>,
+}
+
+impl<'a> Visit<'a> for ProviderValueReferenceFinder {
+    fn visit_identifier_reference(&mut self, identifier: &oxc_ast::ast::IdentifierReference<'a>) {
+        self.names.insert(identifier.name.to_string());
+    }
+}
+
+fn contextualize_precomputed_jsx_inputs<'a>(
+    ast: &AstBuilder<'a>,
+    body: &mut FunctionBody<'a>,
+    before_index: usize,
+    provider_child_name: &str,
+    context: &Expression<'a>,
+    value: &Expression<'a>,
+) {
+    for statement in body.statements.iter_mut().take(before_index) {
+        let Statement::VariableDeclaration(declaration) = statement else {
+            continue;
+        };
+        for declarator in &mut declaration.declarations {
+            if matches!(
+                &declarator.id,
+                BindingPattern::BindingIdentifier(identifier)
+                    if identifier.name.as_str() == provider_child_name
+            ) {
+                continue;
+            }
+            let Some(initializer) = &mut declarator.init else {
+                continue;
+            };
+            if expression_contains_jsx(initializer) {
+                contextualize_expression(ast, initializer, context, value);
+            }
+        }
+    }
+}
+
+fn expression_contains_jsx(expression: &Expression<'_>) -> bool {
+    let mut finder = ProviderJsxFinder::default();
+    finder.visit_expression(expression);
+    finder.found
+}
+
+#[derive(Default)]
+struct ProviderJsxFinder {
+    found: bool,
+}
+
+impl<'a> Visit<'a> for ProviderJsxFinder {
+    fn visit_jsx_element(&mut self, _element: &JSXElement<'a>) {
+        self.found = true;
+    }
+
+    fn visit_jsx_fragment(&mut self, _fragment: &JSXFragment<'a>) {
+        self.found = true;
+    }
+
+    fn visit_function(&mut self, _function: &Function<'a>, _flags: ScopeFlags) {}
+
+    fn visit_arrow_function_expression(&mut self, _function: &ArrowFunctionExpression<'a>) {}
+}
+
+fn is_forwarded_children_member(expression: &Expression<'_>) -> bool {
+    match expression.without_parentheses() {
+        Expression::StaticMemberExpression(member) => member.property.name == "children",
+        Expression::ComputedMemberExpression(member) => member
+            .static_property_name()
+            .is_some_and(|name| name.as_str() == "children"),
+        _ => false,
     }
 }
 

@@ -1,0 +1,38 @@
+---
+title: @vidact/start
+description: Route, loader, navigation, client, server, and Vite API reference.
+group: Reference
+kind: Reference
+---
+
+## Route API
+
+| Export | Purpose |
+| --- | --- |
+| `defineFileRoute(options)` | Define a component, loader, and method handlers |
+| `RouteComponentProps` | Children, loader data, params, and request URL |
+| `RouteLoaderContext` | Parent data, params, and request |
+| `Link` | SSR anchor with hydrated navigation |
+
+## Client API
+
+| Export | Purpose |
+| --- | --- |
+| `hydrateStart(options)` | Claim the route and install navigation listeners |
+| `StartClient.navigate(to, options)` | Navigate programmatically |
+| `StartClient.replace(application)` | Replace the compiled route root |
+| `StartClient.unmount()` | Dispose listeners and root ownership |
+
+## Server and Vite API
+
+| Export | Purpose |
+| --- | --- |
+| `createStartHandler(options)` | Match requests, run loaders, and render responses |
+| `renderDocument(context)` | Wrap HTML and the loader snapshot |
+| `vidactStart(options)` | Configure targets, routes, and development handling |
+
+## Current limitations
+
+- Navigation replaces the complete route root, including layout state.
+- Route preloading, middleware, and deployment adapters are not in the first release.
+- Loader snapshots accept framework values, not arbitrary class instances or cyclic graphs.

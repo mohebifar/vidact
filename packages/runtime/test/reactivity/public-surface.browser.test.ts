@@ -13,8 +13,10 @@ describe('runtime public surface', () => {
 
   it('keeps one-shot refs available to compiled components', () => {
     const ref = runtime.useRef('initial')
+    const createdRef = runtime.createRef<HTMLElement>()
 
     expect(ref).toEqual({ current: 'initial' })
+    expect(createdRef).toEqual({ current: null })
   })
 
   it('refuses imperative handles outside compiled component construction', () => {

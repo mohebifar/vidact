@@ -4,8 +4,11 @@ use oxc_allocator::{Allocator, CloneIn, GetAllocator, TakeIn};
 use oxc_ast::{ast::*, builder::AstBuilder};
 use oxc_ast_visit::{
     Visit, VisitMut,
-    walk::walk_call_expression,
-    walk_mut::{walk_expression, walk_if_statement},
+    walk::{
+        walk_call_expression, walk_computed_member_expression, walk_method_definition,
+        walk_static_member_expression,
+    },
+    walk_mut::{walk_class_body, walk_expression, walk_if_statement},
 };
 use oxc_semantic::Scoping;
 use oxc_span::{GetSpan, SPAN, Span};
@@ -23,10 +26,284 @@ use crate::{
 const GENERATED_PREFIX: &str = "__vidactHook";
 const MAX_EXPANSION_PASSES: usize = 100;
 
+pub(crate) fn normalize_dependency_class_hook_methods<'a>(
+    allocator: &'a Allocator,
+    program: &mut Program<'a>,
+) {
+    let mut collector = ClassHookMethodCollector {
+        allocator,
+        methods: BTreeMap::new(),
+        duplicates: BTreeSet::new(),
+    };
+    collector.visit_program(program);
+    collector
+        .methods
+        .retain(|name, _| !collector.duplicates.contains(name));
+    if collector.methods.is_empty() {
+        return;
+    }
+
+    let synthetic_names = collector
+        .methods
+        .keys()
+        .enumerate()
+        .map(|(ordinal, name)| (name.clone(), format!("useVidactClassMethod{ordinal}")))
+        .collect::<BTreeMap<_, _>>();
+    let mut rewriter = ClassHookCallRewriter {
+        allocator,
+        synthetic_names: &synthetic_names,
+        rewritten: BTreeSet::new(),
+    };
+    rewriter.visit_program(program);
+    if rewriter.rewritten.is_empty() {
+        return;
+    }
+
+    let mut remaining = ClassHookMemberUseCollector {
+        candidates: &rewriter.rewritten,
+        names: BTreeSet::new(),
+    };
+    remaining.visit_program(program);
+    let removable = rewriter
+        .rewritten
+        .difference(&remaining.names)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if removable.is_empty() {
+        return;
+    }
+
+    ClassHookMethodRemover { names: &removable }.visit_program(program);
+
+    for name in removable {
+        let Some(mut function) = collector.methods.remove(&name) else {
+            continue;
+        };
+        let ast = AstBuilder::new(allocator);
+        let synthetic_name = synthetic_names
+            .get(&name)
+            .expect("each class hook method receives a synthetic name");
+        let receiver_name = allocator.alloc_str(&format!("__vidactClassReceiver{name}"));
+        function.r#type = FunctionType::FunctionDeclaration;
+        function.id = Some(BindingIdentifier::new(
+            SPAN,
+            allocator.alloc_str(synthetic_name),
+            &ast,
+        ));
+        function.params.items.insert(
+            0,
+            FormalParameter::new(
+                SPAN,
+                [],
+                BindingPattern::new_binding_identifier(SPAN, receiver_name, &ast),
+                None,
+                None,
+                false,
+                None,
+                false,
+                false,
+                &ast,
+            ),
+        );
+        if let Some(body) = &mut function.body {
+            ThisExpressionRewriter {
+                allocator,
+                receiver_name,
+            }
+            .visit_function_body(body);
+        }
+        program.body.push(Statement::FunctionDeclaration(function));
+    }
+}
+
+struct ClassHookMethodCollector<'a> {
+    allocator: &'a Allocator,
+    methods: BTreeMap<String, oxc_allocator::Box<'a, Function<'a>>>,
+    duplicates: BTreeSet<String>,
+}
+
+impl<'a> Visit<'a> for ClassHookMethodCollector<'a> {
+    fn visit_method_definition(&mut self, method: &MethodDefinition<'a>) {
+        let Some(name) = method.key.static_name().map(|name| name.to_string()) else {
+            walk_method_definition(self, method);
+            return;
+        };
+        if method.decorators.is_empty()
+            && method.kind == MethodDefinitionKind::Method
+            && is_hook_name(&name)
+            && method.value.body.is_some()
+        {
+            let mut finder = SyntacticHookCallFinder { found: false };
+            if let Some(body) = &method.value.body {
+                finder.visit_function_body(body);
+            }
+            if finder.found {
+                if self.methods.contains_key(&name) {
+                    self.duplicates.insert(name);
+                } else {
+                    self.methods
+                        .insert(name, method.value.clone_in(self.allocator));
+                }
+            }
+        }
+        walk_method_definition(self, method);
+    }
+}
+
+struct SyntacticHookCallFinder {
+    found: bool,
+}
+
+impl<'a> Visit<'a> for SyntacticHookCallFinder {
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if self.found {
+            return;
+        }
+        self.found = match call.callee.without_parentheses() {
+            Expression::Identifier(identifier) => is_hook_name(identifier.name.as_str()),
+            expression => expression
+                .get_member_expr()
+                .and_then(MemberExpression::static_property_name)
+                .is_some_and(is_hook_name),
+        };
+        if !self.found {
+            walk_call_expression(self, call);
+        }
+    }
+}
+
+struct ClassHookCallRewriter<'a, 'r> {
+    allocator: &'a Allocator,
+    synthetic_names: &'r BTreeMap<String, String>,
+    rewritten: BTreeSet<String>,
+}
+
+impl<'a> VisitMut<'a> for ClassHookCallRewriter<'a, '_> {
+    fn visit_call_expression(&mut self, call: &mut CallExpression<'a>) {
+        let candidate = match call.callee.without_parentheses() {
+            Expression::StaticMemberExpression(member) => Some((
+                member.property.name.to_string(),
+                member.object.clone_in(self.allocator),
+            )),
+            Expression::ComputedMemberExpression(member) => member
+                .static_property_name()
+                .map(|name| (name.to_string(), member.object.clone_in(self.allocator))),
+            _ => None,
+        };
+        let Some((name, receiver)) = candidate else {
+            oxc_ast_visit::walk_mut::walk_call_expression(self, call);
+            return;
+        };
+        let Some(synthetic_name) = self.synthetic_names.get(&name) else {
+            oxc_ast_visit::walk_mut::walk_call_expression(self, call);
+            return;
+        };
+        if is_react_namespace_expression(&receiver) {
+            oxc_ast_visit::walk_mut::walk_call_expression(self, call);
+            return;
+        }
+
+        call.arguments.insert(0, Argument::from(receiver));
+        call.callee = Expression::new_identifier(
+            SPAN,
+            self.allocator.alloc_str(synthetic_name),
+            &AstBuilder::new(self.allocator),
+        );
+        self.rewritten.insert(name);
+        oxc_ast_visit::walk_mut::walk_call_expression(self, call);
+    }
+}
+
+fn is_react_namespace_expression(expression: &Expression<'_>) -> bool {
+    expression
+        .get_identifier_reference()
+        .is_some_and(|identifier| {
+            let name = identifier.name.as_str();
+            name.ends_with("React")
+                || name.strip_prefix("React").is_some_and(|suffix| {
+                    suffix.is_empty()
+                        || suffix.strip_prefix('$').is_some_and(|ordinal| {
+                            ordinal.chars().all(|character| character.is_ascii_digit())
+                        })
+                })
+        })
+}
+
+struct ClassHookMemberUseCollector<'r> {
+    candidates: &'r BTreeSet<String>,
+    names: BTreeSet<String>,
+}
+
+impl<'a> Visit<'a> for ClassHookMemberUseCollector<'_> {
+    fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
+        let name = member.property.name.as_str();
+        if self.candidates.contains(name) && !is_react_namespace_expression(&member.object) {
+            self.names.insert(name.to_string());
+        }
+        walk_static_member_expression(self, member);
+    }
+
+    fn visit_computed_member_expression(&mut self, member: &ComputedMemberExpression<'a>) {
+        if let Some(name) = member.static_property_name()
+            && self.candidates.contains(name.as_str())
+            && !is_react_namespace_expression(&member.object)
+        {
+            self.names.insert(name.to_string());
+        }
+        walk_computed_member_expression(self, member);
+    }
+}
+
+struct ClassHookMethodRemover<'r> {
+    names: &'r BTreeSet<String>,
+}
+
+impl<'a> VisitMut<'a> for ClassHookMethodRemover<'_> {
+    fn visit_class_body(&mut self, body: &mut ClassBody<'a>) {
+        body.body.retain(|element| {
+            let ClassElement::MethodDefinition(method) = element else {
+                return true;
+            };
+            method
+                .key
+                .static_name()
+                .is_none_or(|name| !self.names.contains(name.as_ref()))
+        });
+        walk_class_body(self, body);
+    }
+}
+
+struct ThisExpressionRewriter<'a> {
+    allocator: &'a Allocator,
+    receiver_name: &'a str,
+}
+
+impl<'a> VisitMut<'a> for ThisExpressionRewriter<'a> {
+    fn visit_expression(&mut self, expression: &mut Expression<'a>) {
+        if matches!(expression, Expression::ThisExpression(_)) {
+            *expression = Expression::new_identifier(
+                SPAN,
+                self.receiver_name,
+                &AstBuilder::new(self.allocator),
+            );
+            return;
+        }
+        walk_expression(self, expression);
+    }
+
+    fn visit_function(
+        &mut self,
+        _function: &mut Function<'a>,
+        _flags: oxc_syntax::scope::ScopeFlags,
+    ) {
+    }
+}
+
 pub(crate) struct CustomHookPlan<'a> {
     allocator: &'a Allocator,
     hooks: BTreeMap<SymbolId, HookTemplate<'a>>,
     references: BTreeMap<ReferenceId, SymbolId>,
+    dead_class_hook_methods: BTreeSet<u32>,
 }
 
 struct HookTemplate<'a> {
@@ -53,6 +330,7 @@ pub(crate) fn plan_local_custom_hooks<'a>(
     allocator: &'a Allocator,
     program: &Program<'a>,
     scoping: &Scoping,
+    prune_dead_class_hook_methods: bool,
 ) -> Result<Option<CustomHookPlan<'a>>, Diagnostic> {
     let mut references = BTreeMap::new();
     let mut reference_collector = ReferenceCollector {
@@ -110,6 +388,11 @@ pub(crate) fn plan_local_custom_hooks<'a>(
         ));
     }
 
+    let dead_class_hook_methods = if prune_dead_class_hook_methods {
+        collect_dead_class_hook_methods(program, &references, &active)
+    } else {
+        BTreeSet::new()
+    };
     let hooks = candidates
         .into_iter()
         .filter(|(symbol, _)| active.contains(symbol))
@@ -128,6 +411,7 @@ pub(crate) fn plan_local_custom_hooks<'a>(
         allocator,
         hooks,
         references,
+        dead_class_hook_methods,
     }))
 }
 
@@ -137,6 +421,10 @@ impl CustomHookPlan<'_> {
         Self: 'a,
     {
         let ast = AstBuilder::new(self.allocator);
+        DeadClassHookMethodRemover {
+            starts: &self.dead_class_hook_methods,
+        }
+        .visit_program(program);
         let mut invocation = 0_u32;
         for statement in &mut program.body {
             expand_top_level_components(
@@ -1834,6 +2122,113 @@ impl<'a> Visit<'a> for HookCallFinder<'_, '_> {
             self.calls.local.insert(symbol);
         }
         walk_call_expression(self, call);
+    }
+}
+
+fn collect_dead_class_hook_methods(
+    program: &Program<'_>,
+    references: &BTreeMap<ReferenceId, SymbolId>,
+    active: &BTreeSet<SymbolId>,
+) -> BTreeSet<u32> {
+    let mut property_uses = StaticMemberPropertyCollector {
+        names: BTreeSet::new(),
+    };
+    property_uses.visit_program(program);
+
+    let mut collector = DeadClassHookMethodCollector {
+        references,
+        active,
+        used_properties: &property_uses.names,
+        starts: BTreeSet::new(),
+    };
+    collector.visit_program(program);
+    collector.starts
+}
+
+struct StaticMemberPropertyCollector {
+    names: BTreeSet<String>,
+}
+
+impl<'a> Visit<'a> for StaticMemberPropertyCollector {
+    fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
+        self.names.insert(member.property.name.to_string());
+        walk_static_member_expression(self, member);
+    }
+
+    fn visit_computed_member_expression(&mut self, member: &ComputedMemberExpression<'a>) {
+        if let Some(name) = member.static_property_name() {
+            self.names.insert(name.to_string());
+        }
+        walk_computed_member_expression(self, member);
+    }
+}
+
+struct DeadClassHookMethodCollector<'r> {
+    references: &'r BTreeMap<ReferenceId, SymbolId>,
+    active: &'r BTreeSet<SymbolId>,
+    used_properties: &'r BTreeSet<String>,
+    starts: BTreeSet<u32>,
+}
+
+impl<'a> Visit<'a> for DeadClassHookMethodCollector<'_> {
+    fn visit_method_definition(&mut self, method: &MethodDefinition<'a>) {
+        let removable = method.decorators.is_empty()
+            && method.kind == MethodDefinitionKind::Method
+            && method
+                .key
+                .static_name()
+                .is_some_and(|name| !self.used_properties.contains(name.as_ref()));
+        if removable {
+            let mut finder = ActiveHookReferenceFinder {
+                references: self.references,
+                active: self.active,
+                found: false,
+            };
+            if let Some(body) = &method.value.body {
+                for statement in &body.statements {
+                    finder.visit_statement(statement);
+                }
+            }
+            if finder.found {
+                self.starts.insert(method.span.start);
+            }
+        }
+        walk_method_definition(self, method);
+    }
+}
+
+struct ActiveHookReferenceFinder<'r> {
+    references: &'r BTreeMap<ReferenceId, SymbolId>,
+    active: &'r BTreeSet<SymbolId>,
+    found: bool,
+}
+
+impl<'a> Visit<'a> for ActiveHookReferenceFinder<'_> {
+    fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
+        if self.found {
+            return;
+        }
+        self.found = identifier
+            .reference_id
+            .get()
+            .and_then(|reference| self.references.get(&reference))
+            .is_some_and(|symbol| self.active.contains(symbol));
+    }
+}
+
+struct DeadClassHookMethodRemover<'r> {
+    starts: &'r BTreeSet<u32>,
+}
+
+impl<'a> VisitMut<'a> for DeadClassHookMethodRemover<'_> {
+    fn visit_class_body(&mut self, body: &mut ClassBody<'a>) {
+        body.body.retain(|element| {
+            let ClassElement::MethodDefinition(method) = element else {
+                return true;
+            };
+            !self.starts.contains(&method.span.start)
+        });
+        walk_class_body(self, body);
     }
 }
 

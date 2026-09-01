@@ -37,6 +37,7 @@ import {
   isRenderableProtocol,
   materializeRenderable,
   materializeRenderableWithInput,
+  RENDERABLE,
   renderableIdentity,
   renderablePropsSnapshot,
   type RenderableProtocol,
@@ -76,6 +77,7 @@ type ContextFrame = {
   readonly context: CompiledContext<unknown>
   readonly input: unknown
   readonly parent: ContextFrame | null
+  readonly owner: Owner | null
 }
 
 type ErrorBoundaryHandler = {
@@ -707,14 +709,73 @@ export function suspense(
   ]
 }
 
+type PortalRenderableProps = {
+  readonly children: CompiledRenderValue | readonly CompiledRenderValue[]
+}
+
+const keyedPortalIdentities = new WeakMap<ParentNode, Map<string | number | bigint, object>>()
+
 export function createPortal(
   children: CompiledRenderValue | readonly CompiledRenderValue[],
   container: ParentNode,
-  _key?: string | number | bigint | null,
-): StructuralBinding {
+  key?: string | number | bigint | null,
+): CompiledRenderValue {
   if (!(container instanceof Node) || typeof container.insertBefore !== 'function') {
     throw new TypeError(DEV ? 'createPortal requires a DOM container' : 'V026')
   }
+  const input: PortalRenderableProps = { children }
+  const capability = { props: input } as RenderableProtocol & {
+    readonly props: PortalRenderableProps
+  }
+  Object.defineProperty(capability, RENDERABLE, {
+    configurable: false,
+    enumerable: false,
+    value: {
+      identity: portalIdentity(container, key),
+      input,
+      reconcile: true,
+      construct: (currentInput: PortalRenderableProps | CompiledBinding<PortalRenderableProps>) =>
+        createPortalStructural(portalChildren(currentInput), container),
+    },
+  })
+  return capability as unknown as CompiledRenderValue
+}
+
+function portalIdentity(
+  container: ParentNode,
+  key: string | number | bigint | null | undefined,
+): object {
+  if (key == null) return container
+  let identities = keyedPortalIdentities.get(container)
+  if (identities === undefined) {
+    identities = new Map()
+    keyedPortalIdentities.set(container, identities)
+  }
+  let identity = identities.get(key)
+  if (identity === undefined) {
+    identity = {}
+    identities.set(key, identity)
+  }
+  return identity
+}
+
+function portalChildren(
+  input: PortalRenderableProps | CompiledBinding<PortalRenderableProps>,
+): CompiledRenderValue | readonly CompiledRenderValue[] {
+  if (!isCompiledBinding(input)) return input.children
+  return binding(
+    input[2],
+    input[3],
+    () => input[1]().children,
+    input[4],
+    input[5],
+  ) as CompiledBinding<CompiledRenderValue>
+}
+
+function createPortalStructural(
+  children: CompiledRenderValue | readonly CompiledRenderValue[],
+  container: ParentNode,
+): StructuralBinding {
   const context = activeContextFrame ?? activeOwner?.[2] ?? null
   const rootIdentity = activeOwner?.[3] ?? activeRootIdentity
   if (rootIdentity === null) {
@@ -991,23 +1052,105 @@ function topologicalUpdaterOrder(
   updaters: ReadonlyArray<CompiledUpdater | undefined>,
   operations: SourceOperations,
 ): number[] {
-  const remaining = updaters.flatMap((updater, index) =>
+  const activeIndexes = updaters.flatMap((updater, index) =>
     updater === undefined || !updater[3] ? [] : [index],
   )
-  const ordered: number[] = []
-  while (remaining.length > 0) {
-    const next = remaining.findIndex((readerIndex) =>
-      remaining.every((writerIndex) => {
-        if (writerIndex === readerIndex) return true
-        const writes = updaters[writerIndex]![1]
-        return writes === undefined || !operations[1](writes, updaters[readerIndex]![0])
-      }),
-    )
-    if (next === -1) {
-      ordered.push(...remaining)
-      break
+  const edges = new Map<number, number[]>()
+  for (const writerIndex of activeIndexes) {
+    const writes = updaters[writerIndex]![1]
+    if (writes === undefined) continue
+    const readers: number[] = []
+    for (const readerIndex of activeIndexes) {
+      if (
+        writerIndex !== readerIndex &&
+        operations[1](writes, updaters[readerIndex]![0])
+      ) {
+        readers.push(readerIndex)
+      }
     }
-    ordered.push(remaining.splice(next, 1)[0]!)
+    if (readers.length > 0) edges.set(writerIndex, readers)
+  }
+
+  const visitIndexes = new Int32Array(updaters.length).fill(-1)
+  const lowLinks = new Int32Array(updaters.length)
+  const stack: number[] = []
+  const onStack = new Uint8Array(updaters.length)
+  const components: number[][] = []
+  let nextVisitIndex = 0
+
+  const connect = (updaterIndex: number): void => {
+    const visitIndex = nextVisitIndex++
+    visitIndexes[updaterIndex] = visitIndex
+    lowLinks[updaterIndex] = visitIndex
+    stack.push(updaterIndex)
+    onStack[updaterIndex] = 1
+
+    for (const readerIndex of edges.get(updaterIndex) ?? []) {
+      if (visitIndexes[readerIndex] === -1) {
+        connect(readerIndex)
+        lowLinks[updaterIndex] = Math.min(lowLinks[updaterIndex]!, lowLinks[readerIndex]!)
+      } else if (onStack[readerIndex] === 1) {
+        lowLinks[updaterIndex] = Math.min(lowLinks[updaterIndex]!, visitIndexes[readerIndex]!)
+      }
+    }
+
+    if (lowLinks[updaterIndex] !== visitIndexes[updaterIndex]) return
+    const component: number[] = []
+    let member: number
+    do {
+      member = stack.pop()!
+      onStack[member] = 0
+      component.push(member)
+    } while (member !== updaterIndex)
+    component.sort((left, right) => left - right)
+    components.push(component)
+  }
+
+  for (const updaterIndex of activeIndexes) {
+    if (visitIndexes[updaterIndex] === -1) connect(updaterIndex)
+  }
+
+  const componentByUpdater = new Int32Array(updaters.length).fill(-1)
+  const componentEdges = components.map(() => new Set<number>())
+  const componentIndegrees = new Uint32Array(components.length)
+  const componentFirstIndexes = components.map((component) => component[0]!)
+  for (let componentIndex = 0; componentIndex < components.length; componentIndex += 1) {
+    for (const updaterIndex of components[componentIndex]!) {
+      componentByUpdater[updaterIndex] = componentIndex
+    }
+  }
+  for (const [writerIndex, readers] of edges) {
+    const writerComponent = componentByUpdater[writerIndex]!
+    for (const readerIndex of readers) {
+      const readerComponent = componentByUpdater[readerIndex]!
+      if (
+        writerComponent === readerComponent ||
+        componentEdges[writerComponent]!.has(readerComponent)
+      ) {
+        continue
+      }
+      componentEdges[writerComponent]!.add(readerComponent)
+      componentIndegrees[readerComponent] = componentIndegrees[readerComponent]! + 1
+    }
+  }
+
+  const ready = components
+    .map((_, index) => index)
+    .filter((index) => componentIndegrees[index] === 0)
+    .sort((left, right) => componentFirstIndexes[left]! - componentFirstIndexes[right]!)
+  const ordered: number[] = []
+  while (ready.length > 0) {
+    const componentIndex = ready.shift()!
+    ordered.push(...components[componentIndex]!)
+    for (const readerComponent of componentEdges[componentIndex]!) {
+      componentIndegrees[readerComponent] = componentIndegrees[readerComponent]! - 1
+      if (componentIndegrees[readerComponent] === 0) {
+        ready.push(readerComponent)
+        ready.sort(
+          (left, right) => componentFirstIndexes[left]! - componentFirstIndexes[right]!,
+        )
+      }
+    }
   }
   return ordered
 }
@@ -1089,7 +1232,12 @@ export function runWithCompiledContext<Value, Result>(
   }
   const parent = activeContextFrame ?? activeOwner?.[2] ?? null
   return withContextFrame(
-    { context: context as CompiledContext<unknown>, input: value, parent },
+    {
+      context: context as CompiledContext<unknown>,
+      input: value,
+      parent,
+      owner: activeOwner,
+    },
     operation,
   )
 }
@@ -1106,81 +1254,111 @@ export function createCompiledContext<T>(
 export function createCompiledExternalStore<T>(
   scope: CompiledScope,
   sourceMask: SourceMask,
-  storeSubscribe: (onStoreChange: () => void) => () => void,
-  getSnapshot: () => T,
+  storeSubscribe:
+    | ((onStoreChange: () => void) => () => void)
+    | CompiledBinding<
+        readonly [
+          (onStoreChange: () => void) => () => void,
+          () => T,
+          (() => T)?,
+        ]
+      >,
+  getSnapshot?: () => T,
   _getServerSnapshot?: () => T,
 ): StateSlot<T> {
   const owner = scopeOwners.get(scope)
   if (owner === undefined) {
     throw new Error(DEV ? 'createCompiledExternalStore received an unknown scope' : 'V003')
   }
-  const slot = createStateSlot(scope[1], sourceMask, getSnapshot(), stateWriteGuard(scope))
-  if (!retainedUiEnabled) {
-    let active = true
-    const checkSnapshot = (): void => {
-      if (!active) return
-      scope[2](() => slot.replace(getSnapshot()))
-    }
-    const unsubscribe = storeSubscribe(() => runOwnerTask(owner, checkSnapshot))
-    if (typeof unsubscribe !== 'function') {
-      active = false
+  const reactiveStore = isCompiledBinding(storeSubscribe) ? storeSubscribe : undefined
+  let currentSubscribe: (onStoreChange: () => void) => () => void
+  let currentGetSnapshot!: () => T
+  const readStore = (): void => {
+    const store = reactiveStore?.[1]()
+    currentSubscribe = store?.[0] ?? (storeSubscribe as (onStoreChange: () => void) => () => void)
+    currentGetSnapshot = store?.[1] ?? (getSnapshot as () => T)
+    if (typeof currentSubscribe !== 'function' || typeof currentGetSnapshot !== 'function') {
       throw new TypeError(
-        DEV ? 'external store subscribe must return an unsubscribe function' : 'V020',
+        DEV ? 'external store requires subscribe and getSnapshot functions' : 'V020',
       )
     }
-    try {
-      checkSnapshot()
-    } catch (error) {
-      active = false
-      unsubscribe()
-      throw error
-    }
-    owner[1].add(() => {
-      active = false
-      unsubscribe()
-    })
-    return slot
   }
+  readStore()
+  const slot = createStateSlot(
+    scope[1],
+    sourceMask,
+    currentGetSnapshot(),
+    stateWriteGuard(scope),
+  )
   let active = false
   let unsubscribe = noop
   const checkSnapshot = (): void => {
     if (!active) return
-    scope[2](() => slot.replace(getSnapshot()))
+    const nextSnapshot = currentGetSnapshot()
+    scope[2](() => slot.replace(nextSnapshot))
   }
-  const [activate, disposeResource] = createRetainedResource(
-    owner,
-    () => {
-      active = true
-      try {
-        const remove = storeSubscribe(() => runOwnerTask(owner, checkSnapshot))
-        if (typeof remove !== 'function') {
-          throw new TypeError(
-            DEV ? 'external store subscribe must return an unsubscribe function' : 'V020',
-          )
-        }
-        unsubscribe = remove
-        checkSnapshot()
-      } catch (error) {
-        active = false
-        unsubscribe()
-        unsubscribe = noop
-        throw error
+  const activateStore = (): void => {
+    readStore()
+    active = true
+    try {
+      const remove = currentSubscribe(() => runOwnerTask(owner, checkSnapshot))
+      if (typeof remove !== 'function') {
+        throw new TypeError(
+          DEV ? 'external store subscribe must return an unsubscribe function' : 'V020',
+        )
       }
-    },
-    () => {
+      unsubscribe = remove
+      checkSnapshot()
+    } catch (error) {
       active = false
       unsubscribe()
       unsubscribe = noop
-    },
+      throw error
+    }
+  }
+  const deactivateStore = (): void => {
+    active = false
+    unsubscribe()
+    unsubscribe = noop
+  }
+  const reconnect = (): void => {
+    if (!active) {
+      readStore()
+      return
+    }
+    deactivateStore()
+    activateStore()
+  }
+  const removeStoreUpdater =
+    reactiveStore === undefined ? noop : subscribeBinding(reactiveStore, reconnect)
+
+  if (!retainedUiEnabled) {
+    try {
+      activateStore()
+    } catch (error) {
+      removeStoreUpdater()
+      throw error
+    }
+    owner[1].add(() => {
+      removeStoreUpdater()
+      deactivateStore()
+    })
+    return slot
+  }
+  const [activateResource, disposeResource] = createRetainedResource(
+    owner,
+    activateStore,
+    deactivateStore,
     0,
   )
   try {
-    activate()
+    activateResource()
   } catch (error) {
     disposeResource()
     throw error
   }
   owner[1].add(() => {
+    removeStoreUpdater()
     disposeResource()
   })
   return slot
@@ -1403,13 +1581,16 @@ export function compiledEvent<Arguments extends unknown[]>(
     throw new Error(DEV ? 'compiledEvent received an unknown scope' : 'V003')
   }
   const errorOwner = activeOwner ?? owner
-  return (...arguments_) => {
-    const current = isCompiledBinding(handler) ? handler[1]() : handler
-    if (typeof current !== 'function') return
-    return runOwnerTask(errorOwner, () =>
-      withOwner(errorOwner, () => scope[2](() => current(...arguments_))),
+  return (...arguments_) =>
+    runOwnerTask(errorOwner, () =>
+      withOwner(errorOwner, () =>
+        scope[2](() => {
+          const current = isCompiledBinding(handler) ? handler[1]() : handler
+          if (typeof current !== 'function') return
+          return current(...arguments_)
+        }),
+      ),
     )
-  }
 }
 
 export interface CompiledTaskController {
@@ -3105,7 +3286,12 @@ function provideContext<T>(
       if (mounted) throw new Error(DEV ? 'context provider is already mounted' : 'V008')
       mounted = true
       withContextFrame(
-        { context: context as CompiledContext<unknown>, input, parent: parentContext },
+        {
+          context: context as CompiledContext<unknown>,
+          input,
+          parent: parentContext,
+          owner: activeOwner,
+        },
         () => insertValue(parent, children, before),
       )
     },
@@ -3620,12 +3806,20 @@ function commitNodeRefs(root: Node): void {
       if (pending !== undefined) {
         pendingRefs.delete(node)
         const owner = pending[0] ?? activeOwner
+        commitContextInsertions(owner?.[2] ?? null)
+        commitOwnerInsertions(owner ?? undefined)
         const cleanup = attachRef(pending[1], node)
         if (pending[2] === undefined) owner?.[1].add(cleanup)
         else pending[2](cleanup)
       }
     }
   })
+}
+
+function commitContextInsertions(frame: ContextFrame | null): void {
+  if (frame === null) return
+  commitContextInsertions(frame.parent)
+  commitOwnerInsertions(frame.owner ?? undefined)
 }
 
 function commitNodeResources(root: Node): void {

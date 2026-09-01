@@ -1,0 +1,33 @@
+---
+title: @vidact/runtime
+description: Root APIs and capability-specific runtime entry points.
+group: Reference
+kind: Reference
+---
+
+## Root APIs
+
+| API | Behavior |
+| --- | --- |
+| `mountCompiled` | Mount one compiled application factory |
+| `createRoot` | Create a root with mount, replace, and unmount |
+| `mountHotRoot` | Replace an owned client root across HMR |
+| `hydrateRoot` | Claim matching server markup |
+| `hydrateHotRoot` | Hydrate once, then replace across HMR |
+
+> [!WARNING] Factories, not element descriptors
+>
+> Root APIs consume compiler-generated factories. Repeated React-style `root.render(element)` is intentionally unsupported.
+
+## Entry points
+
+| Entry | Capability |
+| --- | --- |
+| `@vidact/runtime` | Client roots and direct DOM support |
+| `@vidact/runtime/hydrate` | Hydration roots and JSX runtime |
+| `@vidact/runtime/server` | Deterministic server rendering |
+| `@vidact/runtime/async` | Resources, lazy, and Suspense |
+| `@vidact/runtime/concurrent` | Transitions and deferred work |
+| `@vidact/runtime/actions` | Actions, optimistic state, form status |
+| `@vidact/runtime/framework/*` | Streams and framework boundaries |
+| `@vidact/runtime/testing` | Deterministic task draining |

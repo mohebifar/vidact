@@ -127,7 +127,11 @@ export function keyedFragmentComponent(props: Record<string, unknown>): Compiled
 
 export function renderableProps(input: RenderablePropsInput): Record<string, unknown> {
   const ordinary = projectInput(input, (props) =>
-    Object.fromEntries(Object.entries(props).filter(([name]) => !SPECIAL_PROPS.has(name))),
+    Object.fromEntries(
+      Reflect.ownKeys(props)
+        .filter((name) => typeof name !== 'string' || !SPECIAL_PROPS.has(name))
+        .map((name) => [name, Reflect.get(props, name)]),
+    ),
   )
   return isCompiledBinding(ordinary) ? compiledSpread(ordinary, []) : ordinary
 }

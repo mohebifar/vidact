@@ -92,9 +92,13 @@ impl ReactAnalysisAdapter for OxcReactAnalysisAdapter {
         } else {
             semantic
         };
-        let custom_hooks =
-            plan_local_custom_hooks(&allocator, &parsed.program, semantic.semantic.scoping())
-                .map_err(|diagnostic| vec![diagnostic])?;
+        let custom_hooks = plan_local_custom_hooks(
+            &allocator,
+            &parsed.program,
+            semantic.semantic.scoping(),
+            false,
+        )
+        .map_err(|diagnostic| vec![diagnostic])?;
         drop(semantic);
         if let Some(custom_hooks) = custom_hooks {
             custom_hooks
@@ -175,6 +179,7 @@ fn run_react_analysis(
 ) -> Result<Vec<FunctionAnalysis>, Vec<Diagnostic>> {
     let mut options = PluginOptions::default();
     if compilation_options.feature_enabled(CompilerFeature::DependencySource) {
+        options.environment.enable_allow_reactive_mutations = true;
         options.environment.validate_ref_access_during_render = false;
         options
             .environment

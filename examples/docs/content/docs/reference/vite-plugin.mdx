@@ -1,0 +1,34 @@
+---
+title: @vidact/vite
+description: Configuration reference for the Vidact Vite compiler plugin.
+group: Reference
+kind: Reference
+---
+
+## Plugin options
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `target` | `client` | Select `client`, `hydrate`, or `server` output |
+| `features` | `[]` | Enable semantic capability families |
+| `includeDependencies` | none | Include compatible source without React metadata |
+| `exclude` | none | Leave matching source untouched; exclusion wins |
+| `extensions` | `['.tsx']` | Compile JSX-bearing earlier transform output |
+
+```ts
+vidact({
+  target: 'hydrate',
+  features: ['async'],
+  extensions: ['.tsx', '.mdx'],
+  includeDependencies: '**/node_modules/@scope/compatible-source/**',
+  exclude: ['**/*.generated.tsx'],
+})
+```
+
+## Dependency compilation
+
+Reachable package modules qualify automatically when their owning package declares React. Qualified entries become target-specific source capsules with composed source maps and cache identity.
+
+> [!WARNING] Qualification is not compatibility
+>
+> Source must remain inside the supported subset. Renderer-dependent or provenance-erased bundles fail closed.

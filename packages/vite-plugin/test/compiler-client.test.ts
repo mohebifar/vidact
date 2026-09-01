@@ -260,6 +260,9 @@ describe('vidact compiler client', () => {
     expect(virtualReactDomModule({ target: 'hydrate', features: ['framework'] })).toContain(
       '@vidact/runtime/framework',
     )
+    expect(virtualReactDomModule({ target: 'server', features: ['framework'] })).toContain(
+      '@vidact/runtime/server',
+    )
     expect(virtualReactDomModule({})).not.toContain('preconnect')
     expect(
       virtualModule('react-dom/server', { target: 'server', features: ['framework'] }),
@@ -270,7 +273,23 @@ describe('vidact compiler client', () => {
     expect(virtualModule('react-dom/server', { target: 'server' })).toContain(
       'renderToStaticMarkup, renderToString',
     )
+    expect(virtualModule('react-dom/server.edge', { target: 'server' })).toBe(
+      virtualModule('react-dom/server', { target: 'server' }),
+    )
     expect(virtualModule('react-dom/server', {})).toContain('requires the server target')
+  })
+
+  it('routes automatic React JSX runtimes to target-specific Vidact runtimes', () => {
+    expect(virtualModule('react/jsx-runtime', { target: 'server' })).toContain(
+      '@vidact/runtime/server/jsx-runtime',
+    )
+    expect(virtualModule('react/jsx-dev-runtime', { target: 'server' })).toContain(
+      '@vidact/runtime/server/jsx-dev-runtime',
+    )
+    expect(virtualModule('react/jsx-runtime', { target: 'hydrate' })).toContain(
+      '@vidact/runtime/hydrate/jsx-runtime',
+    )
+    expect(virtualModule('react/jsx-runtime', {})).toContain('@vidact/runtime/jsx-runtime')
   })
 
   it('selects isolated Actions facades and exposes form APIs only when enabled', () => {

@@ -1,0 +1,38 @@
+---
+title: Manage state and effects
+description: Update local values and synchronize with systems outside the owned DOM tree.
+group: How-to guides
+kind: How-to guide
+---
+
+## Update local state
+
+```tsx
+import { useState } from 'react'
+
+export function Quantity() {
+  const [quantity, setQuantity] = useState(1)
+  const total = quantity * 24
+  return <button onClick={() => setQuantity((value) => value + 1)}>{quantity} · ${total}</button>
+}
+```
+
+Use functional updates when the next value depends on the previous value. Synchronous writes in compiler-wrapped DOM events are batched.
+
+## Synchronize an external system
+
+```tsx
+useEffect(() => {
+  const controller = new AbortController()
+  connect(roomId, { signal: controller.signal })
+  return () => controller.abort()
+}, [roomId])
+```
+
+- `useLayoutEffect` runs after DOM and refs commit but before passive effects.
+- `useEffect` runs after commit and cleans up before dependency changes or owner disposal.
+- `useInsertionEffect` requires the `css-insertion` feature.
+
+> [!WARNING] Keep construction pure
+>
+> Component bodies do not rerun after state changes. Put synchronization in an effect and external reactive reads in `useSyncExternalStore`.

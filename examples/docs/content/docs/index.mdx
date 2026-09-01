@@ -1,0 +1,34 @@
+---
+title: Vidact documentation
+description: Build direct-DOM applications with React-shaped components, static reactivity, and no React runtime.
+group: Overview
+kind: Overview
+---
+
+## What is Vidact?
+
+Vidact is an experimental compiler for React-shaped TypeScript and JSX. It turns supported function components into direct DOM construction and compiler-selected updates. Components construct once when mounted; state changes update only the DOM, child props, ranges, and effects that read the changed value.
+
+> [!WARNING] Experimental software
+>
+> Vidact is currently published as a beta. Test production applications against the exact compiler and runtime versions you ship.
+
+<Preview variant="counter" />
+
+## Choose a path
+
+- New to Vidact: complete **Build your first Vidact application**.
+- Building a full-stack site: follow **Build with Vidact Start**.
+- Solving one problem: open a task-focused how-to guide.
+- Checking an API or limitation: use the reference section.
+- Learning the model: read the explanations on compilation, ownership, and reactivity.
+
+## The core contract
+
+| Property | Vidact behavior |
+| --- | --- |
+| Rendering | Direct DOM construction without a Virtual DOM |
+| Updates | Static compiler-selected operations |
+| Components | Supported functions construct once per mount |
+| React | Source compatibility for a documented subset; no runtime fallback |
+| Failure mode | Unsupported patterns are diagnosed during compilation |

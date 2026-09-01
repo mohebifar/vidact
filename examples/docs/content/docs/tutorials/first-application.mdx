@@ -1,0 +1,99 @@
+---
+title: Build your first Vidact application
+description: Create a small client application with state, events, and a production build.
+group: Tutorials
+kind: Tutorial
+---
+
+## What you will build
+
+You will build a counter written with `useState` and JSX, then compile it into direct DOM operations. You need Node 24 or newer and a package manager that can run Vite.
+
+## 1. Create the project
+
+```shell
+mkdir vidact-counter
+cd vidact-counter
+pnpm init
+pnpm add @vidact/runtime
+pnpm add -D @vidact/vite @vidact/react-types @types/react typescript vite
+```
+
+The React type package describes the authoring surface. The Vite plugin replaces supported React imports while compiling, so the application does not install or ship the React runtime.
+
+## 2. Configure TypeScript and Vite
+
+```ts
+import { vidact } from '@vidact/vite'
+import { defineConfig } from 'vite'
+
+export default defineConfig({
+  plugins: [vidact()],
+})
+```
+
+```json
+{
+  "compilerOptions": {
+    "jsx": "preserve",
+    "jsxImportSource": "@vidact/react-types",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2022",
+    "types": ["@vidact/react-types", "vite/client"]
+  },
+  "include": ["src", "vite.config.ts"]
+}
+```
+
+## 3. Write the component
+
+```tsx
+import { useState } from 'react'
+
+export function Counter() {
+  const [count, setCount] = useState(0)
+
+  return (
+    <main>
+      <h1>Count: {count}</h1>
+      <button onClick={() => setCount((value) => value + 1)}>
+        Increment
+      </button>
+    </main>
+  )
+}
+```
+
+The compiler gives `count` a state slot and emits one text updater for the heading. Clicking the button changes that text node in place; it does not call `Counter` again.
+
+## 4. Mount and run it
+
+```ts
+import { mountCompiled } from '@vidact/runtime'
+import { Counter } from './Counter.tsx'
+
+const host = document.querySelector('#app')
+if (host === null) throw new Error('Missing #app')
+
+mountCompiled(Counter, host)
+```
+
+```html
+<!doctype html>
+<html lang="en">
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
+```
+
+```shell
+pnpm vite
+pnpm vite build
+```
+
+> [!NOTE] You built a compiled root
+>
+> Keep changing data inside state, props, context, or external stores. A compiled root mounts an application factory, not an arbitrary element descriptor.

@@ -1,0 +1,30 @@
+---
+title: Configure SSR and hydration
+description: Build matching server and hydrate targets and serve their shared snapshot.
+group: How-to guides
+kind: How-to guide
+---
+
+## Build matching targets
+
+1. Compile the browser entry with target `hydrate`.
+2. Compile the request handler with target `server`.
+3. Use the same feature list and compiler/runtime versions.
+4. Serve the assets referenced by the document shell.
+
+Vidact Start configures these targets for Vite client and SSR environments.
+
+## Render the document shell
+
+Use `createStartHandler` with a client entry and a `renderDocument` function. Preserve the supplied application HTML, root identifiers, client entry, and encoded snapshot.
+
+> [!WARNING] Keep the snapshot intact
+>
+> Do not decode and interpolate arbitrary application values into HTML. The supplied snapshot is encoded for the matching hydration build.
+
+## Investigate mismatches
+
+- Confirm compiler and runtime protocol versions match.
+- Confirm both builds use the same feature families.
+- Remove browser globals and nondeterministic server values.
+- Verify loader snapshots contain the browser's initial values.

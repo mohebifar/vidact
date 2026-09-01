@@ -1,0 +1,85 @@
+---
+title: Build with Vidact Start
+description: Add file routes, server loaders, SSR, hydration, and client navigation.
+group: Tutorials
+kind: Tutorial
+---
+
+## 1. Install the framework
+
+Vidact Start owns the route manifest and request lifecycle while keeping rendering in the Vidact compiler and runtime.
+
+```shell
+pnpm add @vidact/start @vidact/runtime srvx
+pnpm add -D @vidact/react-types @types/react typescript vite
+```
+
+## 2. Configure Vidact Start
+
+```ts
+import { vidactStart } from '@vidact/start/vite'
+import { defineConfig } from 'vite'
+
+export default defineConfig({
+  plugins: [vidactStart()],
+})
+```
+
+> [!NOTE] Use named route components
+>
+> Route components must be named functions so the compiler can identify and lower them in generated route modules.
+
+## 3. Add a route and loader
+
+Save this as `src/routes/index.tsx`.
+
+```tsx
+import { defineFileRoute, type RouteComponentProps } from '@vidact/start'
+
+const loader = () => ({ greeting: 'Hello from the server' })
+
+export function HomeRoute({
+  loaderData,
+}: RouteComponentProps<ReturnType<typeof loader>>) {
+  return <h1>{loaderData.greeting}</h1>
+}
+
+export const Route = defineFileRoute({ loader, component: HomeRoute })
+```
+
+## 4. Add server and client entries
+
+```ts
+import { hydrateStart } from '@vidact/start/client'
+import { routeManifest } from 'virtual:vidact-start/routes'
+
+await hydrateStart({ manifest: routeManifest })
+```
+
+```ts
+import { createStartHandler } from '@vidact/start/server'
+import { routeManifest } from 'virtual:vidact-start/routes'
+
+export default createStartHandler({
+  manifest: routeManifest,
+  clientEntry: import.meta.env.DEV ? '/src/client.ts' : '/assets/client.js',
+})
+```
+
+The request handler matches routes, runs loaders from parent to child, renders server output, and embeds a serialized loader snapshot. The client uses the same manifest to claim that output.
+
+## 5. Navigate without a document reload
+
+```tsx
+import { Link } from '@vidact/start'
+
+export function Navigation() {
+  return <Link href="/products/42">Product 42</Link>
+}
+```
+
+An eligible same-origin click requests a loader snapshot, atomically replaces the owned route root, and updates browser history.
+
+> [!WARNING] Current navigation boundary
+>
+> Client navigation replaces the complete owned route root. Local state in shared layouts currently resets.

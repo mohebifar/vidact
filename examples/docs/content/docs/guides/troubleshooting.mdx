@@ -1,0 +1,28 @@
+---
+title: Diagnose unsupported patterns
+description: Use compiler diagnostics to locate compatibility and ownership boundaries.
+group: How-to guides
+kind: How-to guide
+---
+
+## Start at the source span
+
+1. Read the construct and location named by the compiler.
+2. Check whether the API requires a feature flag.
+3. Reduce dynamic element manipulation to statically lowerable JSX.
+4. Confirm dependency source retains identifiable React imports.
+5. Do not add a React fallback to hide the boundary.
+
+## Recognize common boundaries
+
+| Pattern | Use instead |
+| --- | --- |
+| Class component | Function component and supported hooks |
+| Repeated `root.render(element)` | State, props, context, store, or root replacement |
+| Opaque `cloneElement` or `Children` traversal | Explicit props and compiler-known JSX |
+| Render-time side effect | Effect or event handler |
+| Renderer-coupled package | Compatible source, adapter, or Vidact-native component |
+
+## Match production codes by version
+
+Production failures may use compact V-number codes. Diagnose them against the catalog for the exact runtime version because compiler and runtime protocols are versioned together.

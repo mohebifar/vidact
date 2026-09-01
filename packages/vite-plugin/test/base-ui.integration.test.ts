@@ -24,7 +24,15 @@ afterEach(async () => {
 })
 
 async function transformBaseUiEntry(
-  subpath: 'avatar' | 'button' | 'collapsible' | 'input' | 'toggle-group',
+  subpath:
+    | 'accordion'
+    | 'avatar'
+    | 'button'
+    | 'collapsible'
+    | 'input'
+    | 'popover'
+    | 'switch'
+    | 'toggle-group',
   target: 'client' | 'server',
 ) {
   const entry = join(baseUiRoot, subpath, 'index.mjs')
@@ -63,11 +71,13 @@ async function buildBaseUiApp(target: 'client' | 'server', bundleRuntime = false
     entry,
     `
       import { Button } from '@base-ui/react/button'
+      import { Avatar } from '@base-ui/react/avatar'
       import { Input } from '@base-ui/react/input'
       import { ToggleGroup } from '@base-ui/react/toggle-group'
 
       export function App() {
         return <main>
+          <Avatar.Root><Avatar.Fallback>VD</Avatar.Fallback></Avatar.Root>
           <Button render={(props) => <a {...props} href="/callback">Callback</a>} />
           <Button render={<a href="/element">Element</a>} />
           <Input aria-label="Search" />
@@ -77,6 +87,7 @@ async function buildBaseUiApp(target: 'client' | 'server', bundleRuntime = false
     `,
   )
   const aliases: Array<{ find: string; replacement: string }> = [
+    'avatar',
     'button',
     'input',
     'toggle-group',
@@ -100,7 +111,7 @@ async function buildBaseUiApp(target: 'client' | 'server', bundleRuntime = false
     root,
     configFile: false,
     logLevel: 'silent',
-    plugins: [vidact({ target, features: ['css-insertion', 'profiling'] })],
+    plugins: [vidact({ target, features: ['concurrent', 'css-insertion', 'profiling'] })],
     resolve: { alias: aliases },
     build: {
       write: false,
@@ -152,6 +163,32 @@ describe('Base UI dependency compilation', () => {
 
     expect(original.source).toContain('/@base-ui/utils/useStableCallback.mjs')
     expect(original.line).toBe(42)
+  })
+
+  it('normalizes the published Popover store hook methods for client', async () => {
+    const transformed = await transformBaseUiEntry('popover', 'client')
+
+    expect(transformed?.code).toContain('@vidact/runtime')
+    expect(transformed?.code).not.toContain('useVidactClassMethod')
+    expect(transformed?.code).not.toContain('react/jsx-runtime')
+  })
+
+  it('keeps the published Switch memo state reactive after dependency hook expansion', async () => {
+    const transformed = await transformBaseUiEntry('switch', 'client')
+
+    expect(transformed?.code).toContain('const state = __vidactCreateMemo')
+    expect(transformed?.code).toMatch(
+      /SwitchRootContext\.Provider,\s*\{\s*value:\s*__vidactBinding/u,
+    )
+  })
+
+  it('keeps the published Accordion controlled-state destructuring reactive', async () => {
+    const transformed = await transformBaseUiEntry('accordion', 'client')
+    const controlledAssignments =
+      transformed?.code.match(/controlled\s*=\s*__vidactHook\d+Arg0\["controlled"\]/gu) ?? []
+
+    expect(controlledAssignments.length).toBeGreaterThanOrEqual(2)
+    expect(transformed?.code).not.toMatch(/let\s*\{\s*controlled:/u)
   })
 
   it('serves helper-bearing dependency capsules through the development pipeline', async () => {
@@ -220,7 +257,7 @@ describe('Base UI dependency compilation', () => {
     })
   }
 
-  it('server-renders callback and element-valued Button render props', async () => {
+  it('server-renders Avatar and Button dependency behavior', async () => {
     const code = await buildBaseUiApp('server', true)
     const root = await mkdtemp(join(tmpdir(), 'vidact-base-ui-output-'))
     temporaryDirectories.push(root)
@@ -229,6 +266,7 @@ describe('Base UI dependency compilation', () => {
     const built = (await import(pathToFileURL(output).href)) as { App(): unknown }
     const html = renderToStaticMarkup(() => built.App() as never)
 
+    expect(html).toContain('VD')
     expect(html).toContain('<a href="/callback" tabIndex="0" type="button">Callback</a>')
     expect(html).toContain('<a href="/element" tabIndex="0" type="button">Element</a>')
     expect(html).toContain('<input aria-label="Search"')

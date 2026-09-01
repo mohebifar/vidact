@@ -1511,6 +1511,27 @@ fn accepts_module_frozen_empty_hook_dependency_arrays() {
 }
 
 #[test]
+fn accepts_inline_effect_dependency_spreads() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "EffectDependencySpread.tsx",
+        source: r#"
+            import { useLayoutEffect, useState } from 'react';
+
+            export function EffectDependencySpread({ values }): Node {
+                const [runs, setRuns] = useState(0);
+                const dependencies = Object.values(values);
+                useLayoutEffect(() => setRuns((count) => count + 1), [values, ...dependencies]);
+                return <output>{runs}</output>;
+            }
+        "#,
+    })
+    .expect("an inline dependency array may spread a reactively derived array");
+
+    assert!(output.contains("__vidactLayoutEffect"), "{output}");
+    assert!(output.contains("...dependencies"), "{output}");
+}
+
+#[test]
 fn rejects_mutable_named_hook_dependency_arrays() {
     let diagnostics = compile_surgical_module(ModuleInput {
         filename: "MutableHookDependencies.tsx",
@@ -2007,6 +2028,137 @@ fn dependency_source_mode_analyzes_memos_expanded_from_custom_hooks() {
 }
 
 #[test]
+fn dependency_source_prunes_an_unreferenced_class_hook_forwarder() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "StoreStatus.tsx",
+            source: r#"
+                import { useSyncExternalStore } from 'react';
+
+                function useStore(store, selector) {
+                    return useSyncExternalStore(
+                        store.subscribe,
+                        () => selector(store.getSnapshot()),
+                        () => selector(store.getSnapshot()),
+                    );
+                }
+
+                const Store = class {
+                    constructor(state) {
+                        this.state = state;
+                        this.listeners = new Set();
+                    }
+                    subscribe = (listener) => {
+                        this.listeners.add(listener);
+                        return () => this.listeners.delete(listener);
+                    };
+                    getSnapshot = () => this.state;
+                    use(selector) {
+                        return useStore(this, selector);
+                    }
+                };
+
+                const store = new Store({ value: 1 });
+                export function StoreStatus() {
+                    const value = useStore(store, (state) => state.value);
+                    return <output>{value}</output>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("an unused class hook forwarder should not retain an otherwise compiled hook");
+
+    assert!(!output.contains("use(selector)"), "{output}");
+    assert!(!output.contains("function useStore"), "{output}");
+    assert!(
+        output.contains("createCompiledExternalStore as __vidactCreateExternalStore"),
+        "{output}"
+    );
+}
+
+#[test]
+fn dependency_source_normalizes_a_unique_hook_shaped_method_call() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "ReactStoreStatus.tsx",
+            source: r#"
+                import { useSyncExternalStore } from 'react';
+                function useStore(store, selector) {
+                    return useSyncExternalStore(
+                        store.subscribe,
+                        () => selector(store.getSnapshot()),
+                        () => selector(store.getSnapshot()),
+                    );
+                }
+                const ReactStore = class {
+                    constructor(state) {
+                        this.state = state;
+                    }
+                    subscribe = () => () => {};
+                    getSnapshot = () => this.state;
+                    useState(selector) {
+                        return useStore(this, selector);
+                    }
+                };
+                const store = new ReactStore({ value: 1 });
+                export function StoreStatus() {
+                    const value = store.useState((state) => state.value);
+                    return <output>{value}</output>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("a unique hook-shaped method should lower through the local hook ABI");
+
+    assert!(!output.contains(".useState("), "{output}");
+    assert!(!output.contains("useVidactClassMethod"), "{output}");
+    assert!(
+        output.contains("createCompiledExternalStore as __vidactCreateExternalStore"),
+        "{output}"
+    );
+}
+
+#[test]
+fn dependency_source_keeps_a_referenced_class_hook_forwarder_diagnosed() {
+    let diagnostics = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "StoreStatus.tsx",
+            source: r#"
+                import { useSyncExternalStore } from 'react';
+                function useStore(store, selector) {
+                    return useSyncExternalStore(
+                        store.subscribe,
+                        () => selector(store.getSnapshot()),
+                        () => selector(store.getSnapshot()),
+                    );
+                }
+                const Store = class {
+                    use(selector) {
+                        return useStore(this, selector);
+                    }
+                };
+                const store = new Store();
+                export function StoreStatus() {
+                    const value = store.use((state) => state.value);
+                    return <output>{value}</output>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect_err("a live class-instance hook call remains outside Vidact's hook ABI");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic
+                .message
+                .contains("custom hook useStore must be called directly")
+    }));
+}
+
+#[test]
 fn dependency_source_mode_keeps_guarded_use_id_on_the_runtime_facade() {
     let output = compile_surgical_module_with_options(
         ModuleInput {
@@ -2158,8 +2310,8 @@ fn dependency_source_constructs_precomputed_provider_children_under_the_provider
                 }
 
                 export function Root(props) {
-                    const contextValue = { label: 'ready' };
                     const element = useRenderElement(props);
+                    const contextValue = { label: 'ready' };
                     return <RootContext.Provider value={contextValue}>{element}</RootContext.Provider>;
                 }
 
@@ -2178,6 +2330,61 @@ fn dependency_source_constructs_precomputed_provider_children_under_the_provider
     );
     assert!(
         output.contains("__vidactRunWithContext(RootContext, contextValue, () =>"),
+        "{output}"
+    );
+    assert!(
+        output.find("const contextValue").unwrap()
+            < output
+                .find("__vidactRunWithContext(RootContext, contextValue")
+                .unwrap(),
+        "{output}"
+    );
+}
+
+#[test]
+fn dependency_source_constructs_precomputed_jsx_inputs_under_the_provider() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "PrecomputedProviderInput.tsx",
+            source: r#"
+                import { createContext, useContext, useRef } from 'react';
+                const RootContext = createContext(undefined);
+
+                function useRenderElement(props, options) {
+                    useRef(null);
+                    return <div {...options.props[0]} />;
+                }
+
+                function Part() {
+                    const value = useContext(RootContext);
+                    return <b>{value.label}</b>;
+                }
+
+                export function Root({ children }) {
+                    const contextValue = { label: 'ready' };
+                    const defaultProps = { children: <>{children}<span>sentinel</span></> };
+                    const element = useRenderElement({}, { props: [defaultProps] });
+                    return <RootContext.Provider value={contextValue}>{element}</RootContext.Provider>;
+                }
+
+                export function App() {
+                    return <Root><Part /></Root>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("precomputed JSX inputs should compile under their provider context");
+
+    assert!(
+        output.contains("defaultProps = __vidactRunWithContext(RootContext, contextValue, () =>"),
+        "{output}"
+    );
+    assert!(
+        output.find("const contextValue").unwrap()
+            < output
+                .find("defaultProps = __vidactRunWithContext")
+                .unwrap(),
         "{output}"
     );
 }
@@ -2223,6 +2430,82 @@ fn dependency_source_evaluates_provider_values_and_defaulted_props_once() {
     );
     assert!(output.contains("__vidactProviderValue"), "{output}");
     assert!(output.contains("__vidactDestructured"), "{output}");
+}
+
+#[test]
+fn dependency_source_tracks_namespace_memo_provider_values() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "MemoProvider.tsx",
+            source: r#"
+                import * as React from 'react';
+                import { SwitchContext } from './SwitchContext.mjs';
+
+                function useRenderElement(componentProps, parameters) {
+                    React.useRef(null);
+                    const renderedState = React.useMemo(
+                        () => parameters.state,
+                        [parameters.state],
+                    );
+                    return <span data-checked={renderedState.checked || undefined} {...componentProps} />;
+                }
+
+                function useControlled() {
+                    const [value, setValue] = React.useState(true);
+                    return [value, setValue];
+                }
+
+                export const Root = React.forwardRef(function Root(componentProps, forwardedRef) {
+                    const [checked, setChecked] = useControlled();
+                    const state = React.useMemo(() => ({ checked }), [checked]);
+                    const element = useRenderElement(componentProps, { state });
+                    return (
+                        <SwitchContext.Provider value={state}>
+                            <button ref={forwardedRef} onClick={() => setChecked(!checked)} />
+                            {element}
+                        </SwitchContext.Provider>
+                    );
+                });
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("a namespace memo used as a provider value should compile reactively");
+
+    assert!(
+        output.contains("createCompiledMemo as __vidactCreateMemo"),
+        "{output}"
+    );
+    assert!(
+        output.contains("value={__vidactBinding") && output.contains("() => state.get()"),
+        "{output}"
+    );
+}
+
+#[test]
+fn dependency_source_does_not_eagerly_contextualize_forwarded_children() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "ForwardedProviderChildren.tsx",
+            source: r#"
+                import * as React from 'react';
+                const ListContext = React.createContext(undefined);
+
+                export function CompositeList(props) {
+                    const { children, register } = props;
+                    const contextValue = React.useMemo(() => ({ register }), [register]);
+                    return <ListContext.Provider value={contextValue}>{children}</ListContext.Provider>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("forwarded children should remain deferred under their provider");
+
+    assert!(
+        !output.contains("__vidactRunWithContext(ListContext, contextValue"),
+        "{output}"
+    );
 }
 
 #[test]
@@ -2392,6 +2675,33 @@ fn compiles_external_store_snapshots_into_owned_slots() {
     );
     assert!(output.contains("() => snapshot.get()"), "{output}");
     assert!(!output.contains("useStore("), "{output}");
+}
+
+#[test]
+fn compiles_reactive_external_store_inputs_for_resubscription() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "ReactiveStoreStatus.tsx",
+        source: r#"
+            import { useSyncExternalStore } from 'react';
+            export function ReactiveStoreStatus({ store }): Node {
+                const snapshot = useSyncExternalStore(
+                    store.subscribe,
+                    store.getSnapshot,
+                    store.getServerSnapshot,
+                );
+                return <output>{snapshot}</output>;
+            }
+        "#,
+    })
+    .expect("reactive external-store inputs should lower to one resubscription binding");
+
+    assert!(
+        output.contains("const snapshot = __vidactCreateExternalStore("),
+        "{output}"
+    );
+    assert!(output.contains("__vidactBinding("), "{output}");
+    assert!(output.contains("store.get().subscribe"), "{output}");
+    assert!(output.contains("store.get().getSnapshot"), "{output}");
 }
 
 #[test]
@@ -2864,6 +3174,38 @@ fn normalizes_expression_bodied_custom_hook_arrows() {
 }
 
 #[test]
+fn dependency_source_keeps_expanded_hook_object_destructuring_reactive() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "ExpandedHookDestructuring.tsx",
+            source: r#"
+                import { createContext, useContext, useState } from 'react';
+                const OpenContext = createContext({ open: false });
+
+                function useControlled({ controlled }) {
+                    const [uncontrolled, setUncontrolled] = useState(false);
+                    return controlled === undefined ? uncontrolled : controlled;
+                }
+
+                export function Trigger() {
+                    const context = useContext(OpenContext);
+                    const open = useControlled({ controlled: context.open });
+                    return <button aria-expanded={open} />;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("expanded custom-hook object fields should remain reactive");
+
+    assert!(output.contains("aria-expanded"), "{output}");
+    assert!(
+        output.matches("controlled = __vidactHook").count() >= 2,
+        "controlled field should have an initial assignment and a reactive updater:\n{output}"
+    );
+}
+
+#[test]
 fn expands_unconditional_custom_hook_at_optional_chain_base() {
     let output = compile_surgical_module_with_options(
         ModuleInput {
@@ -2962,6 +3304,37 @@ fn dependency_source_uses_vidact_memo_semantics_without_upstream_preservation_ba
 }
 
 #[test]
+fn lowers_conditional_render_phase_state_synchronization_into_an_owner_updater() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "RenderPhaseStateSync.tsx",
+        source: r#"
+            import { useState } from 'react';
+
+            export function RenderPhaseStateSync({ open }): Node {
+                const [status, setStatus] = useState('closed');
+                const [mounted, setMounted] = useState(open);
+                if (open && !mounted) {
+                    setMounted(true);
+                    setStatus('opening');
+                }
+                if (!open && mounted && status !== 'closing') {
+                    setStatus('closing');
+                }
+                return <output data-mounted={mounted}>{status}</output>;
+            }
+        "#,
+    })
+    .expect("top-level conditional state synchronization should rerun from reactive sources");
+
+    assert!(output.contains("__vidactScope[0]("), "{output}");
+    assert!(output.matches("mounted.set(true)").count() >= 2, "{output}");
+    assert!(
+        output.matches("status.set(\"opening\")").count() >= 2,
+        "{output}"
+    );
+}
+
+#[test]
 fn dependency_source_normalizes_simple_logical_assignments() {
     let output = compile_surgical_module_with_options(
         ModuleInput {
@@ -3035,6 +3408,32 @@ fn coalesces_props_before_reactive_jsx_spreads_in_source_order() {
     );
     assert!(output.contains("\"data-slot\": \"trigger\""), "{output}");
     assert!(output.contains("...props"), "{output}");
+}
+
+#[test]
+fn coalesces_multiple_reactive_jsx_spreads_in_source_order() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "MultipleOrderedSpreads.tsx",
+        source: r#"
+            export function MultipleOrderedSpreads({ props, ref, role, restProps }) {
+                return (
+                    <span
+                        {...props}
+                        ref={ref}
+                        role={role}
+                        {...restProps}
+                        data-slot="focus-guard"
+                    />
+                );
+            }
+        "#,
+    })
+    .expect("ordered reactive spreads should merge into one owned spread descriptor");
+
+    assert_eq!(output.matches("__vidactSpread(").count(), 1, "{output}");
+    assert!(output.contains("...props"), "{output}");
+    assert!(output.contains("...restProps"), "{output}");
+    assert!(output.contains("data-slot=\"focus-guard\""), "{output}");
 }
 
 #[test]

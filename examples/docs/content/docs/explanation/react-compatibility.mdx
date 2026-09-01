@@ -1,0 +1,19 @@
+---
+title: React compatibility without React interop
+description: Why React-shaped source does not make Vidact another React renderer.
+group: Explanation
+kind: Explanation
+---
+
+## Compatibility is a source contract
+
+Vidact recognizes supported React imports, component forms, hooks, JSX factories, and dependency source. It converts their meaning into Vidact ownership and updater operations before the code runs.
+
+## There is no second renderer
+
+- No React element tree is retained for general inspection or cloning.
+- No Fiber tree or React DevTools protocol is emulated.
+- No component rerender and reconciliation loop runs after state writes.
+- No React runtime fallback is inserted for unsupported code.
+
+Failing closed keeps one ownership system responsible for identity, effects, refs, subscriptions, and cleanup. A silent fallback would allow incompatible lifetime models to mutate the same interface.

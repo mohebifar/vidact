@@ -15,7 +15,10 @@ import {
   type VidactTarget,
 } from './compiler-client.ts'
 import {
+  BASE_UI_FAST_HOOKS_SHIM_ID,
   createDependencyCapsuleBuilder,
+  EXTERNAL_STORE_SELECTOR_SHIM_ID,
+  EXTERNAL_STORE_SHIM_ID,
   isDependencyCapsuleModule,
   type DependencyCapsule,
   type SourceDependencyCapsule,
@@ -23,6 +26,8 @@ import {
 import { createDependencyQualifier, isDependencyModuleId } from './dependency-qualification.ts'
 
 const REACT_MODULE = '\0vidact:react'
+const REACT_JSX_RUNTIME_MODULE = '\0vidact:react-jsx-runtime'
+const REACT_JSX_DEV_RUNTIME_MODULE = '\0vidact:react-jsx-dev-runtime'
 const REACT_DOM_MODULE = '\0vidact:react-dom'
 const REACT_DOM_SERVER_MODULE = '\0vidact:react-dom-server'
 const REACT_DOM_STATIC_MODULE = '\0vidact:react-dom-static'
@@ -131,6 +136,13 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
     },
     resolveId(source, importer) {
       if (
+        source === BASE_UI_FAST_HOOKS_SHIM_ID ||
+        source === EXTERNAL_STORE_SHIM_ID ||
+        source === EXTERNAL_STORE_SELECTOR_SHIM_ID
+      ) {
+        return source
+      }
+      if (
         (source === ROLLDOWN_RUNTIME_MODULE || source === SANITIZED_ROLLDOWN_RUNTIME_MODULE) &&
         importer !== undefined &&
         helperBearingCapsules.has(importer.split('?', 1)[0] ?? importer)
@@ -138,12 +150,38 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
         return VIDACT_DEPENDENCY_RUNTIME_MODULE
       }
       if (source === 'react') return REACT_MODULE
+      if (source === 'react/jsx-runtime') return REACT_JSX_RUNTIME_MODULE
+      if (source === 'react/jsx-dev-runtime') return REACT_JSX_DEV_RUNTIME_MODULE
       if (source === 'react-dom') return REACT_DOM_MODULE
-      if (source === 'react-dom/server') return REACT_DOM_SERVER_MODULE
+      if (source === 'react-dom/server' || source === 'react-dom/server.edge') {
+        return REACT_DOM_SERVER_MODULE
+      }
       return source === 'react-dom/static' ? REACT_DOM_STATIC_MODULE : null
     },
     load(id) {
+      if (id === BASE_UI_FAST_HOOKS_SHIM_ID) {
+        return `
+          export function memo() { throw new Error("Base UI fastComponent must be lowered during dependency compilation") }
+          export function forwardRef() { throw new Error("Base UI fastComponentRef must be lowered during dependency compilation") }
+        `
+      }
+      if (id === EXTERNAL_STORE_SHIM_ID) {
+        return `export function useSyncExternalStore() { throw new Error("useSyncExternalStore shim must be lowered during dependency compilation") }`
+      }
+      if (id === EXTERNAL_STORE_SELECTOR_SHIM_ID) {
+        return `export function useSyncExternalStoreWithSelector() { throw new Error("useSyncExternalStoreWithSelector shim must be lowered during dependency compilation") }`
+      }
       if (id === VIDACT_DEPENDENCY_RUNTIME_MODULE) return 'export {}'
+      if (id === REACT_JSX_RUNTIME_MODULE || id === REACT_JSX_DEV_RUNTIME_MODULE) {
+        const suffix = id === REACT_JSX_DEV_RUNTIME_MODULE ? 'jsx-dev-runtime' : 'jsx-runtime'
+        const runtime =
+          configuration.target === 'server'
+            ? `@vidact/runtime/server/${suffix}`
+            : configuration.target === 'hydrate'
+              ? `@vidact/runtime/hydrate/${suffix}`
+              : '@vidact/runtime/jsx-runtime'
+        return `export * from "${runtime}"`
+      }
       if (id === REACT_MODULE) {
         const asyncEnabled = configuration.features.includes('async')
         const concurrentEnabled = configuration.features.includes('concurrent')
@@ -157,8 +195,8 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
         const actionExports = actionsEnabled ? 'useActionState, useOptimistic, ' : ''
         const core =
           configuration.target === 'server'
-            ? `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}${frameworkEnabled ? 'cache, cacheSignal, ' : ''}cloneRenderable as cloneElement, createContext, createElement, isRenderable as isValidElement, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "@vidact/runtime/server"`
-            : `export { cloneRenderable as cloneElement, createContext, createReactElement as createElement, isRenderable as isValidElement, ${asyncEnabled ? '' : 'use, '}useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "@vidact/runtime"`
+            ? `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}${frameworkEnabled ? 'cache, cacheSignal, ' : ''}cloneRenderable as cloneElement, createContext, createElement, createRef, isRenderable as isValidElement, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "@vidact/runtime/server"`
+            : `export { cloneRenderable as cloneElement, createContext, createReactElement as createElement, createRef, isRenderable as isValidElement, ${asyncEnabled ? '' : 'use, '}useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "@vidact/runtime"`
         const exports = [core, 'export const version = "19.2.0"']
         if (configuration.target !== 'server') {
           if (configuration.target === 'hydrate')
@@ -228,9 +266,7 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
             ].join('\n')
       if (!frameworkEnabled) return core
       const frameworkRuntime =
-        configuration.target === 'server'
-          ? '@vidact/runtime/framework/server'
-          : '@vidact/runtime/framework'
+        configuration.target === 'server' ? '@vidact/runtime/server' : '@vidact/runtime/framework'
       return `${core}\nexport { preconnect, prefetchDNS, preinit, preinitModule, preload, preloadModule } from "${frameworkRuntime}"`
     },
     async transform(source, id) {

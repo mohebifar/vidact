@@ -27,7 +27,8 @@ versioned compatibility corpus, not as a package allowlist or a promise that all
 React packages work. `examples/docs/src/shadcn-compatibility.ts` records the
 first known boundary for every component entry, and
 `examples/docs/src/shadcn-corpus.ts` makes the compile-certified subset reachable
-from the production build.
+from a dedicated, unloaded production-build entry. The browser client does not
+initialize corpus modules that the current page does not render.
 
 The compiler accepts only normalization work that preserves existing owners:
 
@@ -37,6 +38,9 @@ The compiler accepts only normalization work that preserves existing owners:
   properties requires separate key, ref, child, raw-HTML, or renderable
   ownership;
 - `useState()` lowers to a state slot initialized with `undefined`;
+- server codegen preserves a `useState` or `useReducer` tuple whenever its
+  dispatcher position is bound, preventing SSR state-value inlining from
+  leaving an escaping context or prop dispatcher as an unbound identifier;
 - expression-bodied module-local custom hooks normalize before hygienic
   expansion;
 - directly imported hooks from qualified React-bearing dependencies are
@@ -80,10 +84,11 @@ barrel eagerly reaches the whole renderer-bearing icon catalog and individual
 minified icon modules reach a context read inside an aliased component that is
 not yet a direct compiled declaration.
 
-The docs example is a Fumadocs-style shell built from the local shadcn sources;
-it does not import `fumadocs-ui` and does not emulate a React runtime. Its
-production verifier rejects React package imports, React element tags,
-`react-dom` rendering, and compatibility adapters.
+The docs example uses Fumadocs as a headless server-side content source and
+Vidact Start for routing, SSR, hydration, and client navigation. The shell is
+built from local shadcn sources; it does not import `fumadocs-ui` and does not
+emulate a React runtime. Its production verifier rejects React package imports,
+React element tags, `react-dom` rendering, and compatibility adapters.
 
 ## Compatibility boundary
 
@@ -92,7 +97,9 @@ browser proof:
 
 - Button, Input, published Base UI Collapsible, and the local Popover have
   browser interaction plus stable-owner proof;
-- Alert, Card, Kbd, and Separator mount statically in the docs shell;
+- Kbd mounts statically in the docs shell and Separator mounts through the
+  bounded Markdown renderer; Alert and Card remain production-build-only
+  pending mount-safe child/rest forwarding proof;
 - Avatar mounts under its provider context but still needs a reactive
   image-status identity proof;
 - 26 more modules compile into the React-free production corpus but remain
@@ -174,9 +181,11 @@ with direct SVG ownership, but this progress is not a support claim for Command.
 - A compiled state setter may retire state only while its owner participates in
   the active disposal cascade. A setter retained from an earlier, unrelated
   disposal remains an error.
-- Fumadocs remains a design and information-architecture reference until its
-  package graph can satisfy these same compiler, runtime, type, and ownership
-  proofs.
+- A server-bound state or reducer dispatcher retains the server runtime's stable
+  dispatch function. Passing it through context or props is valid; invoking it
+  during server rendering throws instead of mutating or replaying a component.
+- Fumadocs may contribute server-only content data, but no Fumadocs renderer,
+  component tree, or client runtime may cross the Start snapshot.
 
 ## Alternatives considered
 
@@ -219,8 +228,16 @@ incompatible by design.
   binding identity, expression-bodied inline arrows, verified transpiler name
   wrappers and statements, keyed factory fragments, final factory `children`
   coalescing, and guarded dynamic intrinsic children.
+- `crates/vidact-compiler/tests/server_codegen.rs` covers dispatcher preservation
+  inside a dependency-owned `forwardRef` component.
+- `packages/vite-plugin/test/base-ui.integration.test.ts` server-renders the
+  published Base UI Avatar provider and fallback from a React-free bundle.
+- `examples/docs/test/vite-dev.test.ts` requests the generated Avatar reference
+  page through the real Vite SSR development pipeline.
 - `examples/docs/src/App.browser.test.ts` exercises the Base UI-backed Button and
   Input and asserts surgical sidebar/theme updates with retained page owners.
+- `examples/docs/src/ComponentShowcase.browser.test.ts` mounts the integrated
+  component showcase and operates the four interaction-certified controls.
 - `examples/docs/src/ShadcnExpansionProof.browser.test.ts` proves Avatar context
   construction plus functional, accessible Collapsible interaction with
   retained root and trigger owners.

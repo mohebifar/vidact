@@ -1,0 +1,22 @@
+---
+title: How Vidact compilation works
+description: Follow React-shaped source through analysis, static updater IR, and direct DOM code.
+group: Explanation
+kind: Explanation
+---
+
+## The pipeline
+
+1. Parse TypeScript and JSX and resolve bindings by semantic identity.
+2. Use React Compiler analysis for control flow, dependencies, HIR, CFG, and SSA facts.
+3. Translate those facts through Vidact-owned analysis types.
+4. Build updater IR with explicit reads, writes, DOM, ranges, effects, and child props.
+5. Generate target-specific direct DOM, hydration, or server operations.
+
+> [!NOTE] React Compiler is an analysis dependency
+>
+> Its internal types end at a narrow adapter. It is not Vidact's renderer, code generator, runtime, or ownership model.
+
+## What reaches the browser
+
+The browser receives DOM construction plus a small scheduler and required capabilities. It does not receive a component replay loop, element tree, reconciler, or runtime dependency tracker.

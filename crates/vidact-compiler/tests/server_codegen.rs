@@ -29,6 +29,42 @@ fn emits_react_compiler_ssr_output_without_client_hook_replay() {
 }
 
 #[test]
+fn preserves_state_dispatchers_that_escape_during_server_rendering() {
+    let compilation = compile_server_module_with_options(
+        ModuleInput {
+            filename: "AvatarRoot.tsx",
+            source: r#"
+            import * as React from 'react';
+
+            export const AvatarRoot = React.forwardRef(function AvatarRoot(componentProps, forwardedRef) {
+                const [imageLoadingStatus, setImageLoadingStatus] = React.useState('idle');
+                const [retryCount, retryImage] = React.useReducer((count) => count + 1, 0);
+                const contextValue = React.useMemo(() => ({
+                    imageLoadingStatus,
+                    setImageLoadingStatus,
+                    retryCount,
+                    retryImage,
+                }), [imageLoadingStatus, setImageLoadingStatus, retryCount, retryImage]);
+                return <Provider ref={forwardedRef} value={contextValue} {...componentProps} />;
+            });
+            "#,
+        },
+        &CompilationOptions::new(CompilerTarget::Server)
+            .with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("state dispatchers may be passed through server-rendered context");
+
+    assert!(
+        compilation
+            .code
+            .contains("[imageLoadingStatus, setImageLoadingStatus]")
+    );
+    assert!(compilation.code.contains("useState(\"idle\")"));
+    assert!(compilation.code.contains("[retryCount, retryImage]"));
+    assert!(compilation.code.contains("useReducer("));
+}
+
+#[test]
 fn lowers_element_valued_render_props_to_server_capabilities() {
     let compilation = compile_server_module(ModuleInput {
         filename: "ServerRenderable.tsx",

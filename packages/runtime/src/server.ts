@@ -626,6 +626,10 @@ export function useRef<Value>(initial: Value): { current: Value } {
   return { current: initial }
 }
 
+export function createRef<Value>(): { current: Value | null } {
+  return { current: null }
+}
+
 export function useEffect(
   _create: () => void | (() => void),
   _dependencies?: readonly unknown[],

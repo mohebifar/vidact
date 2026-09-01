@@ -1,0 +1,35 @@
+---
+title: Build for production
+description: Produce, serve, and verify a compiled Vidact application.
+group: How-to guides
+kind: How-to guide
+---
+
+## Build a client application
+
+```shell
+pnpm vite build
+pnpm vite preview
+```
+
+- Keep the compiler, Vite plugin, and runtime on compatible versions.
+- Inspect output for accidental `react` or `react-dom` imports.
+- Test state, ranges, lists, forms, and disposal in a browser.
+
+## Build a Vidact Start application
+
+```shell
+vite build --config vite.client.config.ts
+vite build --config vite.server.config.ts
+node dist/server/start.js
+```
+
+The first Start release targets Vite and Node. Your server must serve the client directory and pass requests to `createStartHandler`.
+
+## Verify before release
+
+1. Run TypeScript checks and production builds.
+2. Test server HTML and first hydration.
+3. Test navigation and browser history.
+4. Verify root error callbacks and production diagnostics.
+5. Measure the generated browser bundle.

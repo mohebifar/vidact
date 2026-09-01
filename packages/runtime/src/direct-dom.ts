@@ -238,7 +238,11 @@ function applyProps(
         mountCompiledRef(element, value)
         continue
       }
-      queueElementRef(element, value)
+      // A generated renderable wrapper always projects a `ref` field, even when
+      // its input does not own one. Do not let that nullish projection replace a
+      // pending ref mounted by an earlier reactive spread. Authored overrides
+      // are already excluded from that spread by `compiledSpread`.
+      if (value !== null && value !== undefined) queueElementRef(element, value)
       continue
     }
     if (isCompiledBinding(value)) {

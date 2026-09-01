@@ -59,13 +59,7 @@ export function createStartHandler(
         params: resolved.at(-1)!.params,
         request,
       })
-      return request.method === 'HEAD'
-        ? new Response(null, {
-            status: response.status,
-            statusText: response.statusText,
-            headers: response.headers,
-          })
-        : response
+      return responseForRequest(request, response)
     }
     const canRender = resolved.some((match) => match.definition.options.component !== undefined)
     if ((request.method !== 'GET' && request.method !== 'HEAD') || !canRender) {
@@ -80,7 +74,13 @@ export function createStartHandler(
         headers: { allow: allow.join(', ') },
       })
     }
-    const loaded = await runRouteLoaders(resolved, request)
+    let loaded
+    try {
+      loaded = await runRouteLoaders(resolved, request)
+    } catch (error) {
+      if (isResponse(error)) return responseForRequest(request, error)
+      throw error
+    }
     const snapshot = escapeScriptText(
       encodeStartSnapshot({
         protocol: VIDACT_START_PROTOCOL,
@@ -118,6 +118,33 @@ export function createStartHandler(
     return new Response(request.method === 'HEAD' ? null : html, {
       headers: { 'content-type': 'text/html; charset=utf-8' },
     })
+  }
+}
+
+function responseForRequest(request: Request, response: Response): Response {
+  return request.method === 'HEAD' ? new Response(null, response) : response
+}
+
+function isResponse(value: unknown): value is Response {
+  if (value instanceof Response) return true
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Object.prototype.hasOwnProperty.call(value, Symbol.toStringTag) ||
+    Object.prototype.toString.call(value) !== '[object Response]'
+  ) {
+    return false
+  }
+  try {
+    const candidate = value as Response
+    return (
+      typeof candidate.arrayBuffer === 'function' &&
+      typeof candidate.clone === 'function' &&
+      typeof candidate.headers?.get === 'function' &&
+      Number.isInteger(candidate.status)
+    )
+  } catch {
+    return false
   }
 }
 

@@ -1,0 +1,26 @@
+---
+title: Render conditional content
+description: Choose DOM branches while preserving clear ownership and cleanup.
+group: How-to guides
+kind: How-to guide
+---
+
+## Use a supported conditional form
+
+```tsx
+return (
+  <section>
+    {status === 'loading' ? <Spinner /> : <Results />}
+    {error && <p role="alert">{error.message}</p>}
+    {label ?? <span>Untitled</span>}
+  </section>
+)
+```
+
+Vidact lowers supported ternary, logical, nullish, and synchronous control-flow forms into owned ranges. When selection changes, the previous branch is disposed before the next branch mounts.
+
+## Plan for branch lifetime
+
+- A removed branch loses local state and runs owned cleanup.
+- A branch that remains selected retains its DOM and component owners.
+- Enable `retained-ui` only when hidden content must keep state and DOM alive.

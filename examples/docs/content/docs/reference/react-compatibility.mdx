@@ -1,0 +1,51 @@
+---
+title: React compatibility
+description: The current source-compatibility contract for React-shaped web applications.
+group: Reference
+kind: Reference
+---
+
+## Status terms
+
+| Status | Meaning |
+| --- | --- |
+| Supported | Works in compiled source within the documented subset |
+| Opt-in | Works when the named compiler feature is enabled |
+| Targeted | Works only in the named build target |
+| Adapted | Supports the intent with deliberate differences |
+| Diagnosed | Rejected during compilation; no fallback is emitted |
+
+## Components and rendering
+
+| Surface | Status | Notes |
+| --- | --- | --- |
+| Function components and supported custom hooks | Supported | Construct once per mount |
+| JSX, fragments, nested components | Supported | Compiler-owned DOM and ranges |
+| Conditional and keyed arrays | Supported | Preserve identity and cleanup |
+| Class components | Diagnosed | Use functions and hooks |
+| `createElement` | Adapted | Statically lowerable calls only |
+| General `Children` traversal | Diagnosed | No opaque child descriptor model |
+
+## Hooks
+
+| API | Status |
+| --- | --- |
+| State, reducer, ref, ID, memo, callback | Supported |
+| Effects and imperative handles | Supported |
+| Context and external stores | Supported |
+| `useInsertionEffect` | Opt-in: `css-insertion` |
+| Promise `use`, lazy, Suspense | Opt-in: `async` |
+| Transitions, deferred values, `flushSync` | Opt-in: `concurrent` |
+| Action hooks and form status | Opt-in: `actions` |
+
+## DOM, roots, and targets
+
+| Surface | Status | Notes |
+| --- | --- | --- |
+| HTML, SVG, MathML, custom elements | Supported | Namespace-aware direct DOM |
+| Native events and controlled forms | Adapted | Documented `onChange` timing |
+| Refs and portals | Supported or adapted | Portal events use physical bubbling |
+| Client roots | Adapted | Mount compiled application factories |
+| SSR | Targeted: `server` | Deterministic server output |
+| Hydration | Targeted: `hydrate` | Claims matching Vidact markup |
+| React DevTools and Fiber | Diagnosed | No Fiber protocol |

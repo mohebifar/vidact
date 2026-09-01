@@ -1,0 +1,29 @@
+---
+title: Enable compiler features
+description: Opt into cross-cutting capabilities only when the application needs them.
+group: How-to guides
+kind: How-to guide
+---
+
+## Add feature families
+
+```ts
+vidact({
+  features: ['async', 'concurrent', 'actions'],
+})
+```
+
+Feature flags are semantic capability gates, not compatibility modes. Disabled syntax receives a source-located error, and unused capabilities remain out of the browser bundle.
+
+## Select the smallest set
+
+| Feature | Enables |
+| --- | --- |
+| `unsafe-html` | `dangerouslySetInnerHTML` |
+| `css-insertion` | `useInsertionEffect` |
+| `async` | `lazy`, `use(promise)`, and Suspense |
+| `concurrent` | Transitions, deferred values, and `flushSync` |
+| `actions` | Action hooks and function form actions |
+| `retained-ui` | Activity with retained state and DOM |
+| `profiling` | Profiler, debug values, and owner stacks |
+| `framework` | Streams, metadata, cache, and framework boundaries |

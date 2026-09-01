@@ -11,6 +11,110 @@ import {
 } from './dependency-qualification.ts'
 
 const REACT_EXTERNAL = /^(?:react|react-dom)(?:\/|$)/
+export const EXTERNAL_STORE_SHIM_ID = '\0vidact:use-sync-external-store-shim'
+export const EXTERNAL_STORE_SELECTOR_SHIM_ID = '\0vidact:use-sync-external-store-selector-shim'
+export const BASE_UI_FAST_HOOKS_SHIM_ID = '\0vidact:base-ui-fast-hooks-shim'
+const BASE_UI_FAST_HOOKS_SHIM = `
+export { memo as fastComponent, forwardRef as fastComponentRef } from 'react'
+
+export function getInstance() {
+  return undefined
+}
+
+export function setInstance() {}
+export function register() {}
+`
+const EXTERNAL_STORE_SELECTOR_SHIM = `
+import { useDebugValue, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+
+export function useSyncExternalStoreWithSelector(
+  subscribe,
+  getSnapshot,
+  getServerSnapshot,
+  selector,
+  isEqual,
+) {
+  const instRef = useRef(null)
+  let inst
+  if (instRef.current === null) {
+    inst = { hasValue: false, value: null }
+    instRef.current = inst
+  } else {
+    inst = instRef.current
+  }
+
+  const [getSelection, getServerSelection] = useMemo(() => {
+    let hasMemo = false
+    let memoizedSnapshot
+    let memoizedSelection
+    const memoizedSelector = (nextSnapshot) => {
+      if (!hasMemo) {
+        hasMemo = true
+        memoizedSnapshot = nextSnapshot
+        const nextSelection = selector(nextSnapshot)
+        if (isEqual !== undefined && inst.hasValue && isEqual(inst.value, nextSelection)) {
+          memoizedSelection = inst.value
+          return inst.value
+        }
+        memoizedSelection = nextSelection
+        return nextSelection
+      }
+      if (Object.is(memoizedSnapshot, nextSnapshot)) return memoizedSelection
+      const nextSelection = selector(nextSnapshot)
+      if (isEqual !== undefined && isEqual(memoizedSelection, nextSelection)) {
+        memoizedSnapshot = nextSnapshot
+        return memoizedSelection
+      }
+      memoizedSnapshot = nextSnapshot
+      memoizedSelection = nextSelection
+      return nextSelection
+    }
+    return [
+      () => memoizedSelector(getSnapshot()),
+      getServerSnapshot === undefined ? undefined : () => memoizedSelector(getServerSnapshot()),
+    ]
+  }, [getSnapshot, getServerSnapshot, selector, isEqual])
+
+  const value = useSyncExternalStore(subscribe, getSelection, getServerSelection)
+  useEffect(() => {
+    inst.hasValue = true
+    inst.value = value
+  }, [value])
+  useDebugValue(value)
+  return value
+}
+`
+
+function externalStoreShimId(specifier: string): string | undefined {
+  if (specifier === 'use-sync-external-store/shim') return EXTERNAL_STORE_SHIM_ID
+  if (specifier === 'use-sync-external-store/shim/with-selector') {
+    return EXTERNAL_STORE_SELECTOR_SHIM_ID
+  }
+  return undefined
+}
+
+function externalStoreShimSource(id: string): string | undefined {
+  if (id === EXTERNAL_STORE_SHIM_ID) return `export { useSyncExternalStore } from 'react'`
+  if (id === EXTERNAL_STORE_SELECTOR_SHIM_ID) return EXTERNAL_STORE_SELECTOR_SHIM
+  return undefined
+}
+
+function dependencyCompatibilityShimId(specifier: string): string | undefined {
+  if (specifier === '@base-ui/utils/fastHooks') return BASE_UI_FAST_HOOKS_SHIM_ID
+  return externalStoreShimId(specifier)
+}
+
+function dependencyCompatibilityShimSource(id: string): string | undefined {
+  if (id === BASE_UI_FAST_HOOKS_SHIM_ID) return BASE_UI_FAST_HOOKS_SHIM
+  return externalStoreShimSource(id)
+}
+
+function resolvedDependencyCompatibilityShimId(id: string): string | undefined {
+  if (/[\\/]node_modules[\\/]@base-ui[\\/]utils[\\/]fastHooks\.m?js$/.test(id)) {
+    return BASE_UI_FAST_HOOKS_SHIM_ID
+  }
+  return undefined
+}
 
 export interface DependencyCapsuleInput extends VidactCompilerConfiguration {
   readonly source: string
@@ -142,6 +246,8 @@ export async function buildSourceDependencyCapsule(
       {
         name: 'vidact-source-capsule-resolution',
         async resolveId(specifier, importer) {
+          const shimId = dependencyCompatibilityShimId(specifier)
+          if (shimId !== undefined) return shimId
           if (
             importer === undefined ||
             REACT_EXTERNAL.test(specifier) ||
@@ -150,6 +256,9 @@ export async function buildSourceDependencyCapsule(
             return null
           }
           const resolved = await this.resolve(specifier, importer, { skipSelf: true })
+          const resolvedShimId =
+            resolved === null ? undefined : resolvedDependencyCompatibilityShimId(resolved.id)
+          if (resolvedShimId !== undefined) return resolvedShimId
           if (resolved === null || !isDependencyModuleId(resolved.id)) {
             return { id: specifier, external: true }
           }
@@ -163,6 +272,9 @@ export async function buildSourceDependencyCapsule(
           linkedModules.add(qualification.realModulePath ?? resolved.id)
           if (qualification.manifestPath !== undefined) manifests.add(qualification.manifestPath)
           return resolved
+        },
+        load(id) {
+          return dependencyCompatibilityShimSource(id) ?? null
         },
       },
       {
@@ -244,6 +356,8 @@ export async function buildDependencyCapsule(
       {
         name: 'vidact-capsule-resolution',
         async resolveId(specifier, importer) {
+          const shimId = dependencyCompatibilityShimId(specifier)
+          if (shimId !== undefined) return shimId
           if (
             importer === undefined ||
             REACT_EXTERNAL.test(specifier) ||
@@ -252,6 +366,9 @@ export async function buildDependencyCapsule(
             return null
           }
           const resolved = await this.resolve(specifier, importer, { skipSelf: true })
+          const resolvedShimId =
+            resolved === null ? undefined : resolvedDependencyCompatibilityShimId(resolved.id)
+          if (resolvedShimId !== undefined) return resolvedShimId
           if (resolved === null || !isDependencyModuleId(resolved.id)) return resolved
           const qualification = await qualifier.qualify(resolved.id)
           if (qualification?.status === 'candidate') {
@@ -259,6 +376,9 @@ export async function buildDependencyCapsule(
             return resolved
           }
           return { id: specifier, external: true }
+        },
+        load(id) {
+          return dependencyCompatibilityShimSource(id) ?? null
         },
       },
       {

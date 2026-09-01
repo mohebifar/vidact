@@ -67,7 +67,7 @@ export {
 } from './direct-dom.ts'
 export { nestedProp } from './nested-prop.ts'
 export { assertRuntimeProtocol, VIDACT_RUNTIME_PROTOCOL } from './protocol.ts'
-export { useRef, type MutableRef } from './ref.ts'
+export { createRef, useRef, type MutableRef } from './ref.ts'
 export {
   cloneRenderable,
   cloneRenderableComponent,

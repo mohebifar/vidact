@@ -2,14 +2,12 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "jsx": "preserve",
-    "jsxImportSource": "react",
-    "lib": ["ES2024", "ESNext.Disposable", "DOM", "DOM.Iterable"],
+    "jsxImportSource": "@vidact/react-types",
     "paths": {
       "@/*": ["./src/*"]
     },
     "skipLibCheck": true,
-    "types": ["node", "vitest/globals", "vitest/importMeta", "react"],
-    "noEmit": true
+    "types": ["node", "vite/client", "vitest/globals", "vitest/importMeta", "@vidact/react-types"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "vite.*.config.ts", "vite.config.ts"]
 }
