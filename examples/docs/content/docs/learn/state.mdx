@@ -52,7 +52,7 @@ const [items, setItems] = useState(() => loadFromStorage())
 
 ## Batching
 
-Every synchronous state write inside a Vidact-managed event handler is batched. The DOM is updated once at the end of the handler, and each affected updater runs at most once per batch, even if several sources changed. You never need to think about this, but it means intermediate states are never painted.
+Every synchronous state write inside a Vidact-managed event handler is batched. The DOM is updated once at the end of the handler, and each affected updater runs at most once per batch, even if several sources changed. Intermediate states are never painted.
 
 Writes outside an event handler, for example in a `setTimeout` callback or after an `await`, are flushed at the end of the current microtask, so consecutive writes there still produce a single DOM update. If you need the DOM updated before the next line of code runs, `flushSync` from `react-dom` is available with the `concurrent` feature.
 
@@ -114,4 +114,4 @@ To share state between components, lift it to a common parent and pass it down a
 
 ## State is local to the compiled component
 
-One restriction worth knowing: `useState` must be called directly inside a component or a custom hook in the same module. A helper in another file that calls `useState` and returns the pair cannot be compiled, because Vidact needs to see the call to allocate a slot for it. The compiler reports this as an unsupported call at the `useState` site.
+`useState` must be called directly inside a component or a custom hook in the same module. A helper in another file that calls `useState` and returns the pair cannot be compiled, because Vidact needs to see the call to allocate a slot for it. The compiler reports this as an unsupported call at the `useState` site.

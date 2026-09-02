@@ -41,7 +41,7 @@ Always pass a dependency array. In React, omitting it means "after every render"
 
 Values that never change, such as the setter from `useState` or the `dispatch` from `useReducer`, can be listed or left out; either is fine.
 
-## Why not just do it in the body?
+## The component body is the wrong place
 
 In React, code in the component body runs on every render, so people sometimes use it as a poor substitute for effects. In Vidact the body runs once. Code that should respond to changes *must* be in an effect, and code that only needs to run once can be in either place, but the body is the wrong place for anything with a cleanup or anything asynchronous.
 

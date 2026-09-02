@@ -32,6 +32,7 @@
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@vgpu/wgsl": "^0.3.1",
+    "@vidact/compiler": "workspace:*",
     "@vidact/react-types": "workspace:*",
     "@vidact/test-support": "workspace:*",
     "@vidact/vite": "workspace:*",

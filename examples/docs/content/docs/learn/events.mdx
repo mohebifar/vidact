@@ -20,7 +20,7 @@ Vidact attaches a real `click` listener to the real `<button>`. There is no synt
 
 ## Native events
 
-The biggest difference from React is what your handler receives: the **native DOM event**, not a `SyntheticEvent`. In practice this is simpler, because `event.target`, `event.key`, `event.preventDefault()`, and everything else are exactly what the browser gives you.
+Your handler receives the native DOM event rather than a `SyntheticEvent`, which is the biggest difference from React. In practice it is simpler, because `event.target`, `event.key`, `event.preventDefault()`, and everything else are exactly what the browser gives you.
 
 ```tsx
 export function Search() {

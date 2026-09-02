@@ -49,7 +49,7 @@ Generation emits code that creates the `<p>` and its three text nodes, attaches 
 
 ## What ships to the browser
 
-The compiled module imports a handful of small helpers from `@vidact/runtime`: element creation, text binding, event wrapping, state slots, and the scheduler. There is no reconciler, no element tree, no component instance objects, and no dependency-tracking proxy. A compiled counter, runtime included, is a few kilobytes gzipped.
+The compiled module imports a handful of small helpers from `@vidact/runtime`: element creation, text binding, event wrapping, state slots, and the scheduler. There is no reconciler, no element tree, no component instance objects, and no dependency-tracking proxy. A compiled counter, runtime included, is 8 kB gzipped.
 
 Feature families such as Suspense and transitions are separate entry points, so a module that does not use them never imports them.
 

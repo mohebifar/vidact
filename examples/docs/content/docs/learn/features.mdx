@@ -4,7 +4,7 @@ description: Suspense, transitions, form actions, and other capabilities that yo
 group: Learn
 ---
 
-Everything in the Learn section so far is available in every Vidact project with no configuration. A second group of capabilities is opt-in. They are all part of React's API and they all work the way you expect; they are just switched off until you ask for them.
+Everything in the Learn section so far is available in every Vidact project with no configuration. A second group of capabilities is opt-in. They are all part of React's API and they all work the way you expect, but they stay switched off until you ask for them.
 
 ```ts title="vite.config.ts"
 import { vidact } from '@vidact/vite'
@@ -16,7 +16,7 @@ export default defineConfig({
 
 ## Why opt in?
 
-Two reasons. First, size: a Suspense implementation, a transition scheduler, and an action queue each add code to the runtime. If your app never uses them, they should not be in the bundle, and with feature flags they are not. Second, clarity: when a teammate uses `useTransition` in a project that has not enabled `concurrent`, they get a compile error naming the flag, rather than a runtime surprise three months later.
+Size is the first reason. A Suspense implementation, a transition scheduler, and an action queue each add code to the runtime, and an app that never uses them should not carry them. Clarity is the second. When a teammate uses `useTransition` in a project that has not enabled `concurrent`, they get a compile error naming the flag, rather than a runtime surprise three months later.
 
 A feature flag is a switch for real capability, not a compatibility mode. Enabling one does not change how the rest of your code compiles.
 

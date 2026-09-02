@@ -18,7 +18,15 @@ npx vidact
 
 It asks for a template: a single-page app, a full-stack [Vidact Start](/docs/start/getting-started) app, or the same full-stack app served by [Nitro](https://nitro.build) so it deploys anywhere Nitro does. Then it leaves you with a project you can run. If you take that path, skip ahead to [step 5](#5-run-it).
 
-Notice what is *not* on that list: `react` and `react-dom`. Your source code imports from `react`, but the Vidact Vite plugin resolves those imports to the compiled runtime. React itself is never installed or shipped.
+To set it up by hand instead, start an empty project and install four packages:
+
+```shell
+pnpm init
+pnpm add @vidact/runtime
+pnpm add -D @vidact/vite @vidact/react-types @types/react typescript vite
+```
+
+`react` and `react-dom` are missing from that list on purpose. Your source code imports from `react`, but the Vidact Vite plugin resolves those imports to the compiled runtime. React itself is never installed or shipped.
 
 ## 2. Configure Vite and TypeScript
 

@@ -6,7 +6,7 @@ group: Learn
 
 If you have written React, you already know how to write Vidact. The syntax is the same, the hooks are the same, and the way you break a UI into components is the same. What changes is what happens at runtime, and understanding that change up front will save you from a handful of surprises later.
 
-## React re-renders. Vidact does not.
+## Components run once
 
 In React, a component is a function that runs every time its state or props change. React calls it, gets back a new tree of elements, and diffs that tree against the previous one to work out what to change in the DOM.
 
@@ -35,7 +35,7 @@ React would re-run `Quantity` on every click, recompute `total`, rebuild the ele
 - Create the `<div>`, `<button>`, and `<p>` elements and attach the click listener.
 - When `quantity` changes: recompute `total`, then update the two text nodes inside `<p>`.
 
-That is the whole program. There is no tree to diff and no work to skip because none was scheduled in the first place.
+Those two steps are the whole program. There is no tree to diff, and no work to skip, because none was ever scheduled.
 
 ## What stays the same
 
@@ -83,4 +83,4 @@ When you write a Vidact component, picture it as a description of a piece of DOM
 3. **Bindings.** Every expression in the JSX that reads a source becomes a binding the compiler keeps up to date.
 4. **Effects.** Anything that must happen *because* a source changed, outside the DOM, lives in an effect.
 
-That is the whole picture. The rest of the Learn section fills in each part.
+The rest of the Learn section fills in each of those four parts.

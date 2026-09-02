@@ -4,7 +4,7 @@ import { DocsLayout } from './components/docs-layout.tsx'
 import { DocsPage } from './components/docs-page.tsx'
 import { Button } from './components/ui/button.tsx'
 import { Switch } from './components/ui/switch.tsx'
-import { CounterDemo, HeroLogo, PlaylistDemo } from './routes/index.tsx'
+import { CounterDemo, EnginesDemo, HeroLogo } from './routes/index.tsx'
 
 export function SwitchProof() {
   return <Switch label="Compiled output" />
@@ -131,8 +131,8 @@ export function LandingCounterProof() {
   return <CounterDemo />
 }
 
-export function LandingPlaylistProof() {
-  return <PlaylistDemo />
+export function LandingEnginesProof() {
+  return <EnginesDemo />
 }
 
 export function LandingHeroLogoProof() {

@@ -44,7 +44,7 @@ Concretely:
 - Reordering a keyed list moves owners; it disposes none of them.
 - Reordering an unkeyed list keeps owners by position and updates their props, so a row's state may end up attached to a different item.
 
-These are the same rules React applies during reconciliation, arrived at without reconciliation.
+These are the same rules React applies during reconciliation. Vidact reaches them from the compiled ownership tree instead.
 
 ## Ranges
 

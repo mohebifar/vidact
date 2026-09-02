@@ -7,6 +7,7 @@ import { Button, ButtonLink } from '@/components/ui/button.tsx'
 import type { DocCodeLine } from '@/lib/docs-types.ts'
 import { mountHeroLogo } from '@/lib/hero-logo-mount.ts'
 import { loadLandingData } from '@/lib/landing-loader.ts'
+import { rejectionOutput } from '@/lib/landing-samples.ts'
 
 const loader = () => loadLandingData()
 
@@ -18,104 +19,75 @@ export function HomeRoute({ loaderData }: LandingProps) {
     <main className="min-h-screen bg-background text-foreground">
       <SiteHeader />
 
-      <section className="relative overflow-hidden border-b bg-zinc-950 text-white">
-        <HeroLogo />
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 bg-gradient-to-r from-zinc-950 via-zinc-950/45 via-30% to-transparent to-65%"
-        />
-        <div className="relative mx-auto max-w-6xl px-6 py-28 sm:py-36 lg:py-44">
-          <h1 className="font-display max-w-3xl text-5xl font-bold tracking-tight text-balance sm:text-7xl">
-            Write React. Ship{' '}
-            <span className="decoration-signal underline decoration-4 underline-offset-8">
-              the DOM
-            </span>
-            .
-          </h1>
-          <p className="mt-6 max-w-xl text-lg leading-8 text-zinc-400">
-            Vidact compiles your function components and hooks into direct DOM operations. No
-            Virtual DOM, no re-renders, no React in the bundle.
-          </p>
-          <div className="mt-8 flex flex-wrap gap-3">
-            <Link
-              className="inline-flex h-10 items-center gap-2 rounded-md bg-white px-5 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-200"
-              href="/docs/getting-started/quick-start"
-            >
-              Get started <ArrowIcon className="size-4" />
-            </Link>
-            <Link
-              className="inline-flex h-10 items-center gap-2 rounded-md border border-white/25 px-5 text-sm font-medium text-white transition-colors hover:bg-white/10"
-              href="/docs"
-            >
-              Read the docs
-            </Link>
+      {/* The hero and the compiled-output panes share one dark slab, so the
+          first thing below the headline is the compiler's actual output. */}
+      <div className="bg-zinc-950 text-white">
+        <section className="relative overflow-hidden">
+          <HeroLogo />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 bg-linear-to-r from-zinc-950 via-zinc-950/45 via-30% to-transparent to-65%"
+          />
+          <div className="relative mx-auto max-w-6xl px-6 pt-24 pb-20 sm:pt-32 sm:pb-24">
+            <h1 className="font-display max-w-3xl text-5xl font-bold tracking-tight text-balance sm:text-7xl">
+              React, compiled to VanillaJS
+            </h1>
+            <p className="mt-6 max-w-xl text-lg leading-8 text-zinc-400">
+              Vidact reads your function components at build time and writes the DOM code for them.
+              The component body runs once, at mount. A{' '}
+              <code className="text-zinc-200">setState</code> call after that reaches only the text
+              nodes and attributes that read that state.
+            </p>
+            <div className="mt-8 flex flex-wrap items-center gap-3">
+              <Link
+                className="inline-flex h-10 items-center gap-2 rounded-md bg-white px-5 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-200"
+                href="/docs/getting-started/quick-start"
+              >
+                Get started <ArrowIcon className="size-4" />
+              </Link>
+              <code className="inline-flex h-10 items-center rounded-md border border-white/15 px-4 font-mono text-sm text-zinc-300">
+                npx vidact my-app
+              </code>
+            </div>
+            <p className="mt-6 max-w-xl text-sm text-zinc-500">
+              Beta. Vidact compiles a{' '}
+              <Link
+                className="text-zinc-300 underline underline-offset-4"
+                href="/docs/reference/react-compatibility"
+              >
+                documented subset
+              </Link>{' '}
+              of React 19 and refuses the rest at build time.
+            </p>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
 
       <Examples data={loaderData} />
 
-      <section className="border-y bg-muted/30">
-        <div className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
-          <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">
-            How it works
-          </h2>
-          <div className="mt-10 grid gap-10 md:grid-cols-3">
-            <Step
-              number="1"
-              title="Compile"
-              body="The compiler maps every expression to the values it reads. Code it cannot compile stops the build at its exact line."
-            />
-            <Step
-              number="2"
-              title="Mount once"
-              body="The component runs a single time and builds its DOM. There is no render loop and no tree to diff."
-            />
-            <Step
-              number="3"
-              title="Update surgically"
-              body="A state write runs only the updaters that read it: a text node, an attribute, a list row."
-            />
-          </div>
-        </div>
-      </section>
+      <Measurements />
 
       <section className="mx-auto grid max-w-6xl items-center gap-12 px-6 py-20 sm:py-24 lg:grid-cols-2">
         <div>
           <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">
-            Full-stack, the same way
+            There is a framework around it
           </h2>
-          <p className="mt-4 text-muted-foreground">
-            Vidact Start adds file routes, server loaders, SSR, hydration, and client navigation,
-            all generated by the same compiler, so server and browser output match by construction.
+          <p className="mt-4 leading-7 text-muted-foreground">
+            Vidact Start adds file routes, server loaders, SSR, hydration, and client navigation.
+            The same compiler produces the server and the browser build, so the markup the server
+            sends and the DOM the client hydrates come from one description of the component.
           </p>
           <Link
             className="decoration-muted-foreground/60 mt-6 inline-flex items-center gap-2 font-medium underline underline-offset-4 hover:decoration-current"
             href="/docs/start/getting-started"
           >
-            Explore Vidact Start <ArrowIcon className="size-4" />
+            Read the Start guide <ArrowIcon className="size-4" />
           </Link>
         </div>
         <CodePane filename="src/routes/products/$productId.tsx" lines={loaderData.route} rounded />
       </section>
 
-      <section className="border-t">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-6 px-6 py-12">
-          <p className="max-w-xl text-muted-foreground">
-            Vidact is in beta. What is supported is{' '}
-            <Link
-              className="text-foreground underline underline-offset-4"
-              href="/docs/reference/react-compatibility"
-            >
-              documented
-            </Link>
-            ; what is not fails at build time.
-          </p>
-          <ButtonLink href="/docs/getting-started/quick-start">
-            Get started <ArrowIcon className="size-4" />
-          </ButtonLink>
-        </div>
-      </section>
+      <Limits />
 
       <footer className="border-t">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-8 text-sm text-muted-foreground">
@@ -125,6 +97,9 @@ export function HomeRoute({ loaderData }: LandingProps) {
           </Link>
           <Link className="hover:text-foreground" href="/docs/guides/migrating-from-react">
             Migrate from React
+          </Link>
+          <Link className="hover:text-foreground" href="/docs/internals/compilation">
+            Internals
           </Link>
           <a className="hover:text-foreground" href="https://github.com/mohebifar/vidact">
             GitHub
@@ -160,20 +135,12 @@ export function HeroLogo() {
 
 function SiteHeader() {
   return (
-    <header className="border-b">
+    <header className="border-b border-white/10 bg-zinc-950 text-white">
       <div className="mx-auto flex h-14 max-w-6xl items-center px-6">
         <Link className="flex items-center gap-2 font-semibold" href="/">
           <img
             alt=""
-            className="size-7 dark:hidden"
-            height="28"
-            src="/logo-64.png"
-            srcSet="/logo-64.png 1x, /logo-128.png 2x"
-            width="28"
-          />
-          <img
-            alt=""
-            className="hidden size-7 dark:block"
+            className="size-7"
             height="28"
             src="/logo-64-dark.png"
             srcSet="/logo-64-dark.png 1x, /logo-128-dark.png 2x"
@@ -181,19 +148,104 @@ function SiteHeader() {
           />
           Vidact
         </Link>
-        <nav className="ml-auto flex items-center gap-5 text-sm text-muted-foreground">
-          <Link className="hover:text-foreground" href="/docs">
+        <nav className="ml-auto flex items-center gap-5 text-sm text-zinc-400">
+          <Link className="hover:text-white" href="/docs">
             Docs
           </Link>
-          <Link className="hover:text-foreground" href="/docs/learn/thinking-in-vidact">
+          <Link className="hover:text-white" href="/docs/learn/thinking-in-vidact">
             Learn
           </Link>
-          <a className="hover:text-foreground" href="https://github.com/mohebifar/vidact">
+          <a className="hover:text-white" href="https://github.com/mohebifar/vidact">
             GitHub
           </a>
         </nav>
       </div>
     </header>
+  )
+}
+
+function Measurements() {
+  return (
+    <section className="border-y bg-muted/30">
+      <div className="mx-auto max-w-6xl px-6 py-16 sm:py-20">
+        <div className="grid gap-10 sm:grid-cols-3">
+          <Measurement
+            label="A counter app, runtime included"
+            note="tests/runtime-size/fixtures/counter.tsx"
+            value="8.0 kB"
+          />
+          <Measurement
+            label="TodoMVC, runtime included"
+            note="examples/todomvc/src/TodoApp.tsx"
+            value="11.8 kB"
+          />
+          <Measurement
+            label="Component calls after mount"
+            note="the body runs once, at mount"
+            value="0"
+          />
+        </div>
+        <p className="mt-10 max-w-2xl text-sm leading-6 text-muted-foreground">
+          Bundle sizes are gzipped
+        </p>
+      </div>
+    </section>
+  )
+}
+
+function Measurement({
+  label,
+  note,
+  value,
+}: {
+  readonly label: string
+  readonly note: string
+  readonly value: string
+}) {
+  return (
+    <div className="border-t pt-5">
+      <p className="font-display text-4xl font-bold tracking-tight">{value}</p>
+      <p className="mt-2 font-medium">{label}</p>
+      <p className="mt-1 font-mono text-xs text-muted-foreground">{note}</p>
+    </div>
+  )
+}
+
+function Limits() {
+  return (
+    <section className="border-t bg-muted/30">
+      <div className="mx-auto grid max-w-6xl gap-12 px-6 py-20 sm:py-24 lg:grid-cols-2">
+        <div>
+          <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">
+            What it refuses
+          </h2>
+          <p className="mt-4 leading-7 text-muted-foreground">
+            Class components, <code>createRef</code>, most of the <code>Children</code> helpers, and
+            React DevTools are outside the subset. So is any third-party package that ships
+            precompiled against React's runtime rather than React-shaped source.
+          </p>
+          <p className="mt-4 leading-7 text-muted-foreground">
+            None of that degrades quietly. The compiler stops the build at the line that caused it
+            and names the API, and there is no fallback path that loads React instead.
+          </p>
+          <ButtonLink className="mt-6" href="/docs/reference/react-compatibility" variant="outline">
+            See every API and its status <ArrowIcon className="size-4" />
+          </ButtonLink>
+        </div>
+        <div className="self-start overflow-hidden rounded-xl border border-white/10 bg-zinc-950">
+          <div className="border-b border-white/10 px-5 py-2.5 font-mono text-xs text-zinc-500">
+            build output
+          </div>
+          <pre className="p-5 font-mono text-[13px] leading-6 whitespace-pre-wrap text-zinc-300">
+            {rejectionOutput.map((line) => (
+              <span className="block pb-3 last:pb-0" key={line}>
+                {line}
+              </span>
+            ))}
+          </pre>
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -214,10 +266,13 @@ function Examples({ data }: { readonly data: LandingData }) {
       aria-label="Live compiled examples"
       className="mx-auto max-w-6xl px-6 pt-16 pb-20 sm:pt-20 sm:pb-24"
     >
-      <p className="max-w-2xl text-muted-foreground">
-        Every example below is ordinary React, compiled by Vidact and running on this page.
+      <h2 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">
+        Four things, running here
+      </h2>
+      <p className="mt-3 max-w-2xl text-muted-foreground">
+        Every example below is ordinary React, compiled by Vidact and mounted into this page.
       </p>
-      <div className="mt-6 flex gap-1 border-b" role="tablist">
+      <div className="mt-8 flex gap-1 border-b" role="tablist">
         {EXAMPLES.map((example) => (
           <TabButton
             active={tab === example.key}
@@ -275,11 +330,11 @@ function ExamplePanel({ data, tab }: { readonly data: LandingData; readonly tab:
     case 'list':
       return (
         <ExampleWindow
-          caption="Tick a song, then reverse. The row moves with its checkbox, and nothing is rebuilt."
-          filename="Playlist.tsx"
+          caption="Tick a row, then reverse. The row moves with its checkbox, and nothing is rebuilt."
+          filename="Engines.tsx"
           lines={data.list}
         >
-          <PlaylistDemo />
+          <EnginesDemo />
         </ExampleWindow>
       )
     case 'branches':
@@ -476,35 +531,35 @@ function GreetingDemo() {
   )
 }
 
-const SONGS = [
-  { id: 'golden', title: 'Golden hour' },
-  { id: 'night', title: 'Night drive' },
-  { id: 'blue', title: 'Blue in green' },
+const ENGINES = [
+  { id: 'chromium', name: 'Chromium' },
+  { id: 'firefox', name: 'Firefox' },
+  { id: 'webkit', name: 'WebKit' },
 ]
 
 /** Exported for the browser proof tests. */
-export function PlaylistDemo() {
-  const [songs, setSongs] = useState(SONGS)
+export function EnginesDemo() {
+  const [engines, setEngines] = useState(ENGINES)
 
   return (
     <div className="max-w-sm">
-      <Button onClick={() => setSongs(songs.toReversed())} size="sm" variant="outline">
+      <Button onClick={() => setEngines(engines.toReversed())} size="sm" variant="outline">
         Reverse
       </Button>
       <ul className="mt-4 divide-y rounded-md border text-sm">
-        {songs.map((song) => (
-          <PlaylistRow key={song.id} song={song} />
+        {engines.map((engine) => (
+          <EngineRow engine={engine} key={engine.id} />
         ))}
       </ul>
     </div>
   )
 }
 
-function PlaylistRow({ song }: { readonly song: (typeof SONGS)[number] }) {
+function EngineRow({ engine }: { readonly engine: (typeof ENGINES)[number] }) {
   return (
-    <li className="flex items-center gap-3 px-3 py-2" data-song={song.id}>
-      <input aria-label={`Mark ${song.title}`} className="accent-signal size-4" type="checkbox" />
-      {song.title}
+    <li className="flex items-center gap-3 px-3 py-2" data-engine={engine.id}>
+      <input aria-label={`Mark ${engine.name}`} className="accent-signal size-4" type="checkbox" />
+      {engine.name}
     </li>
   )
 }
@@ -548,26 +603,6 @@ function BranchDemo() {
     <Button onClick={load} variant="outline">
       Load data
     </Button>
-  )
-}
-
-function Step({
-  body,
-  number,
-  title,
-}: {
-  readonly body: string
-  readonly number: string
-  readonly title: string
-}) {
-  return (
-    <div className="border-t pt-5">
-      <div className="flex items-baseline gap-3">
-        <span className="font-mono text-sm text-muted-foreground">{number}</span>
-        <h3 className="font-display text-xl font-semibold">{title}</h3>
-      </div>
-      <p className="mt-3 text-sm leading-6 text-muted-foreground">{body}</p>
-    </div>
   )
 }
 

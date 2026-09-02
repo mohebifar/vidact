@@ -60,6 +60,9 @@ importers:
       '@vgpu/wgsl':
         specifier: ^0.3.1
         version: 0.3.1(@vgpu/adapter-node@0.3.1)
+      '@vidact/compiler':
+        specifier: workspace:*
+        version: link:../../packages/compiler
       '@vidact/react-types':
         specifier: workspace:*
         version: link:../../packages/react-types
@@ -7072,7 +7075,7 @@ snapshots:
 
   graceful-fs@4.2.11: {}
 
-  h3@2.0.1-rc.22(crossws@0.4.12(srvx@0.11.22)):
+  h3@2.0.1-rc.22(crossws@0.4.12(srvx@0.12.7)):
     dependencies:
       rou3: 0.8.1
       srvx: 0.11.22
@@ -7899,7 +7902,7 @@ snapshots:
       crossws: 0.4.12(srvx@0.11.22)
       db0: 0.3.4
       env-runner: 0.1.16
-      h3: 2.0.1-rc.22(crossws@0.4.12(srvx@0.11.22))
+      h3: 2.0.1-rc.22(crossws@0.4.12(srvx@0.12.7))
       hookable: 6.1.1
       nf3: 0.3.24
       ocache: 0.1.5

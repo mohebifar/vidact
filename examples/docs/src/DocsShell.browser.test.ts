@@ -7,8 +7,8 @@ import {
   DocsLayoutProof,
   DocsPageProof,
   LandingCounterProof,
+  LandingEnginesProof,
   LandingHeroLogoProof,
-  LandingPlaylistProof,
   SwitchProof,
 } from './DocsShellProof.tsx'
 
@@ -96,10 +96,10 @@ describe('Vidact-native documentation controls', () => {
     expect(Number(host.querySelector('[data-live]')!.textContent)).toBeGreaterThanOrEqual(2)
   })
 
-  it('moves playlist rows with their checkbox state when reversed', async () => {
-    const host = await mount(LandingPlaylistProof)
-    const golden = host.querySelector<HTMLLIElement>('[data-song="golden"]')!
-    const checkbox = golden.querySelector<HTMLInputElement>('input')!
+  it('moves list rows with their checkbox state when reversed', async () => {
+    const host = await mount(LandingEnginesProof)
+    const first = host.querySelector<HTMLLIElement>('[data-engine="chromium"]')!
+    const checkbox = first.querySelector<HTMLInputElement>('input')!
 
     checkbox.click()
     const reverse = [...host.querySelectorAll('button')].find(
@@ -108,8 +108,8 @@ describe('Vidact-native documentation controls', () => {
     await captureMutations(host, () => reverse.click())
 
     const rows = [...host.querySelectorAll('li')]
-    expect(rows.at(-1)).toBe(golden)
-    expect(golden.querySelector('input')!.checked).toBe(true)
+    expect(rows.at(-1)).toBe(first)
+    expect(first.querySelector('input')!.checked).toBe(true)
   })
 
   it('mounts the crystal hero logo canvas lazily', async () => {

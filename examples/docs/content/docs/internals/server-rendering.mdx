@@ -4,7 +4,7 @@ description: How the server target produces HTML, how the hydrate target attache
 group: Under the hood
 ---
 
-Server rendering in Vidact is not a separate renderer running the same components in a DOM shim. It is a third output of the same compiler, driven by the same ownership model, which is why it stays in step with the client automatically.
+Server rendering is a third output of the same compiler, driven by the same ownership model, so it stays in step with the client automatically. There is no second renderer and no DOM shim.
 
 ## The server target
 

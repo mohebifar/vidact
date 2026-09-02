@@ -76,7 +76,7 @@ await act(async () => {
 
 ## Asserting on DOM mutations
 
-Vidact's promise is that updates are surgical. `@vidact/test-support` includes helpers to prove it in tests. `captureMutations` runs an action under a `MutationObserver` and returns the records; `assertMutationEnvelope` checks that only the expected kinds of mutation touched the expected nodes.
+Updates are meant to be surgical, and `@vidact/test-support` includes helpers to check that in a test. `captureMutations` runs an action under a `MutationObserver` and returns the records; `assertMutationEnvelope` checks that only the expected kinds of mutation touched the expected nodes.
 
 ```ts
 import { assertMutationEnvelope, captureMutations } from '@vidact/test-support'
