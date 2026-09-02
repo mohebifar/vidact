@@ -6,7 +6,6 @@ import { classes } from '@/lib/classes.ts'
 import type { NavigationGroup } from '@/lib/docs-types.ts'
 
 import { MenuIcon, MoonIcon, SunIcon } from './icons.tsx'
-import { Badge } from './ui/badge.tsx'
 
 type DocsLayoutProps = {
   readonly children: VidactNode
@@ -41,14 +40,24 @@ export function DocsLayout({ children, navigation, requestUrl }: DocsLayoutProps
             <MenuIcon className="size-4" />
           </button>
           <Link className="flex items-center gap-2 font-semibold tracking-tight" href="/">
-            <span className="grid size-7 place-items-center rounded-md bg-foreground text-xs font-bold text-background">
-              V
-            </span>
+            <img
+              alt=""
+              className="size-7 dark:hidden"
+              height="28"
+              src="/logo-64.png"
+              srcSet="/logo-64.png 1x, /logo-128.png 2x"
+              width="28"
+            />
+            <img
+              alt=""
+              className="hidden size-7 dark:block"
+              height="28"
+              src="/logo-64-dark.png"
+              srcSet="/logo-64-dark.png 1x, /logo-128-dark.png 2x"
+              width="28"
+            />
             <span>Vidact</span>
           </Link>
-          <Badge className="hidden sm:inline-flex" variant="secondary">
-            docs
-          </Badge>
           <nav
             aria-label="Top navigation"
             className="ml-5 hidden items-center gap-5 text-sm lg:flex"
@@ -86,45 +95,48 @@ export function DocsLayout({ children, navigation, requestUrl }: DocsLayoutProps
         />
       ) : null}
 
-      <aside
-        className={classes(
-          'fixed inset-y-0 left-0 z-40 mt-14 w-72 -translate-x-full overflow-y-auto border-r bg-background px-4 py-6 transition-transform lg:translate-x-0',
-          mobileOpen && 'translate-x-0',
-        )}
-        data-testid="docs-sidebar"
-      >
-        <nav aria-label="Documentation navigation">
-          <div className="space-y-7 pb-6">
-            {navigation.map((group) => (
-              <section key={group.title}>
-                <h2 className="mb-2 px-3 text-xs font-semibold tracking-wide text-foreground">
-                  {group.title}
-                </h2>
-                <div className="space-y-1">
-                  {group.items.map((item) => (
-                    <Link
-                      aria-current={pathname === item.url ? 'page' : undefined}
-                      className={classes(
-                        'block rounded-md px-3 py-1.5 text-sm leading-5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground',
-                        pathname === item.url && 'bg-accent font-medium text-accent-foreground',
-                      )}
-                      href={item.url}
-                      key={item.url}
-                      onClick={() => setMobileOpen(false)}
-                    >
-                      {item.title}
-                    </Link>
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-        </nav>
-      </aside>
+      <div className="mx-auto flex w-full max-w-360 pt-14 lg:px-6">
+        <aside
+          className={classes(
+            'fixed inset-y-0 left-0 z-40 mt-14 w-72 -translate-x-full overflow-y-auto border-r bg-background px-4 py-6 transition-transform',
+            'lg:sticky lg:top-14 lg:mt-0 lg:h-[calc(100vh-3.5rem)] lg:shrink-0 lg:translate-x-0',
+            mobileOpen && 'translate-x-0',
+          )}
+          data-testid="docs-sidebar"
+        >
+          <nav aria-label="Documentation navigation">
+            <div className="space-y-7 pb-6">
+              {navigation.map((group) => (
+                <section key={group.title}>
+                  <h2 className="mb-2 px-3 text-xs font-semibold tracking-wide text-foreground">
+                    {group.title}
+                  </h2>
+                  <div className="space-y-1">
+                    {group.items.map((item) => (
+                      <Link
+                        aria-current={pathname === item.url ? 'page' : undefined}
+                        className={classes(
+                          'block rounded-md px-3 py-1.5 text-sm leading-5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground',
+                          pathname === item.url && 'bg-accent font-medium text-accent-foreground',
+                        )}
+                        href={item.url}
+                        key={item.url}
+                        onClick={() => setMobileOpen(false)}
+                      >
+                        {item.title}
+                      </Link>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </nav>
+        </aside>
 
-      <main className="pt-14 lg:pl-72" id="main-content">
-        {children}
-      </main>
+        <main className="min-w-0 flex-1" id="main-content">
+          {children}
+        </main>
+      </div>
     </div>
   )
 }

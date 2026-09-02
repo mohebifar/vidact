@@ -19,6 +19,13 @@ export default createStartHandler({
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Vidact compiles React components into direct DOM code. No Virtual DOM, no React runtime." />
     <title>Vidact</title>
+    <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="/favicon-48.png" sizes="48x48" type="image/png" />
+    <link rel="icon" href="/logo-512.png" sizes="512x512" type="image/png" />
+    <link rel="icon" href="/favicon-32-dark.png" sizes="32x32" type="image/png" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" href="/favicon-48-dark.png" sizes="48x48" type="image/png" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" href="/logo-512-dark.png" sizes="512x512" type="image/png" media="(prefers-color-scheme: dark)" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&display=swap" rel="stylesheet" />

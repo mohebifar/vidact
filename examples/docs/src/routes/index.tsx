@@ -163,9 +163,22 @@ function SiteHeader() {
     <header className="border-b">
       <div className="mx-auto flex h-14 max-w-6xl items-center px-6">
         <Link className="flex items-center gap-2 font-semibold" href="/">
-          <span className="grid size-7 place-items-center rounded-md bg-foreground text-xs font-bold text-background">
-            V
-          </span>
+          <img
+            alt=""
+            className="size-7 dark:hidden"
+            height="28"
+            src="/logo-64.png"
+            srcSet="/logo-64.png 1x, /logo-128.png 2x"
+            width="28"
+          />
+          <img
+            alt=""
+            className="hidden size-7 dark:block"
+            height="28"
+            src="/logo-64-dark.png"
+            srcSet="/logo-64-dark.png 1x, /logo-128-dark.png 2x"
+            width="28"
+          />
           Vidact
         </Link>
         <nav className="ml-auto flex items-center gap-5 text-sm text-muted-foreground">

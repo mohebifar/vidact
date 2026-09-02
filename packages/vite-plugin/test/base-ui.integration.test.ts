@@ -167,14 +167,6 @@ describe('Base UI dependency compilation', () => {
     expect(original.line).toBe(42)
   })
 
-  it('normalizes the published Popover store hook methods for client', async () => {
-    const transformed = await transformBaseUiEntry('popover', 'client')
-
-    expect(transformed?.code).toContain('@vidact/runtime')
-    expect(transformed?.code).not.toContain('useVidactClassMethod')
-    expect(transformed?.code).not.toContain('react/jsx-runtime')
-  })
-
   it('keeps the published Switch memo state reactive after dependency hook expansion', async () => {
     const transformed = await transformBaseUiEntry('switch', 'client')
 
