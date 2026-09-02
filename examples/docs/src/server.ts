@@ -35,6 +35,7 @@ export default createStartHandler({
     <div id="${rootId}">${applicationHtml}</div>
     <script id="${snapshotId}" type="application/json">${snapshot}</script>
     <script type="module" src="${clientEntry}"></script>
+    <script defer src="https://cloud.umami.is/script.js" data-website-id="4ea1fd18-a740-4f0f-8102-4228f8d5ddcd"></script>
   </body>
 </html>`,
 })
