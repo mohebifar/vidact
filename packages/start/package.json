@@ -1,6 +1,6 @@
 {
   "name": "@vidact/start",
-  "version": "0.2.0-beta.0",
+  "version": "0.2.0-beta.1",
   "description": "Full-stack application framework primitives for Vidact",
   "keywords": [
     "full-stack",
