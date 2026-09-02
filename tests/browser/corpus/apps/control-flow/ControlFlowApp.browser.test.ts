@@ -360,12 +360,12 @@ describe('compiled render control flow', () => {
     const first = await captureMutations(host, () => input.click())
     expect(host.querySelector('[data-reactive-ref]')).toBe(input)
     expect(first.records).toEqual([])
-    expect(takeReactiveRefTrace()).toEqual(['attach:first', 'clear:second'])
+    expect(takeReactiveRefTrace()).toEqual(['clear:second', 'attach:first'])
 
     const second = await captureMutations(host, () => input.click())
     expect(host.querySelector('[data-reactive-ref]')).toBe(input)
     expect(second.records).toEqual([])
-    expect(takeReactiveRefTrace()).toEqual(['attach:second', 'clear:first'])
+    expect(takeReactiveRefTrace()).toEqual(['clear:first', 'attach:second'])
 
     dispose()
     dispose = undefined

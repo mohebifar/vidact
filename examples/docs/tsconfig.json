@@ -3,8 +3,11 @@
   "compilerOptions": {
     "jsx": "preserve",
     "jsxImportSource": "@vidact/react-types",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "skipLibCheck": true,
-    "types": ["node", "vitest/globals", "vitest/importMeta", "@vidact/react-types"]
+    "types": ["node", "vite/client", "vitest/globals", "vitest/importMeta", "@vidact/react-types"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.mdx", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "vite.*.config.ts", "vite.config.ts"]
 }

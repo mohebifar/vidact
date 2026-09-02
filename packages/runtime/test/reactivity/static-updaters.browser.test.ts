@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  binding,
   combineSources,
+  createCompiledRestProp,
   createCompiledMemo,
   createCompiledReducer,
   createCompiledScope,
@@ -36,6 +38,126 @@ describe('compiled updater corpus', () => {
 
     expect(text.data).toBe('6')
     expect(trace).toEqual(['derive', 'text'])
+  })
+
+  it('orders generated prerequisites before earlier registered consumers', () => {
+    const inputSource = source(0)
+    const derivedSource = source(1)
+    const outputSource = source(2)
+    const scope = createCompiledScope()
+    const input = createCompiledState(scope, inputSource, 1)
+    let derived = input.get()
+    let output = derived
+    const trace: string[] = []
+
+    scope[0](
+      derivedSource,
+      () => {
+        output = derived
+        trace.push('consumer')
+      },
+      outputSource,
+    )
+    scope[0](
+      inputSource,
+      () => {
+        derived = input.get() * 2
+        trace.push('prerequisite')
+      },
+      derivedSource,
+    )
+
+    input.set(3)
+
+    expect(output).toBe(6)
+    expect(trace).toEqual(['prerequisite', 'consumer'])
+  })
+
+  it('keeps downstream prerequisites ordered after a reactive dependency cycle', () => {
+    const inputSource = source(0)
+    const cycleLeftSource = source(1)
+    const cycleRightSource = source(2)
+    const derivedSource = source(3)
+    const scope = createCompiledScope()
+    const input = createCompiledState(scope, inputSource, 1)
+    let cycleLeft = 0
+    let cycleRight = 0
+    let derived = 0
+    let output = 0
+    const trace: string[] = []
+
+    scope[0](derivedSource, () => {
+      output = derived
+      trace.push('consumer')
+    })
+    scope[0](
+      combineSources(inputSource, cycleRightSource),
+      () => {
+        cycleLeft = input.get()
+        trace.push('cycle-left')
+      },
+      cycleLeftSource,
+    )
+    scope[0](
+      cycleLeftSource,
+      () => {
+        cycleRight = cycleLeft
+        trace.push('cycle-right')
+      },
+      cycleRightSource,
+    )
+    scope[0](
+      cycleLeftSource,
+      () => {
+        derived = cycleRight * 2
+        trace.push('derive')
+      },
+      derivedSource,
+    )
+
+    input.set(3)
+
+    expect(output).toBe(6)
+    expect(trace).toEqual(['cycle-left', 'cycle-right', 'derive', 'consumer'])
+  })
+
+  it('recomputes updater order after registrations change', () => {
+    const inputSource = source(0)
+    const derivedSource = source(1)
+    const scope = createCompiledScope()
+    const input = createCompiledState(scope, inputSource, 1)
+    let derived = input.get()
+    let output = derived
+
+    const removeConsumer = scope[0](derivedSource, () => {
+      output = derived
+    })
+    const removePrerequisite = scope[0](
+      inputSource,
+      () => {
+        derived = input.get() * 2
+      },
+      derivedSource,
+    )
+    input.set(2)
+    expect(output).toBe(4)
+
+    removeConsumer()
+    removePrerequisite()
+    scope[0](derivedSource, () => {
+      output = derived
+    })
+    scope[0](
+      inputSource,
+      () => {
+        derived = input.get() * 3
+      },
+      derivedSource,
+    )
+
+    input.set(3)
+
+    expect(output).toBe(9)
   })
 
   it('batches multiple source writes into one updater execution', () => {
@@ -102,6 +224,32 @@ describe('compiled updater corpus', () => {
 
     expect(callback.get()).toBe(second)
     expect(callback.get()()).toBe('second')
+  })
+
+  it('does not publish an unchanged projection of reactive rest props', () => {
+    const inputSource = source(0)
+    const restSource = source(1)
+    const scope = createCompiledScope()
+    const input = createCompiledState(scope, inputSource, { label: 'same', version: 0 })
+    const rest = createCompiledRestProp(
+      scope,
+      restSource,
+      { 'aria-label': binding(scope, inputSource, () => input.get().label) },
+      [],
+    )
+    const initial = rest.get()
+    let publications = 0
+    scope[0](restSource, () => {
+      publications += 1
+    })
+
+    input.set({ label: 'same', version: 1 })
+    expect(rest.get()).toBe(initial)
+    expect(publications).toBe(0)
+
+    input.set({ label: 'changed', version: 2 })
+    expect(rest.get()).toEqual({ 'aria-label': 'changed' })
+    expect(publications).toBe(1)
   })
 
   it('publishes cached values only when memo dependencies change', () => {

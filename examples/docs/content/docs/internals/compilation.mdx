@@ -1,0 +1,72 @@
+---
+title: How compilation works
+description: Follow a component from TSX through analysis to the direct DOM code that ships to the browser.
+group: Under the hood
+---
+
+You do not need this page to use Vidact. It is here for the curious, and for anyone who wants to predict what the compiler will do with a piece of code.
+
+## The pipeline
+
+A module goes through five stages:
+
+1. **Parse.** The TypeScript and JSX are parsed with Oxc, and every identifier is resolved to the binding it refers to. Vidact never matches on names as text: `useState` is recognized because it is bound to the `useState` export of `react`, whether it was imported directly, aliased, or accessed as `React.useState`.
+2. **Analyze.** The component body is handed to the React Compiler's analysis, running natively in Rust. It produces a control-flow graph in SSA form, together with the facts Vidact needs: which values are reactive inputs, which expressions read them, where the Rules of Hooks would be violated, and where a value is mutated.
+3. **Adapt.** Those facts are translated into Vidact's own analysis types. The React Compiler's internal representation stops here; nothing downstream depends on it.
+4. **Lower.** The adapted facts become an *updater IR*: a list of sources (state, props, context, store snapshots), a list of updaters (things to do when a source changes), and for each updater the exact set of sources it reads and writes. Conditionals and lists become owned ranges, effects become effect updaters, and child components become prop updaters.
+5. **Generate.** The IR is printed as JavaScript for the chosen target: direct DOM construction for `client`, node claiming for `hydrate`, or string output for `server`. JSX is lowered in the same pass, and a source map back to the original TSX is composed.
+
+> [!NOTE] Where the React Compiler fits
+>
+> Vidact uses the React Compiler as an analysis library, not as a code generator. It is good at exactly one thing Vidact needs, understanding the data flow of a React function, and its output ends at a narrow adapter. Vidact's renderer, runtime, and ownership model are its own.
+
+## A worked example
+
+```tsx
+export function Greeting({ name }: { name: string }) {
+  const [excited, setExcited] = useState(false)
+  const punctuation = excited ? '!' : '.'
+
+  return (
+    <p onClick={() => setExcited(!excited)}>
+      Hello, {name}{punctuation}
+    </p>
+  )
+}
+```
+
+Analysis finds two sources: the `name` prop and the `excited` state. It finds one derivation, `punctuation`, that reads `excited`. It finds two bindings in the JSX: a text node reading `name`, and a text node reading `punctuation`.
+
+Lowering turns that into three updaters, in dependency order:
+
+| Updater | Reads | Writes |
+| --- | --- | --- |
+| Recompute `punctuation` | `excited` | `punctuation` |
+| Set text of node 1 | `name` | DOM |
+| Set text of node 2 | `punctuation` | DOM |
+
+Generation emits code that creates the `<p>` and its three text nodes, attaches the listener, and registers the three updaters with their read masks. When the click handler calls `setExcited`, the runtime marks `excited` dirty, runs the first updater, which marks `punctuation` dirty, then runs the third. The second never runs because `name` did not change.
+
+## What ships to the browser
+
+The compiled module imports a handful of small helpers from `@vidact/runtime`: element creation, text binding, event wrapping, state slots, and the scheduler. There is no reconciler, no element tree, no component instance objects, and no dependency-tracking proxy. A compiled counter, runtime included, is a few kilobytes gzipped.
+
+Feature families such as Suspense and transitions are separate entry points, so a module that does not use them never imports them.
+
+## Targets
+
+The same IR is printed three ways:
+
+- `client` creates elements with `document.createElement` and inserts them.
+- `hydrate` walks existing DOM produced by the server target, claims each node, and attaches the same bindings and listeners. Mismatches are repaired and reported.
+- `server` walks the IR once and writes escaped HTML, inserting comment markers where the client will need to find range boundaries.
+
+Server and hydrate output must come from the same compiler version, because the marker format is part of the protocol.
+
+## Dependencies
+
+The Vite plugin runs the same pipeline on packages that ship React-shaped source. Each qualifying module is compiled per target with its source map chained to the published one, and the result is cached by content, target, features, and compiler version.
+
+## Why compile ahead of time?
+
+Frameworks that track dependencies at runtime pay for it on every read: a proxy trap, a subscription, a bookkeeping allocation. Frameworks that re-render pay for it on every write: run the function, allocate a tree, diff it. Compiling ahead of time pays once, at build time, and the browser receives a program that already knows what to do. The cost is that the compiler has to understand your code, which is why the supported subset is explicit and why unsupported code is a build error rather than a slow path.

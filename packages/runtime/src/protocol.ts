@@ -1,4 +1,4 @@
-export const VIDACT_RUNTIME_PROTOCOL = 'vidact-runtime-v1'
+export const VIDACT_RUNTIME_PROTOCOL = 'vidact-runtime-v2'
 
 export function assertRuntimeProtocol(expected: string): void {
   if (expected === VIDACT_RUNTIME_PROTOCOL) return

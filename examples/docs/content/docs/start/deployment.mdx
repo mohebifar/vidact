@@ -1,0 +1,95 @@
+---
+title: Building and deploying
+description: Produce the client and server builds of a Vidact Start application and run them in production.
+group: Vidact Start
+---
+
+A Vidact Start application is two builds: a client bundle that hydrates in the browser, and a server bundle that renders pages and answers API requests. Each uses a small Vite config, and both use the same `vidactStart` plugin.
+
+## The client build
+
+```ts title="vite.client.config.ts"
+import { fileURLToPath } from 'node:url'
+
+import { vidactStart } from '@vidact/start/vite'
+import { defineConfig } from 'vite'
+
+export default defineConfig({
+  plugins: [vidactStart({ serverEntry: false })],
+  build: {
+    outDir: 'dist/client',
+    emptyOutDir: true,
+    cssCodeSplit: false,
+    rollupOptions: {
+      input: fileURLToPath(new URL('./src/client.ts', import.meta.url)),
+      output: {
+        entryFileNames: 'assets/client.js',
+        chunkFileNames: 'assets/[name].js',
+        assetFileNames: (asset) =>
+          asset.name?.endsWith('.css') === true ? 'assets/style.css' : 'assets/[name][extname]',
+      },
+    },
+  },
+})
+```
+
+The fixed file names are what `src/server.ts` refers to in `clientEntry` and in the document template. If you prefer hashed names, read Vite's manifest in `renderDocument` instead.
+
+## The server build
+
+```ts title="vite.server.config.ts"
+import { fileURLToPath } from 'node:url'
+
+import { vidactStart } from '@vidact/start/vite'
+import { defineConfig } from 'vite'
+
+export default defineConfig({
+  plugins: [vidactStart({ serverEntry: false })],
+  build: {
+    ssr: fileURLToPath(new URL('./src/start.ts', import.meta.url)),
+    outDir: 'dist/server',
+    emptyOutDir: true,
+    rollupOptions: {
+      output: { entryFileNames: 'start.js' },
+    },
+  },
+})
+```
+
+`serverEntry: false` tells the plugin not to install its development middleware, which is only needed for `vite dev`.
+
+## Scripts
+
+```json title="package.json"
+{
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build --config vite.client.config.ts && vite build --config vite.server.config.ts",
+    "start": "node dist/server/start.js"
+  }
+}
+```
+
+`pnpm build` writes `dist/client` (static assets) and `dist/server/start.js` (a self-contained Node server). `pnpm start` runs it.
+
+## Serving
+
+`dist/server/start.js` listens on `PORT` (default `4173`) and serves `dist/client` as static files through the middleware in `src/start.ts`. In front of it you can put any reverse proxy or CDN. Static assets under `/assets` are safe to cache aggressively; HTML responses should not be cached unless your loaders are pure.
+
+If you would rather serve static files from a CDN or a different host, drop the static middleware and point `clientEntry` and your stylesheet link at the CDN URL.
+
+## Environments
+
+The server bundle reads `process.env` at runtime like any Node program. Loaders are the place to use secrets; they never reach the client bundle. `import.meta.env.DEV` is `false` in both production builds.
+
+## Checklist before shipping
+
+1. Run `tsc` and both builds in CI.
+2. Load a page with JavaScript disabled to confirm server rendering is complete.
+3. Load it with JavaScript enabled and check the console for hydration warnings, which mean the server and client rendered different things.
+4. Navigate with `<Link>` and with the browser's back button.
+5. Make sure `@vidact/runtime`, `@vidact/start`, and `@vidact/vite` are the same version in the lockfile. The runtime checks its protocol version at startup and refuses to hydrate output from a different compiler version.
+
+## Other platforms
+
+The first release targets Node. `createStartHandler` returns a standard `(request: Request) => Promise<Response>` function, so adapting it to another runtime that speaks the Fetch API is mostly a matter of replacing `src/start.ts`. Official adapters for edge and serverless platforms are planned.

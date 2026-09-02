@@ -44,9 +44,12 @@ transaction, ownership, or Trusted Types rules.
 
 The process protocol is `vidact-compile-v2` and includes generated code, its
 source map, compilation metadata, and the effective target/features. The
-runtime publishes `vidact-runtime-v1` through `@vidact/runtime/protocol`. The
+runtime publishes `vidact-runtime-v2` through `@vidact/runtime/protocol`. The
 Vite compiler client checks both constants against the installed packages
 before accepting output.
+Runtime protocol v2 makes compiler-lowered classic element factories opaque
+renderable capabilities; a v1 runtime would eagerly construct those values and
+cannot provide the same retained intrinsic-owner semantics.
 
 Rust code generation emits an original-TSX source map. Vite passes that map as
 the input map to its TypeScript transform so the final map composes both stages.

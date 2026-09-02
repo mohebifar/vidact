@@ -1,0 +1,71 @@
+---
+title: Static reactivity
+description: How a state write turns into exactly the right DOM updates without runtime dependency tracking.
+group: Under the hood
+---
+
+Vidact is reactive in the sense that changing a value updates the UI that depends on it. It is *statically* reactive because the dependency graph is computed by the compiler and shipped as data, rather than discovered while the program runs.
+
+## Sources and updaters
+
+Every compiled component is a set of **sources** and a set of **updaters**.
+
+A source is a value that can change after mount: a `useState` slot, a prop, a context value, an external-store snapshot. Each source gets a numeric ID at compile time.
+
+An updater is a unit of work with a static list of the sources it reads and the sources it writes. Kinds of updater include:
+
+- **Derivation**: recompute a local value like `const total = price * quantity`. Writes a derived source.
+- **DOM binding**: set a text node, attribute, property, style, or class. Writes the DOM.
+- **Range**: switch a conditional branch or reconcile a keyed list. Writes the DOM and may construct or dispose owners.
+- **Prop**: pass a new value to a child component. Writes the child's prop source.
+- **Effect**: schedule a `useEffect` or `useLayoutEffect` callback for the commit phase.
+
+The compiler orders updaters topologically, so any updater that writes a source runs before the updaters that read it. A cycle, or two updaters writing the same source, is a compile error.
+
+## Masks
+
+Reads and writes are stored as bit masks over source IDs. When a source changes, the runtime ORs its bit into a dirty mask, then walks the updater list once, running each updater whose read mask intersects the dirty mask and folding its write mask back in. The walk is linear and allocation-free.
+
+Masks are not limited to 32 sources; the compiler widens them as needed.
+
+## A write, step by step
+
+```tsx
+const [query, setQuery] = useState('')
+const results = search(items, query)
+const count = results.length
+
+<input value={query} onChange={(e) => setQuery(e.target.value)} />
+<p>{count} results</p>
+<ul>{results.map((r) => <li key={r.id}>{r.title}</li>)}</ul>
+```
+
+1. The `input` event fires and the compiled handler opens a batch.
+2. `setQuery` stores the new string and marks source `query` dirty.
+3. The handler returns and the batch flushes.
+4. Updater "recompute `results`" reads `query`: runs, marks `results` dirty.
+5. Updater "recompute `count`" reads `results`: runs, marks `count` dirty.
+6. Updater "set input value" reads `query`: runs.
+7. Updater "set text `count`" reads `count`: runs.
+8. Updater "reconcile list" reads `results`: runs, moving, inserting, and removing `<li>` rows by key.
+9. Effects scheduled during the flush run in their commit phase.
+
+Nothing else in the component was visited. There was no diff and no allocation of a virtual tree.
+
+## Batching
+
+Writes inside a compiled event handler are collected and flushed once when the handler returns. Writes from elsewhere, such as after an `await`, are flushed on the next microtask. Within a flush, each updater runs at most once, no matter how many of its sources changed.
+
+The synchronous core has exactly one priority. Transitions and deferred values, when enabled through the `concurrent` feature, add an interruptible lane on top of it.
+
+## Derived values versus effects
+
+Because derivations are ordinary updaters, `const doubled = count * 2` is reactive with no hook. This is why `useMemo` is not a performance tool in Vidact: the memoization it would provide is the default behaviour of every expression. Effects are different in kind: they run after the DOM is committed and exist for side effects the compiler cannot express as a DOM write.
+
+## Why no runtime tracking?
+
+Runtime dependency tracking, as in signal-based frameworks, discovers the same graph by observing reads while a computation runs. It is flexible, but every read pays for a subscription check, and every computation pays to record its dependencies. Static masks cost a bitwise AND per updater per flush and nothing per read. The trade is that the graph must be knowable at compile time, which is what the supported React subset guarantees.
+
+## Failing loudly
+
+Two situations cannot be resolved statically and are rejected at compile time: an updater cycle, and two writers for one source. One situation cannot be detected statically and is bounded at runtime: an effect or subscription that keeps writing a source it depends on. The runtime stops after a fixed number of passes and throws, rather than freezing the tab.

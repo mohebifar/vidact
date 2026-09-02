@@ -118,6 +118,45 @@ fn imports_only_dom_capabilities_reached_by_intrinsic_jsx() {
 }
 
 #[test]
+fn constructs_reactive_inline_event_closures_once() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "StableInlineEvent.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function StableInlineEvent() {
+                const [count, setCount] = useState(0);
+                return <button onClick={() => setCount(count + 1)}>{count}</button>;
+            }
+        "#,
+    })
+    .expect("inline handlers can read live slots through one stable compiled event");
+
+    assert!(output.contains("onClick={__vidactEvent"), "{output}");
+    assert!(!output.contains("onClick={__vidactBinding"), "{output}");
+}
+
+#[test]
+fn constructs_reactive_event_expressions_once() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "StableEventExpression.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function StableEventExpression({ primary, secondary }) {
+                const [active, setActive] = useState(false);
+                return <button onClick={active ? primary : secondary} onDoubleClick={setActive} />;
+            }
+        "#,
+    })
+    .expect("reactive event expressions should dispatch through one stable compiled event");
+
+    assert!(
+        output.contains("onClick={__vidactEvent(__vidactScope, __vidactBinding"),
+        "{output}"
+    );
+    assert!(!output.contains("onClick={__vidactBinding"), "{output}");
+}
+
+#[test]
 fn gates_framework_resource_hints_and_server_only_cache_apis() {
     let hints = ModuleInput {
         filename: "FrameworkHints.tsx",
@@ -1451,6 +1490,73 @@ fn compiles_layout_and_passive_effect_dependencies_into_owner_resources() {
 }
 
 #[test]
+fn accepts_module_frozen_empty_hook_dependency_arrays() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "FrozenHookDependencies.tsx",
+        source: r#"
+            import { useEffect } from 'react';
+
+            const EMPTY_ARRAY = Object.freeze([]);
+
+            export function FrozenHookDependencies({ onMount }): Node {
+                useEffect(onMount, EMPTY_ARRAY);
+                return <output>stable</output>;
+            }
+        "#,
+    })
+    .expect("a module-frozen empty array has immutable identity and static length");
+
+    assert!(output.contains("__vidactEffect"), "{output}");
+    assert!(output.contains("() => []"), "{output}");
+}
+
+#[test]
+fn accepts_inline_effect_dependency_spreads() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "EffectDependencySpread.tsx",
+        source: r#"
+            import { useLayoutEffect, useState } from 'react';
+
+            export function EffectDependencySpread({ values }): Node {
+                const [runs, setRuns] = useState(0);
+                const dependencies = Object.values(values);
+                useLayoutEffect(() => setRuns((count) => count + 1), [values, ...dependencies]);
+                return <output>{runs}</output>;
+            }
+        "#,
+    })
+    .expect("an inline dependency array may spread a reactively derived array");
+
+    assert!(output.contains("__vidactLayoutEffect"), "{output}");
+    assert!(output.contains("...dependencies"), "{output}");
+}
+
+#[test]
+fn rejects_mutable_named_hook_dependency_arrays() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "MutableHookDependencies.tsx",
+        source: r#"
+            import { useEffect } from 'react';
+
+            const dependencies = [];
+
+            export function MutableHookDependencies(): Node {
+                useEffect(() => undefined, dependencies);
+                return <output>mutable</output>;
+            }
+        "#,
+    })
+    .expect_err("a const binding does not make its mutable array value static");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic
+                .message
+                .contains("dependencies must be an inline array")
+    }));
+}
+
+#[test]
 fn compiles_module_local_custom_hooks_under_the_callers_scope() {
     let output = compile_surgical_module(ModuleInput {
         filename: "CustomHookCounter.tsx",
@@ -1544,6 +1650,106 @@ fn compiles_custom_hook_default_and_optional_parameters() {
 }
 
 #[test]
+fn compiles_custom_hook_rest_parameters_as_one_ordered_argument_array() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "ComposedRefsHook.tsx",
+            source: r#"
+            import * as React from 'react';
+
+            function composeRefs(...refs) {
+                return (node) => refs.forEach((ref) => ref?.(node));
+            }
+
+            function useComposedRefs(...refs) {
+                return React.useCallback(composeRefs(...refs), refs);
+            }
+
+            export function ComposedRefsHook({ firstRef, secondRef }) {
+                const ref = useComposedRefs(firstRef, secondRef);
+                return <input ref={ref} />;
+            }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("a final custom-hook rest parameter should expand at the direct call site");
+
+    assert!(!output.contains("useComposedRefs("), "{output}");
+    assert!(output.contains("__vidactCreateMemo"), "{output}");
+    assert!(output.contains("firstRef"), "{output}");
+    assert!(output.contains("secondRef"), "{output}");
+}
+
+#[test]
+fn rejects_destructured_custom_hook_rest_parameters() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "DestructuredRestHook.tsx",
+        source: r#"
+            import { useRef } from 'react';
+            function useFirst(...[first]) {
+                return useRef(first);
+            }
+            export function DestructuredRestHook({ value }) {
+                const ref = useFirst(value);
+                return <output>{ref.current}</output>;
+            }
+        "#,
+    })
+    .expect_err("a custom-hook rest parameter must keep one statically owned array binding");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic
+                .message
+                .contains("custom hook rest parameters must bind to an identifier")
+    }));
+}
+
+/// A rest argument that carries side effects is bound once and shared by the
+/// spread and the dependency list, so expanding the hook cannot evaluate it
+/// twice.
+#[test]
+fn binds_effectful_rest_arguments_once_for_callback_factory_dependencies() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "EffectfulComposedRefsHook.tsx",
+            source: r#"
+                import * as React from 'react';
+
+                function composeRefs(...refs) {
+                    return (node) => refs.forEach((ref) => ref?.(node));
+                }
+
+                function useComposedRefs(...refs) {
+                    return React.useCallback(composeRefs(...refs), refs);
+                }
+
+                function createRef() {
+                    return () => undefined;
+                }
+
+                export function EffectfulComposedRefsHook() {
+                    const ref = useComposedRefs(createRef());
+                    return <input ref={ref} />;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("an effectful rest argument should expand into one shared binding");
+
+    assert!(!output.contains("useComposedRefs("), "{output}");
+    // The effectful argument is evaluated in exactly one place, and both the
+    // spread and the dependency list read that binding.
+    assert_eq!(output.matches("[createRef()]").count(), 1, "{output}");
+    assert!(
+        output.contains("composeRefs(...__vidactHook0Rest), __vidactHook0Rest)"),
+        "{output}"
+    );
+}
+
+#[test]
 fn compiles_destructured_custom_hook_parameters() {
     let output = compile_surgical_module(ModuleInput {
         filename: "ControlledHook.tsx",
@@ -1565,6 +1771,59 @@ fn compiles_destructured_custom_hook_parameters() {
     assert!(output.contains("__vidactHook0Arg0"), "{output}");
     assert!(output.contains("__vidactCreateState"), "{output}");
     assert!(!output.contains("useControlled("), "{output}");
+}
+
+#[test]
+fn updates_destructured_custom_hook_parameters_with_reactive_arguments() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "ReactiveDestructuredHookParameter.tsx",
+            source: r#"
+                import { useRef } from 'react';
+                function useButton(options) {
+                    const { open } = options;
+                    useRef(null);
+                    return <button aria-expanded={open} />;
+                }
+                export function ReactiveDestructuredHookParameter({ open }) {
+                    return useButton({ open });
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("destructured custom-hook parameters should remain reactive");
+
+    assert!(output.contains("let __vidactHook1_1_open ="), "{output}");
+    assert!(
+        output.matches("__vidactHook1_1_open =").count() >= 2,
+        "the destructured parameter needs an updater: {output}"
+    );
+}
+
+#[test]
+fn dependency_source_updates_props_destructured_inside_a_component_body() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "DirectProps.tsx",
+            source: r#"
+                export function DirectProps(componentProps) {
+                    const { open = false, label: text, ...elementProps } = componentProps;
+                    return <button aria-expanded={open} {...elementProps}>{text}</button>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("direct parameter destructuring should retain reactive component-prop edges");
+
+    assert!(
+        output.contains("objectRest as __vidactObjectRest"),
+        "{output}"
+    );
+    assert!(output.matches("open =").count() >= 2, "{output}");
+    assert!(output.matches("text =").count() >= 2, "{output}");
+    assert!(output.matches("elementProps =").count() >= 2, "{output}");
 }
 
 #[test]
@@ -1636,6 +1895,48 @@ fn hoists_unconditional_nested_custom_hook_results_before_expansion() {
     assert!(output.contains("__vidactEffect"), "{output}");
     assert!(!output.contains("useStable("), "{output}");
     assert!(!output.contains("useButton("), "{output}");
+}
+
+#[test]
+fn keeps_branch_only_custom_hook_arguments_inside_their_guard() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "ConditionalHookArgument.tsx",
+            source: r#"
+            import { useRef } from 'react';
+
+            function useStableItems(items) {
+                useRef(items);
+                return items;
+            }
+
+            function useConditionalItems(items) {
+                let merged = null;
+                if (typeof document !== 'undefined') {
+                    if (!items) void useStableItems(null);
+                    else if (Array.isArray(items)) merged = useStableItems([...items]);
+                    else merged = useStableItems(Object.values(items));
+                }
+                return merged;
+            }
+
+            export function ConditionalHookArgument({ items }) {
+                const merged = useConditionalItems(items);
+                return <output>{String(merged)}</output>;
+            }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("branch-local hook arguments should compile without eager evaluation");
+
+    let guard = output
+        .find("Array.isArray")
+        .expect("the source branch should remain in the compiled output");
+    let spread = output
+        .find("...items")
+        .expect("the branch-local spread should remain in the compiled output");
+    assert!(spread > guard, "branch-only argument was hoisted: {output}");
 }
 
 #[test]
@@ -1731,6 +2032,137 @@ fn dependency_source_mode_analyzes_memos_expanded_from_custom_hooks() {
 
     assert!(output.contains("__vidactCreateMemo"), "{output}");
     assert!(!output.contains("useButton("), "{output}");
+}
+
+#[test]
+fn dependency_source_prunes_an_unreferenced_class_hook_forwarder() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "StoreStatus.tsx",
+            source: r#"
+                import { useSyncExternalStore } from 'react';
+
+                function useStore(store, selector) {
+                    return useSyncExternalStore(
+                        store.subscribe,
+                        () => selector(store.getSnapshot()),
+                        () => selector(store.getSnapshot()),
+                    );
+                }
+
+                const Store = class {
+                    constructor(state) {
+                        this.state = state;
+                        this.listeners = new Set();
+                    }
+                    subscribe = (listener) => {
+                        this.listeners.add(listener);
+                        return () => this.listeners.delete(listener);
+                    };
+                    getSnapshot = () => this.state;
+                    use(selector) {
+                        return useStore(this, selector);
+                    }
+                };
+
+                const store = new Store({ value: 1 });
+                export function StoreStatus() {
+                    const value = useStore(store, (state) => state.value);
+                    return <output>{value}</output>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("an unused class hook forwarder should not retain an otherwise compiled hook");
+
+    assert!(!output.contains("use(selector)"), "{output}");
+    assert!(!output.contains("function useStore"), "{output}");
+    assert!(
+        output.contains("createCompiledExternalStore as __vidactCreateExternalStore"),
+        "{output}"
+    );
+}
+
+#[test]
+fn dependency_source_normalizes_a_unique_hook_shaped_method_call() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "ReactStoreStatus.tsx",
+            source: r#"
+                import { useSyncExternalStore } from 'react';
+                function useStore(store, selector) {
+                    return useSyncExternalStore(
+                        store.subscribe,
+                        () => selector(store.getSnapshot()),
+                        () => selector(store.getSnapshot()),
+                    );
+                }
+                const ReactStore = class {
+                    constructor(state) {
+                        this.state = state;
+                    }
+                    subscribe = () => () => {};
+                    getSnapshot = () => this.state;
+                    useState(selector) {
+                        return useStore(this, selector);
+                    }
+                };
+                const store = new ReactStore({ value: 1 });
+                export function StoreStatus() {
+                    const value = store.useState((state) => state.value);
+                    return <output>{value}</output>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("a unique hook-shaped method should lower through the local hook ABI");
+
+    assert!(!output.contains(".useState("), "{output}");
+    assert!(!output.contains("useVidactClassMethod"), "{output}");
+    assert!(
+        output.contains("createCompiledExternalStore as __vidactCreateExternalStore"),
+        "{output}"
+    );
+}
+
+#[test]
+fn dependency_source_keeps_a_referenced_class_hook_forwarder_diagnosed() {
+    let diagnostics = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "StoreStatus.tsx",
+            source: r#"
+                import { useSyncExternalStore } from 'react';
+                function useStore(store, selector) {
+                    return useSyncExternalStore(
+                        store.subscribe,
+                        () => selector(store.getSnapshot()),
+                        () => selector(store.getSnapshot()),
+                    );
+                }
+                const Store = class {
+                    use(selector) {
+                        return useStore(this, selector);
+                    }
+                };
+                const store = new Store();
+                export function StoreStatus() {
+                    const value = store.use((state) => state.value);
+                    return <output>{value}</output>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect_err("a live class-instance hook call remains outside Vidact's hook ABI");
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedSyntax
+            && diagnostic
+                .message
+                .contains("custom hook useStore must be called directly")
+    }));
 }
 
 #[test]
@@ -1866,6 +2298,224 @@ fn compiles_context_reads_into_owner_scoped_slots() {
 }
 
 #[test]
+fn dependency_source_constructs_precomputed_provider_children_under_the_provider() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "PrecomputedProviderChild.tsx",
+            source: r#"
+                import { createContext, useContext, useRef } from 'react';
+                const RootContext = createContext(undefined);
+
+                function useRenderElement(props) {
+                    useRef(null);
+                    return <span>{props.children}</span>;
+                }
+
+                function Part() {
+                    const value = useContext(RootContext);
+                    return <b>{value.label}</b>;
+                }
+
+                export function Root(props) {
+                    const element = useRenderElement(props);
+                    const contextValue = { label: 'ready' };
+                    return <RootContext.Provider value={contextValue}>{element}</RootContext.Provider>;
+                }
+
+                export function App() {
+                    return <Root><Part /></Root>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("a statically paired provider value and precomputed child should compile");
+
+    assert!(
+        output.contains("runWithCompiledContext as __vidactRunWithContext"),
+        "{output}"
+    );
+    assert!(
+        output.contains("__vidactRunWithContext(RootContext, contextValue, () =>"),
+        "{output}"
+    );
+    assert!(
+        output.find("const contextValue").unwrap()
+            < output
+                .find("__vidactRunWithContext(RootContext, contextValue")
+                .unwrap(),
+        "{output}"
+    );
+}
+
+#[test]
+fn dependency_source_constructs_precomputed_jsx_inputs_under_the_provider() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "PrecomputedProviderInput.tsx",
+            source: r#"
+                import { createContext, useContext, useRef } from 'react';
+                const RootContext = createContext(undefined);
+
+                function useRenderElement(props, options) {
+                    useRef(null);
+                    return <div {...options.props[0]} />;
+                }
+
+                function Part() {
+                    const value = useContext(RootContext);
+                    return <b>{value.label}</b>;
+                }
+
+                export function Root({ children }) {
+                    const contextValue = { label: 'ready' };
+                    const defaultProps = { children: <>{children}<span>sentinel</span></> };
+                    const element = useRenderElement({}, { props: [defaultProps] });
+                    return <RootContext.Provider value={contextValue}>{element}</RootContext.Provider>;
+                }
+
+                export function App() {
+                    return <Root><Part /></Root>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("precomputed JSX inputs should compile under their provider context");
+
+    assert!(
+        output.contains("defaultProps = __vidactRunWithContext(RootContext, contextValue, () =>"),
+        "{output}"
+    );
+    assert!(
+        output.find("const contextValue").unwrap()
+            < output
+                .find("defaultProps = __vidactRunWithContext")
+                .unwrap(),
+        "{output}"
+    );
+}
+
+#[test]
+fn dependency_source_evaluates_provider_values_and_defaulted_props_once() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "ProviderEvaluation.tsx",
+            source: r#"
+                import { createContext, useRef } from 'react';
+                const RootContext = createContext(undefined);
+
+                function useRenderElement(props) {
+                    useRef(null);
+                    return <span>{props.children}</span>;
+                }
+
+                function createValue(label) {
+                    return { label };
+                }
+
+                export function Root(props) {
+                    const { label = 'ready' } = props;
+                    const element = useRenderElement(props);
+                    return <RootContext.Provider value={createValue(label)}>{element}</RootContext.Provider>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("provider values and defaulted props should retain single-evaluation semantics");
+
+    assert!(!output.contains("value={createValue(label)}"), "{output}");
+    assert!(
+        output.contains("value={__vidactBinding") && output.contains("() => __vidactProviderValue"),
+        "{output}"
+    );
+    assert!(
+        !output
+            .contains("props.get()[\"label\"] === undefined ? \"ready\" : props.get()[\"label\"]"),
+        "{output}"
+    );
+    assert!(output.contains("__vidactProviderValue"), "{output}");
+    assert!(output.contains("__vidactDestructured"), "{output}");
+}
+
+#[test]
+fn dependency_source_tracks_namespace_memo_provider_values() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "MemoProvider.tsx",
+            source: r#"
+                import * as React from 'react';
+                import { SwitchContext } from './SwitchContext.mjs';
+
+                function useRenderElement(componentProps, parameters) {
+                    React.useRef(null);
+                    const renderedState = React.useMemo(
+                        () => parameters.state,
+                        [parameters.state],
+                    );
+                    return <span data-checked={renderedState.checked || undefined} {...componentProps} />;
+                }
+
+                function useControlled() {
+                    const [value, setValue] = React.useState(true);
+                    return [value, setValue];
+                }
+
+                export const Root = React.forwardRef(function Root(componentProps, forwardedRef) {
+                    const [checked, setChecked] = useControlled();
+                    const state = React.useMemo(() => ({ checked }), [checked]);
+                    const element = useRenderElement(componentProps, { state });
+                    return (
+                        <SwitchContext.Provider value={state}>
+                            <button ref={forwardedRef} onClick={() => setChecked(!checked)} />
+                            {element}
+                        </SwitchContext.Provider>
+                    );
+                });
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("a namespace memo used as a provider value should compile reactively");
+
+    assert!(
+        output.contains("createCompiledMemo as __vidactCreateMemo"),
+        "{output}"
+    );
+    assert!(
+        output.contains("value={__vidactBinding") && output.contains("() => state.get()"),
+        "{output}"
+    );
+}
+
+#[test]
+fn dependency_source_does_not_eagerly_contextualize_forwarded_children() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "ForwardedProviderChildren.tsx",
+            source: r#"
+                import * as React from 'react';
+                const ListContext = React.createContext(undefined);
+
+                export function CompositeList(props) {
+                    const { children, register } = props;
+                    const contextValue = React.useMemo(() => ({ register }), [register]);
+                    return <ListContext.Provider value={contextValue}>{children}</ListContext.Provider>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("forwarded children should remain deferred under their provider");
+
+    assert!(
+        !output.contains("__vidactRunWithContext(ListContext, contextValue"),
+        "{output}"
+    );
+}
+
+#[test]
 fn gates_and_lowers_suspense_and_promise_use_as_staged_async_work() {
     let source = r#"
         import { Suspense, use } from 'react';
@@ -1940,7 +2590,7 @@ fn lowers_reactive_component_props_inside_suspense_children() {
         "{output}"
     );
     assert!(
-        output.contains("onAdd={__vidactBinding(__vidactScope, 2"),
+        output.contains("onAdd={__vidactEvent(__vidactScope, __vidactBinding(__vidactScope, 2"),
         "{output}"
     );
 }
@@ -2032,6 +2682,33 @@ fn compiles_external_store_snapshots_into_owned_slots() {
     );
     assert!(output.contains("() => snapshot.get()"), "{output}");
     assert!(!output.contains("useStore("), "{output}");
+}
+
+#[test]
+fn compiles_reactive_external_store_inputs_for_resubscription() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "ReactiveStoreStatus.tsx",
+        source: r#"
+            import { useSyncExternalStore } from 'react';
+            export function ReactiveStoreStatus({ store }): Node {
+                const snapshot = useSyncExternalStore(
+                    store.subscribe,
+                    store.getSnapshot,
+                    store.getServerSnapshot,
+                );
+                return <output>{snapshot}</output>;
+            }
+        "#,
+    })
+    .expect("reactive external-store inputs should lower to one resubscription binding");
+
+    assert!(
+        output.contains("const snapshot = __vidactCreateExternalStore("),
+        "{output}"
+    );
+    assert!(output.contains("__vidactBinding("), "{output}");
+    assert!(output.contains("store.get().subscribe"), "{output}");
+    assert!(output.contains("store.get().getSnapshot"), "{output}");
 }
 
 #[test]
@@ -2460,6 +3137,231 @@ fn compiles_reactive_jsx_spreads_with_deletion_aware_property_ownership() {
 }
 
 #[test]
+fn compiles_use_state_without_an_explicit_initializer() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "OptionalState.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function OptionalState() {
+                const [value, setValue] = useState();
+                return <button onClick={() => setValue('ready')}>{value ?? 'empty'}</button>;
+            }
+        "#,
+    })
+    .expect("useState() should initialize the compiled slot with undefined");
+
+    assert!(
+        output.contains("__vidactCreateState(__vidactScope"),
+        "{output}"
+    );
+    assert!(output.contains("undefined"), "{output}");
+}
+
+#[test]
+fn normalizes_expression_bodied_custom_hook_arrows() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "ExpressionHook.tsx",
+        source: r#"
+            import { createContext, useContext } from 'react';
+            const CountContext = createContext(0);
+            const useCount = () => useContext(CountContext);
+            export function ExpressionHook() {
+                const count = useCount();
+                return <output>{count}</output>;
+            }
+        "#,
+    })
+    .expect("expression-bodied custom hooks should normalize before hook expansion");
+
+    assert!(
+        output.contains("__vidactCreateContext(__vidactScope"),
+        "{output}"
+    );
+    assert!(!output.contains("useCount"), "{output}");
+}
+
+#[test]
+fn dependency_source_keeps_expanded_hook_object_destructuring_reactive() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "ExpandedHookDestructuring.tsx",
+            source: r#"
+                import { createContext, useContext, useState } from 'react';
+                const OpenContext = createContext({ open: false });
+
+                function useControlled({ controlled }) {
+                    const [uncontrolled, setUncontrolled] = useState(false);
+                    return controlled === undefined ? uncontrolled : controlled;
+                }
+
+                export function Trigger() {
+                    const context = useContext(OpenContext);
+                    const open = useControlled({ controlled: context.open });
+                    return <button aria-expanded={open} />;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("expanded custom-hook object fields should remain reactive");
+
+    assert!(output.contains("aria-expanded"), "{output}");
+    assert!(
+        output.matches("controlled = __vidactHook").count() >= 2,
+        "controlled field should have an initial assignment and a reactive updater:\n{output}"
+    );
+}
+
+#[test]
+fn expands_unconditional_custom_hook_at_optional_chain_base() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "OptionalChainHook.tsx",
+            source: r#"
+                import { createContext, useContext } from 'react';
+                const PortalContext = createContext(null);
+                const usePortalContext = () => useContext(PortalContext);
+                function usePortalNode() {
+                    const parentNode = usePortalContext()?.context.portalNode;
+                    const active = usePortalContext()?.active ?? false;
+                    return { active, parentNode };
+                }
+                export function Portal() {
+                    const portal = usePortalNode();
+                    return <output data-active={portal.active}>{portal.parentNode?.id}</output>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("a hook at an optional-chain base is still called unconditionally");
+
+    assert!(!output.contains("usePortalContext"), "{output}");
+    assert!(!output.contains("usePortalNode"), "{output}");
+}
+
+#[test]
+fn selects_react_19_hook_implementation_aliases() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "ReactVersionHook.tsx",
+            source: r#"
+                import * as React from 'react';
+                const majorVersion = parseInt(React.version, 10);
+                function isReactVersionAtLeast(version) {
+                    return majorVersion >= version;
+                }
+                const useImplementation = isReactVersionAtLeast(19) ? useModern : useLegacy;
+                function useModern(initial) {
+                    const [value, setValue] = React.useState(initial);
+                    return [value, setValue];
+                }
+                function useLegacy(initial) {
+                    const [value, setValue] = React.useReducer((state) => state, initial);
+                    return [value, setValue];
+                }
+                function useValue(initial) {
+                    return useImplementation(initial);
+                }
+                export function VersionedHook() {
+                    const [value, setValue] = useValue('ready');
+                    return <button onClick={() => setValue('updated')}>{value}</button>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("the React 19 compile target should select its immutable hook implementation");
+
+    assert!(output.contains("__vidactCreateState"), "{output}");
+    assert!(!output.contains("__vidactCreateReducer"), "{output}");
+    assert!(!output.contains("useImplementation"), "{output}");
+}
+
+#[test]
+fn dependency_source_uses_vidact_memo_semantics_without_upstream_preservation_bailouts() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "PublishedMemo.tsx",
+            source: r#"
+                import * as React from 'react';
+                function useCollapsible() {
+                    const [mounted, setMounted] = React.useState(false);
+                    return { mounted, setMounted };
+                }
+                export function PublishedMemo({ rootState, open }) {
+                    const collapsible = useCollapsible();
+                    const state = React.useMemo(() => ({
+                        ...rootState,
+                        hidden: !open && !collapsible.mounted,
+                    }), [collapsible.mounted, open, rootState]);
+                    const context = React.useMemo(() => ({
+                        ...collapsible,
+                        state,
+                    }), [collapsible, state]);
+                    return <output>{context.state.hidden ? 'hidden' : 'visible'}</output>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("Vidact owns dependency-source memo identity after analysis");
+
+    assert!(output.contains("__vidactCreateMemo"), "{output}");
+}
+
+#[test]
+fn lowers_conditional_render_phase_state_synchronization_into_an_owner_updater() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "RenderPhaseStateSync.tsx",
+        source: r#"
+            import { useState } from 'react';
+
+            export function RenderPhaseStateSync({ open }): Node {
+                const [status, setStatus] = useState('closed');
+                const [mounted, setMounted] = useState(open);
+                if (open && !mounted) {
+                    setMounted(true);
+                    setStatus('opening');
+                }
+                if (!open && mounted && status !== 'closing') {
+                    setStatus('closing');
+                }
+                return <output data-mounted={mounted}>{status}</output>;
+            }
+        "#,
+    })
+    .expect("top-level conditional state synchronization should rerun from reactive sources");
+
+    assert!(output.contains("__vidactScope[0]("), "{output}");
+    assert!(output.matches("mounted.set(true)").count() >= 2, "{output}");
+    assert!(
+        output.matches("status.set(\"opening\")").count() >= 2,
+        "{output}"
+    );
+}
+
+#[test]
+fn dependency_source_normalizes_simple_logical_assignments() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "PublishedLogicalAssignment.tsx",
+            source: r#"
+                export function PublishedLogicalAssignment({ authored }) {
+                    let value = authored;
+                    value ||= 'fallback';
+                    return <output>{value}</output>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("simple logical assignment should normalize before upstream analysis");
+
+    assert!(!output.contains("||="), "{output}");
+}
+
+#[test]
 fn compiles_reactive_component_spreads_into_mutable_prop_stores() {
     let output = compile_surgical_module(ModuleInput {
         filename: "ComponentSpread.tsx",
@@ -2485,6 +3387,81 @@ fn compiles_reactive_component_spreads_into_mutable_prop_stores() {
         "{output}"
     );
     assert!(output.contains("[\"title\"]"), "{output}");
+}
+
+#[test]
+fn coalesces_props_before_reactive_jsx_spreads_in_source_order() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "OrderedSpread.tsx",
+        source: r#"
+            export function OrderedSpread({ props, className }) {
+                return (
+                    <button
+                        data-slot="trigger"
+                        className={className}
+                        {...props}
+                    >
+                        Open
+                    </button>
+                );
+            }
+        "#,
+    })
+    .expect("leading JSX props should coalesce with a later reactive spread");
+
+    assert!(
+        output.contains("compiledSpread as __vidactSpread"),
+        "{output}"
+    );
+    assert!(output.contains("\"data-slot\": \"trigger\""), "{output}");
+    assert!(output.contains("...props"), "{output}");
+}
+
+#[test]
+fn coalesces_multiple_reactive_jsx_spreads_in_source_order() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "MultipleOrderedSpreads.tsx",
+        source: r#"
+            export function MultipleOrderedSpreads({ props, ref, role, restProps }) {
+                return (
+                    <span
+                        {...props}
+                        ref={ref}
+                        role={role}
+                        {...restProps}
+                        data-slot="focus-guard"
+                    />
+                );
+            }
+        "#,
+    })
+    .expect("ordered reactive spreads should merge into one owned spread descriptor");
+
+    assert_eq!(output.matches("__vidactSpread(").count(), 1, "{output}");
+    assert!(output.contains("...props"), "{output}");
+    assert!(output.contains("...restProps"), "{output}");
+    assert!(output.contains("data-slot=\"focus-guard\""), "{output}");
+}
+
+#[test]
+fn rejects_non_reactive_allocations_before_reactive_jsx_spreads() {
+    let error = compile_surgical_module(ModuleInput {
+        filename: "OrderedSpreadIdentity.tsx",
+        source: r#"
+            export function OrderedSpreadIdentity({ props }) {
+                return <button onClick={() => undefined} {...props}>Open</button>;
+            }
+        "#,
+    })
+    .expect_err("a leading handler must not be reallocated when only the spread changes");
+
+    let message = format!("{error:?}");
+    assert!(
+        message.contains(
+            "a non-reactive expression before a reactive JSX spread would be re-evaluated during updates"
+        ),
+        "{message}"
+    );
 }
 
 #[test]
@@ -2525,6 +3502,36 @@ fn compiles_element_valued_props_into_opaque_renderable_capabilities() {
     );
     assert!(!output.contains("React.cloneElement"), "{output}");
     assert!(!output.contains("$$typeof"), "{output}");
+}
+
+#[test]
+fn lowers_clone_element_child_replacement_into_the_renderable_capability() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "RenderableChildren.tsx",
+        source: r#"
+            import * as React from 'react';
+            import { useState } from 'react';
+            function Slot({ render, label }) {
+                return React.cloneElement(
+                    render,
+                    { 'data-label': label },
+                    <span data-cloned-label>{label}</span>,
+                );
+            }
+            export function App() {
+                const [label, setLabel] = useState('Open');
+                return <Slot label={label} render={<a href="/docs">Authored</a>} />;
+            }
+        "#,
+    })
+    .expect("a single explicit child replacement should stay within the renderable capability");
+
+    assert!(
+        output.contains("cloneRenderableComponent as __vidactCloneRenderableComponent"),
+        "{output}"
+    );
+    assert!(output.contains("data-cloned-label"), "{output}");
+    assert!(!output.contains("React.cloneElement"), "{output}");
 }
 
 #[test]

@@ -1,0 +1,98 @@
+---
+title: Data loading
+description: Load data on the server with route loaders, share it between nested routes, and expose API endpoints.
+group: Vidact Start
+---
+
+A loader is a function on a route that runs on the server before the route renders. Whatever it returns is passed to the component as `loaderData` and serialized into the page so the browser has the same data during hydration.
+
+```tsx title="src/routes/products/$productId.tsx"
+import { defineFileRoute, type RouteComponentProps, type RouteLoaderContext } from '@vidact/start'
+
+const loader = async ({ params }: RouteLoaderContext) => {
+  const product = await db.products.find(params.productId)
+  return { product }
+}
+
+export function ProductRoute({ loaderData }: RouteComponentProps<Awaited<ReturnType<typeof loader>>>) {
+  return <h1>{loaderData.product.name}</h1>
+}
+
+export const Route = defineFileRoute({ loader, component: ProductRoute })
+```
+
+Loaders only ever run on the server. They can read a database, call internal services, or use secrets, and none of that code is shipped to the browser.
+
+## The loader context
+
+| Field | Description |
+| --- | --- |
+| `params` | Dynamic segment values for this route |
+| `request` | The incoming `Request`, with headers, URL, and method |
+| `parentData` | Loader results from every ancestor route, keyed by route ID |
+
+```ts
+const loader = async ({ request, parentData }: RouteLoaderContext) => {
+  const url = new URL(request.url)
+  const page = Number(url.searchParams.get('page') ?? '1')
+  return { page, user: parentData['__root'] }
+}
+```
+
+## Loader order
+
+When a URL matches several nested routes, their loaders run from the outermost route inward, and each child sees its parents' results in `parentData`. A layout loader is the natural place to load the current user or site settings once for every page beneath it.
+
+Route IDs are the file paths without the extension: `__root`, `index`, `blog`, `blog/$slug`. So a post page reads its layout's data as `parentData['blog']`.
+
+## What a loader can return
+
+Loader data travels from the server to the browser as a serialized snapshot, so it must be plain data: strings, numbers, bigints, booleans, `null`, `undefined`, arrays, and plain objects of those. Class instances such as `Date` or `Map`, functions, promises, and cyclic graphs are rejected with a clear error at serialization time. If a loader produces a rich object, map it to a plain shape before returning, for example `date.toISOString()` for a `Date`.
+
+## Typing loader data
+
+Derive the component's prop type from the loader so the two never drift:
+
+```tsx
+const loader = async () => ({ items: await listItems() })
+
+type Props = RouteComponentProps<Awaited<ReturnType<typeof loader>>>
+
+export function ItemsRoute({ loaderData }: Props) { /* ... */ }
+```
+
+## API endpoints
+
+A route can respond to HTTP methods directly with `server.handlers`. A file with handlers and no component is an endpoint.
+
+```ts title="src/routes/api/time.ts"
+import { defineFileRoute } from '@vidact/start'
+
+export const Route = defineFileRoute({
+  server: {
+    handlers: {
+      GET: () => Response.json({ now: new Date().toISOString() }),
+      POST: async ({ request }) => {
+        const body = await request.json()
+        return Response.json({ received: body }, { status: 201 })
+      },
+    },
+  },
+})
+```
+
+Handlers receive `{ params, request }` and return a `Response`. They are plain web-standard code and can be tested by calling the exported handler with a `Request`.
+
+## Loading in the browser
+
+After hydration, a `<Link>` click asks the server for a snapshot of the target URL's loader data rather than a full page, then re-renders the route tree with it. You do not write any client-side fetching for route data; the same loaders serve both the first request and later navigations.
+
+For data that changes while a page is open, such as a live feed, use an [effect](/docs/learn/effects) or an [external store](/docs/learn/context) as you would in any client application.
+
+## Errors in loaders
+
+A loader that throws a `Response` sends that response as-is, which is how you produce a 404 or a redirect. Any other exception rejects the handler, and your server (srvx, in the default setup) turns it into a 500:
+
+```ts
+if (!session) throw new Response(null, { status: 302, headers: { Location: '/login' } })
+```

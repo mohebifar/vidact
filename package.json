@@ -22,7 +22,7 @@
     "size": "pnpm --fail-if-no-match --filter @vidact/runtime-size measure",
     "test": "pnpm build:packages && pnpm test:rust && pnpm test:runtime && pnpm test:tools && pnpm test:browser && pnpm test:examples && pnpm test:packages",
     "test:browser": "pnpm --filter @vidact/browser-corpus test",
-    "test:examples": "pnpm --filter @vidact/example-todomvc test && pnpm --filter @vidact/example-shop test && pnpm --filter @vidact/example-docs test && pnpm --filter @vidact/example-start test",
+    "test:examples": "pnpm --filter @vidact/example-todomvc test && pnpm --filter @vidact/example-shop test && pnpm --filter @vidact/example-docs test && pnpm --filter @vidact/example-docs build && pnpm --filter @vidact/example-start test",
     "test:packages": "node scripts/verify-packages.mjs",
     "test:runtime": "pnpm --filter @vidact/runtime test",
     "test:rust": "cargo test --workspace",

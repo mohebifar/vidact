@@ -176,7 +176,7 @@ import { vidact } from '@vidact/vite'
 
 const compilation = compileSync('export function App() { return <main>ready</main> }', { filename: 'App.tsx' })
 if (compilation.protocol !== 'vidact-compile-v2' || !compilation.code.includes('__vidactCompiledRoot')) throw new Error('compiler entry failed')
-if (VIDACT_RUNTIME_PROTOCOL !== 'vidact-runtime-v1') throw new Error('runtime entry failed')
+if (VIDACT_RUNTIME_PROTOCOL !== 'vidact-runtime-v2') throw new Error('runtime entry failed')
 if (renderToStaticMarkup(() => 'ready') !== 'ready') throw new Error('server entry failed')
 if ([Suspense, createResource, lazy].some((value) => typeof value !== 'function')) throw new Error('async entry failed')
 if ([flushSync, startTransition].some((value) => typeof value !== 'function')) throw new Error('concurrent entry failed')

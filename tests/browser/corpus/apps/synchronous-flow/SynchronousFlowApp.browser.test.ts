@@ -90,6 +90,64 @@ describe('compiled synchronous regions', () => {
     ).not.toThrow()
   })
 
+  it('reruns conditional render-phase state synchronization without remounting', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    dispose = mountCompiled(SynchronousFlowApp, host).dispose
+
+    const root = host.querySelector<HTMLElement>('[data-synchronous-flow]')!
+    const output = host.querySelector<HTMLOutputElement>('[data-render-phase-sync]')!
+    const storeOutput = host.querySelector<HTMLOutputElement>('[data-synced-transition-store]')!
+    const toggle = host.querySelector<HTMLButtonElement>('[data-toggle-render-phase]')!
+
+    expect(output.textContent?.trim()).toBe('closed')
+    expect(output.dataset.mounted).toBe('false')
+    expect(storeOutput.textContent?.trim()).toBe('closed')
+    expect(storeOutput.dataset.mounted).toBe('false')
+
+    const opened = await captureMutations(host, () => toggle.click())
+
+    expect(host.querySelector('[data-synchronous-flow]')).toBe(root)
+    expect(host.querySelector('[data-render-phase-sync]')).toBe(output)
+    expect(host.querySelector('[data-synced-transition-store]')).toBe(storeOutput)
+    expect(output.textContent?.trim()).toBe('opening')
+    expect(output.dataset.mounted).toBe('true')
+    expect(storeOutput.textContent?.trim()).toBe('opening')
+    expect(storeOutput.dataset.mounted).toBe('true')
+    expect(Reflect.get(globalThis, '__vidactRenderPhaseMounted')).toBe(true)
+    expect(() =>
+      assertMutationEnvelope(
+        opened.records,
+        [
+          { type: 'attributes', target: output },
+          { type: 'characterData', within: output },
+          { type: 'attributes', target: storeOutput },
+          { type: 'characterData', within: storeOutput },
+        ],
+        'render-phase state synchronization open',
+      ),
+    ).not.toThrow()
+
+    const closed = await captureMutations(host, () => toggle.click())
+
+    expect(host.querySelector('[data-synchronous-flow]')).toBe(root)
+    expect(host.querySelector('[data-render-phase-sync]')).toBe(output)
+    expect(output.textContent?.trim()).toBe('closing')
+    expect(output.dataset.mounted).toBe('true')
+    expect(storeOutput.textContent?.trim()).toBe('closing')
+    expect(storeOutput.dataset.mounted).toBe('true')
+    expect(() =>
+      assertMutationEnvelope(
+        closed.records,
+        [
+          { type: 'characterData', within: output },
+          { type: 'characterData', within: storeOutput },
+        ],
+        'render-phase state synchronization close',
+      ),
+    ).not.toThrow()
+  })
+
   it('makes unkeyed map identity explicitly positional', async () => {
     const host = document.createElement('div')
     document.body.append(host)

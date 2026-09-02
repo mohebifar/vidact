@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mohamad Mohebifar <mohebifar@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 11:10:00 -0700
+Subject: [PATCH] fix(react-compiler): preserve SSR state dispatchers
+
+---
+ .../react_compiler_optimization/optimize_for_ssr.rs |  6 ++++-
+ crates/oxc_react_compiler/tests/transform.rs         | 34 ++++++++++++++++++++-
+ 2 files changed, 38 insertions(+), 2 deletions(-)
+
+diff --git a/crates/oxc_react_compiler/src/react_compiler_optimization/optimize_for_ssr.rs b/crates/oxc_react_compiler/src/react_compiler_optimization/optimize_for_ssr.rs
+index 9c410db5186169f69bb022c84ea4f3214475ce55..8b16b7c0587c93f2fdd8173424488be0bcca305e 100644
+--- a/crates/oxc_react_compiler/src/react_compiler_optimization/optimize_for_ssr.rs
++++ b/crates/oxc_react_compiler/src/react_compiler_optimization/optimize_for_ssr.rs
+@@ -57,8 +57,12 @@ pub fn optimize_for_ssr<'a>(func: &mut HirFunction<'a>, env: &Environment<'a>) {
+                         && let Pattern::Array(arr) = &lvalue.pattern
+                         && !arr.items.is_empty()
+                         && let ArrayPatternElement::Place(_) = &arr.items[0]
++                        && arr.items[1..]
++                            .iter()
++                            .all(|item| matches!(item, ArrayPatternElement::Hole))
+                     {
+-                        // Allow destructuring of inlined states
++                        // Allow destructuring only when the state value is the sole binding.
++                        // Dispatchers may escape through context or props during SSR.
+                         continue;
+                     }
+                 }
+diff --git a/crates/oxc_react_compiler/tests/transform.rs b/crates/oxc_react_compiler/tests/transform.rs
+index d7bb129a36d2acdaf918094e5bedcaad18a5f050..3d518aee5d69ee61a7210984c0133d0feb0d3d9f 100644
+--- a/crates/oxc_react_compiler/tests/transform.rs
++++ b/crates/oxc_react_compiler/tests/transform.rs
+@@ -8,7 +8,9 @@ use oxc_parser::Parser;
+ use oxc_semantic::SemanticBuilder;
+ use oxc_span::SourceType;
+ 
+-use oxc_react_compiler::{CompileResult, PanicThreshold, PluginOptions, compile};
++use oxc_react_compiler::{
++    CompileResult, CompilerOutputMode, PanicThreshold, PluginOptions, compile,
++};
+ 
+ fn options() -> PluginOptions {
+     PluginOptions::default()
+@@ -77,6 +79,36 @@ fn skips_non_react_code() {
+     assert!(!result.changed, "non-React code must not be transformed");
+ }
+ 
++#[test]
++fn ssr_preserves_bound_state_and_reducer_dispatchers() {
++    let source = r#"
++import { useReducer, useState } from 'react';
++function reducer(state) {
++  return state + 1;
++}
++function Component() {
++  const [status, setStatus] = useState('idle');
++  const [count, dispatch] = useReducer(reducer, 0);
++  return <Provider value={{ status, setStatus, count, dispatch }} />;
++}
++"#;
++    let allocator = Allocator::default();
++    let options = PluginOptions {
++        output_mode: Some(CompilerOutputMode::Ssr),
++        ..PluginOptions::default()
++    };
++    let (program, result) = transform_source(source, SourceType::tsx(), &allocator, options);
++
++    assert!(!result.diagnostics.has_errors(), "unexpected errors: {:?}", result.diagnostics);
++    assert!(result.changed, "React Compiler should have transformed the component");
++
++    let output = Codegen::new().build(&program).code;
++    assert!(output.contains("[status, setStatus]"), "missing state dispatcher binding:\n{output}");
++    assert!(output.contains("useState(\"idle\")"), "state hook was unexpectedly inlined:\n{output}");
++    assert!(output.contains("[count, dispatch]"), "missing reducer dispatcher binding:\n{output}");
++    assert!(output.contains("useReducer(reducer, 0)"), "reducer hook was unexpectedly inlined:\n{output}");
++}
++
+ #[test]
+ fn default_eslint_suppressions_do_not_bail_out() {
+     let fixtures = [

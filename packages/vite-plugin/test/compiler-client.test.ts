@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { analyzeWithCompiler, compileWithCompiler } from '../src/compiler-client.ts'
-import { compilationCacheKey, vidact } from '../src/index.ts'
+import { compilationCacheKey, sourceDependencySpecifiers, vidact } from '../src/index.ts'
 
 type TransformHook = (
   this: { readonly environment: { readonly name: string } },
@@ -45,6 +45,27 @@ function pluginConfig(initial: Record<string, unknown> = {}): Record<string, unk
 }
 
 describe('vidact compiler client', () => {
+  it('preflights source dependency imports without bundling plain local modules', () => {
+    expect(
+      sourceDependencySpecifiers(`export function App() { return <main>ready</main> }`),
+    ).toEqual([])
+    expect(
+      sourceDependencySpecifiers(`
+        import React from 'react'
+        import { Button } from '@base-ui/react/button'
+        import '@/style.css'
+        export { helper } from 'reactive-helper'
+        const lazy = import('lazy-reactive-helper')
+      `),
+    ).toEqual([
+      'react',
+      '@base-ui/react/button',
+      '@/style.css',
+      'reactive-helper',
+      'lazy-reactive-helper',
+    ])
+  })
+
   it('keeps reachable dependencies in the transform pipeline by default', () => {
     expect(pluginConfig()).toMatchObject({
       optimizeDeps: { noDiscovery: true },
@@ -109,7 +130,7 @@ describe('vidact compiler client', () => {
     expect(compilation).toHaveProperty('sourceMap')
     const sourceMap = (compilation as unknown as { sourceMap: { sources: string[] } }).sourceMap
     expect(sourceMap.sources).toContain('todos.tsx')
-    expect(compilation.runtimeProtocol).toBe('vidact-runtime-v1')
+    expect(compilation.runtimeProtocol).toBe('vidact-runtime-v2')
     expect(compilation.configuration).toEqual({ target: 'client', features: [] })
   })
 
@@ -239,6 +260,9 @@ describe('vidact compiler client', () => {
     expect(virtualReactDomModule({ target: 'hydrate', features: ['framework'] })).toContain(
       '@vidact/runtime/framework',
     )
+    expect(virtualReactDomModule({ target: 'server', features: ['framework'] })).toContain(
+      '@vidact/runtime/server',
+    )
     expect(virtualReactDomModule({})).not.toContain('preconnect')
     expect(
       virtualModule('react-dom/server', { target: 'server', features: ['framework'] }),
@@ -249,7 +273,23 @@ describe('vidact compiler client', () => {
     expect(virtualModule('react-dom/server', { target: 'server' })).toContain(
       'renderToStaticMarkup, renderToString',
     )
+    expect(virtualModule('react-dom/server.edge', { target: 'server' })).toBe(
+      virtualModule('react-dom/server', { target: 'server' }),
+    )
     expect(virtualModule('react-dom/server', {})).toContain('requires the server target')
+  })
+
+  it('routes automatic React JSX runtimes to target-specific Vidact runtimes', () => {
+    expect(virtualModule('react/jsx-runtime', { target: 'server' })).toContain(
+      '@vidact/runtime/server/jsx-runtime',
+    )
+    expect(virtualModule('react/jsx-dev-runtime', { target: 'server' })).toContain(
+      '@vidact/runtime/server/jsx-dev-runtime',
+    )
+    expect(virtualModule('react/jsx-runtime', { target: 'hydrate' })).toContain(
+      '@vidact/runtime/hydrate/jsx-runtime',
+    )
+    expect(virtualModule('react/jsx-runtime', {})).toContain('@vidact/runtime/jsx-runtime')
   })
 
   it('selects isolated Actions facades and exposes form APIs only when enabled', () => {

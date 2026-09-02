@@ -1,0 +1,105 @@
+---
+title: Troubleshooting
+description: How to read compiler diagnostics, what the common ones mean, and how to decode production error codes.
+group: Guides
+---
+
+Vidact prefers a build error to a runtime surprise. When it cannot compile something, it stops and tells you where. This page explains what you will see and what to do about it.
+
+## Reading a diagnostic
+
+A compile error looks like this:
+
+```text
+src/components/Profile.tsx:14:5: UnsupportedSyntax: React class components are unsupported; use a function component and Vidact errorBoundary
+```
+
+Three parts matter: the **location** (`file:line:column`), which points at the exact expression the compiler stopped on; the **code**, which tells you what kind of problem it is; and the **message**, which usually says what to do instead. Vite shows the same information in its error overlay.
+
+| Code | Meaning |
+| --- | --- |
+| `UnsupportedSyntax` | The construct is outside Vidact's React subset, or needs a feature flag that is not enabled |
+| `DestructiveRenderMutation` | The component body writes to something it should only read |
+| `UnsupportedControlFlow`, `AnalysisFailed` | The compiler could not follow the control flow of the component |
+| `UnsupportedComponentForm` | Something was used as a component that the compiler cannot treat as one |
+| `CyclicUpdaterGraph`, `MultipleSourceWriters` | Two updates depend on each other, or two places write the same derived value |
+
+## Common diagnostics
+
+### "requires the `async` feature" (or another feature)
+
+You used an API from an opt-in family. Add the named feature to `vidact({ features: [...] })`. See [Opt-in features](/docs/learn/features).
+
+### Class component
+
+Convert to a function component. For error boundaries use `errorBoundary`; see [Error handling](/docs/learn/error-handling).
+
+### Assignment to a prop, a prop's property, or an outer variable
+
+```tsx
+export function Label({ text }) {
+  text = text.trim()
+  return <span>{text}</span>
+}
+```
+
+Introduce a new binding instead: `const trimmed = text.trim()`. For module-level variables, move the write into an event handler or effect.
+
+### Unsupported `useState` call
+
+`useState` (and the other hooks) must be called directly in a component or in a custom hook defined in the same file. A hook defined in another module is not yet expanded. Move the hook next to its caller, or inline it.
+
+### Unsupported list key
+
+Keys must be a plain identifier or member expression, such as `item.id`. A computed key like `` `${item.id}-row` `` is rejected; give the item a real ID.
+
+### Unknown event prop
+
+A prop that starts with `on` must be a known DOM event. Check the spelling (`onDoubleClick`, not `onDblClick`). Custom element events are not yet supported as props; add them with `addEventListener` in a ref callback.
+
+### Array destructuring from an unknown call
+
+```tsx
+const [value] = createTuple()
+```
+
+The compiler treats array destructuring from a function call as a possible hook call and needs to know what it is. Destructure a local variable instead, or index into the result.
+
+### `try` / `finally` around rendering
+
+Rendering inside `try` blocks that also `throw` or use `finally` cannot be lowered. Move the risky code into an event handler or effect and keep the component body to straight-line construction.
+
+### Dependency failed to compile
+
+A package you import was compiled because it declares React, and something inside it is outside the subset. Either exclude it (`exclude` option) and replace it with a Vidact-compatible alternative, or, if the problem is only missing metadata, use `includeDependencies`. See [@vidact/vite](/docs/reference/vite).
+
+## Runtime errors
+
+### Protocol mismatch on startup
+
+The runtime checks that the compiler and runtime agree on a protocol version. If you see an error mentioning `vidact-runtime-v2`, your `@vidact/runtime`, `@vidact/vite`, and `@vidact/start` versions do not match. Align them in `package.json` and reinstall.
+
+### Duplicate key
+
+Two items in a list share a key. Vidact detects this before changing the DOM and throws, so the list is left in its previous state. Fix the key source.
+
+### Hydration mismatch
+
+The server and client produced different output for the same route. Vidact repairs what it can and reports through `onRecoverableError`. The usual causes are:
+
+- Reading browser-only globals such as `window` during construction.
+- Non-deterministic values such as `Date.now()` or `Math.random()` in the component body.
+- A different set of feature flags or a different package version between the server and client builds.
+- An external store whose `getServerSnapshot` disagrees with the server's actual value.
+
+### Update did not stabilize
+
+An effect or store subscription writes state that triggers the same effect again, forever. Vidact stops after a bounded number of passes and throws rather than hanging the tab. Look for an effect that sets state it also depends on without a guard.
+
+## Production error codes
+
+In production builds, runtime error messages are replaced by short codes such as `V025` to keep bundles small. The codes are stable within a runtime version. To decode one, check the error catalog for the exact `@vidact/runtime` version you shipped; the mapping is documented in the package's changelog and in the repository under `docs/architecture/development-diagnostics-and-production-error-codes.md`.
+
+## Getting help
+
+If a diagnostic seems wrong, or a pattern that should be in the subset is rejected, open an issue with the smallest component that reproduces it. The compiler's test suite is built from exactly such examples.

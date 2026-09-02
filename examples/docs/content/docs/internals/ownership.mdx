@@ -1,0 +1,67 @@
+---
+title: Ownership and identity
+description: Who owns each piece of DOM, when it is created and disposed, and what survives an update.
+group: Under the hood
+---
+
+Without a virtual tree to diff, Vidact needs a different answer to the question "what happens to this DOM when things change?" The answer is ownership: every dynamic region of the page has exactly one owner, and the owner's identity decides whether the region is kept, updated, or thrown away.
+
+## Owners
+
+An owner is a runtime record that holds DOM nodes, bindings, effects, refs, subscriptions, and child owners. When an owner is disposed, everything it holds is cleaned up: effect cleanups run, refs are set to `null`, subscriptions are cancelled, child owners are disposed recursively, and the DOM nodes are removed.
+
+The owners in a Vidact application are:
+
+| Owner | Created when | Disposed when |
+| --- | --- | --- |
+| Root | `mountCompiled` or `hydrateRoot` is called | `dispose()` or `unmount()` |
+| Component | A parent constructs it | The parent's range or list no longer includes it |
+| Conditional branch | A condition selects it | The condition selects a different branch |
+| List record | A key appears in a rendered array | The key disappears |
+| Error boundary content | The boundary mounts or `reset` is called | The content throws |
+| Portal | The portal expression is constructed | Its logical parent is disposed |
+
+Owners nest by construction, not by DOM position. A component rendered into a portal is owned by the component that created the portal, even though its nodes live elsewhere in the document. Context, error boundaries, and cleanup all follow this logical tree.
+
+## Identity
+
+Identity is what lets an owner survive an update. Each kind of owner has a source of identity:
+
+| Owner | Identity |
+| --- | --- |
+| Component | The construction site in the parent (this `<Child />` at this position) |
+| Conditional branch | Which branch of the expression is selected |
+| Keyed list record | The key |
+| Unkeyed list record | The index |
+
+An update that keeps the identity keeps the owner: its DOM, its state, its focus, its scroll position. An update that changes the identity disposes the old owner and constructs a new one.
+
+Concretely:
+
+- Changing a prop on `<Child value={x} />` keeps `Child`; its prop updater runs.
+- Switching `cond ? <A /> : <B />` from `true` to `false` disposes `A` and constructs `B`.
+- Switching `cond ? <A x="1" /> : <A x="2" />` also disposes and constructs, because the branches are different owners even though the component is the same.
+- Reordering a keyed list moves owners; it disposes none of them.
+- Reordering an unkeyed list keeps owners by position and updates their props, so a row's state may end up attached to a different item.
+
+These are the same rules React applies during reconciliation, arrived at without reconciliation.
+
+## Ranges
+
+A component or branch may own several top-level nodes, or none. Vidact tracks each such region as a range delimited by lightweight markers, so it can insert, move, and remove the region as a unit without wrapping it in an extra element. Server output includes the markers as comments, which is how hydration finds the ranges again.
+
+## Disposal order and safety
+
+Disposal is depth-first: children are disposed before their parent's own cleanup runs, so a parent's effect cleanup can still see child DOM if it needs to. Writing state that belongs to a disposed owner is an error ("cannot update state after disposal" in development, `V012` in production). A late `setState` from a resolved promise or a leftover timer means a cleanup is missing, so Vidact reports it instead of silently dropping the write; cancel timers and subscriptions in your effect cleanups.
+
+When a batch fails partway through, the owners it created are disposed and the DOM writes it made are rolled back before the error is routed to a boundary. The page is never left with half of an update applied.
+
+## Roots
+
+A root is the owner with no parent. It records the error callbacks and `useId` prefix for everything below it. `createRoot(...).replace(nextApp)` constructs the next application's owner first and disposes the previous one after, so the host element is never briefly empty. Hot module replacement and Vidact Start navigation both use this mechanism.
+
+## What this means for your code
+
+- Put state where its lifetime should be. If a value should survive a branch switch, hoist it above the conditional.
+- Use stable keys for lists whose rows have state or focus.
+- Assume cleanup is reliable. An effect cleanup, a callback-ref cleanup, and a store unsubscribe all run exactly once when their owner goes away, including during error recovery.

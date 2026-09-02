@@ -1,0 +1,111 @@
+---
+title: React compatibility
+description: A complete list of React 19 APIs and how each one behaves under Vidact.
+group: Reference
+---
+
+Vidact compiles a subset of React 19. This page is the authoritative list of what is in that subset, what needs a feature flag, what behaves differently, and what is rejected.
+
+## How to read the tables
+
+| Status | Meaning |
+| --- | --- |
+| **Supported** | Works as in React |
+| **Opt-in** | Works when the named feature is enabled |
+| **Adapted** | Works for the same purpose, with a documented difference |
+| **Server / Hydrate** | Available only in that build target |
+| **Rejected** | Compile-time error; there is no fallback |
+| **Tracked** | React canary API with no stability promise yet |
+
+## Components
+
+| API | Status | Notes |
+| --- | --- | --- |
+| Function components | Supported | Run once per mount |
+| Arrow, expression, default-export components | Supported | |
+| Custom hooks | Supported | Must be in the same module as the caller |
+| Class components | Rejected | Use functions |
+| JSX, fragments, arrays, conditionals | Supported | |
+| `key` | Supported | Must be a primitive; duplicates throw |
+| `ref` as a prop | Supported | |
+| `forwardRef` | Adapted | Inline `(props, ref)` form only, as a migration aid |
+| `memo` | Adapted | Accepted; no custom comparator; not a performance tool |
+| `createElement` | Adapted | Only when the type and props are statically known |
+| `createPortal` | Adapted | Client only; events bubble through the physical DOM |
+| `lazy`, `Suspense` | Opt-in `async` | |
+| `Activity` | Opt-in `retained-ui` | |
+| `StrictMode` | Adapted | Accepted; no double invocation |
+| `Profiler` | Opt-in `profiling` | Reports Vidact work, not render time |
+| `ViewTransition`, Fragment refs | Tracked | |
+
+## Hooks
+
+| Hook | Status | Notes |
+| --- | --- | --- |
+| `useState` | Supported | |
+| `useReducer` | Supported | |
+| `useRef` | Supported | |
+| `useImperativeHandle` | Supported | |
+| `useEffect`, `useLayoutEffect` | Supported | Pass a dependency array |
+| `useEffectEvent` | Supported | |
+| `useInsertionEffect` | Opt-in `css-insertion` | |
+| `useMemo`, `useCallback` | Supported | Identity preserved where observable; not a performance tool |
+| `useId` | Supported | Stable across server and client |
+| `useContext`, `use(context)` | Supported | |
+| `use(promise)` | Opt-in `async` | |
+| `useSyncExternalStore` | Supported | |
+| `useTransition`, `useDeferredValue` | Opt-in `concurrent` | |
+| `useActionState`, `useOptimistic` | Opt-in `actions` | |
+| `useFormStatus` | Opt-in `actions` | |
+| `useDebugValue` | Opt-in `profiling` | |
+
+## DOM and events
+
+| Feature | Status | Notes |
+| --- | --- | --- |
+| HTML, SVG, MathML, custom elements | Supported | Namespaces handled automatically |
+| Attributes, properties, `style` objects, spreads | Supported | Spreads are reactive |
+| Event handlers | Adapted | Native DOM events, no synthetic layer; unknown event props are rejected |
+| Capture handlers (`onClickCapture`) | Supported | |
+| Controlled forms | Supported | `onChange` timing matches React |
+| Function form `action` | Opt-in `actions` | |
+| `dangerouslySetInnerHTML` | Opt-in `unsafe-html` | |
+| Host and callback refs | Supported | |
+
+## Roots and rendering
+
+| API | Status | Notes |
+| --- | --- | --- |
+| `createRoot(host).render(element)` | Adapted | Use `mountCompiled(Component, host)` or `createRoot(host).mount(Component)` |
+| `hydrateRoot` | Hydrate | Takes a component, not an element |
+| `renderToString`, `renderToStaticMarkup` | Server | |
+| `renderToReadableStream`, `renderToPipeableStream` | Server + `framework` | |
+| `prerender`, `resume` | Server + `framework` | |
+| Error boundaries | Adapted | `errorBoundary()` function plus root callbacks |
+| `flushSync` | Opt-in `concurrent` | |
+| `startTransition` | Opt-in `concurrent` | |
+| Resource hints (`preload`, `preinit`, …) | Opt-in `framework` | |
+| `cache` | Opt-in `framework`, server only | |
+| Server Components and Server Functions | Opt-in `framework` | Explicit manifests; not React Flight |
+
+## Element utilities
+
+| API | Status | Notes |
+| --- | --- | --- |
+| `Children.toArray` | Adapted | Accepts one compiled value |
+| Other `Children` utilities | Rejected | |
+| `cloneElement` | Adapted | Compiled values only |
+| `isValidElement` | Adapted | Tests for a compiled value |
+| `createRef` | Rejected | Use `useRef` or ref-as-prop |
+| `findDOMNode`, legacy roots | Rejected | |
+| React DevTools | Rejected | No Fiber to inspect |
+
+## Testing
+
+| API | Status | Notes |
+| --- | --- | --- |
+| `act` | Supported | From `@vidact/test-support` |
+
+## Third-party packages
+
+A package works with Vidact when it ships React-shaped source inside this subset. The Vite plugin compiles such packages automatically when their `package.json` declares React. Packages that are precompiled against React's runtime, or that depend on rejected APIs, do not work and are reported at build time.

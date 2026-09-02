@@ -52,7 +52,7 @@ describe('Vidact shop', () => {
     const cart = host.querySelector<HTMLElement>('[data-shop-slot="cart-panel"]')!
     const cartLink = host.querySelector<HTMLElement>('[data-shop-slot="cart-link"]')!
     const results = host.querySelector<HTMLElement>('[data-shop-slot="product-results"]')!
-    const candleCard = productCard(host, 'Ember Candle')
+    const candleCard = productCard(host, 'Ember Candle')!
     const bottleCardBeforeSearch = productCard(host, 'Ridge Bottle')!
     const bottleRemovalRules = subtreeMutationRules(bottleCardBeforeSearch, 'childList')
     const productGrid = bottleCardBeforeSearch.parentElement!
@@ -93,7 +93,19 @@ describe('Vidact shop', () => {
       ),
     ).not.toThrow()
 
-    const bottleCard = productCard(host, 'Ridge Bottle')
+    const bottleCard = productCard(host, 'Ridge Bottle')!
+    const bottleQuickAdd = bottleCard.querySelector<HTMLButtonElement>(
+      '[aria-label="Add Ridge Bottle to cart"]',
+    )!
+    const bottleFooterAdd = bottleCard.querySelector<HTMLButtonElement>(
+      '[data-slot="card-footer"] button',
+    )!
+    const candleQuickAdd = candleCard.querySelector<HTMLButtonElement>(
+      '[aria-label="Add Ember Candle to cart"]',
+    )!
+    const candleFooterAdd = candleCard.querySelector<HTMLButtonElement>(
+      '[data-slot="card-footer"] button',
+    )!
     const emptyCart = host.querySelector<HTMLElement>('[data-shop-slot="empty-cart"]')!
     const emptyCartRemovalRules = subtreeMutationRules(emptyCart, 'childList')
     const emptyCheckout = host.querySelector<HTMLButtonElement>(
@@ -109,6 +121,10 @@ describe('Vidact shop', () => {
     )
     expect(host.querySelector('[data-shop-slot="cart-summary"]')?.textContent).toContain('$34.00')
     expect(productCard(host, 'Ridge Bottle')).toBe(bottleCard)
+    expect(bottleCard.querySelector('[aria-label="Add Ridge Bottle to cart"]')).toBe(bottleQuickAdd)
+    expect(bottleCard.querySelector('[data-slot="card-footer"] button')).toBe(bottleFooterAdd)
+    expect(candleCard.querySelector('[aria-label="Add Ember Candle to cart"]')).toBe(candleQuickAdd)
+    expect(candleCard.querySelector('[data-slot="card-footer"] button')).toBe(candleFooterAdd)
     expect(host.querySelector('[data-vidact-example="shop"]')).toBe(shell)
     expect(() =>
       assertMutationEnvelope(
@@ -155,7 +171,9 @@ describe('Vidact shop', () => {
     expect(loadedCategories).toEqual(['travel'])
     expect(categoryButtons[0]?.getAttribute('aria-pressed')).toBe('false')
     expect(categoryButtons[2]?.getAttribute('aria-pressed')).toBe('true')
-    expect(document.activeElement).toBe(categoryButtons[2])
+    expect(document.activeElement).toBe(
+      host.querySelectorAll<HTMLButtonElement>('[data-slot="toggle-group"] button')[2],
+    )
     expect(host.querySelector('[data-vidact-example="shop"]')).toBe(shell)
     expect(host.querySelector('[data-shop-slot="catalog-panel"]')).toBe(catalog)
     expect(host.querySelector('[data-shop-slot="cart-panel"]')).toBe(cart)

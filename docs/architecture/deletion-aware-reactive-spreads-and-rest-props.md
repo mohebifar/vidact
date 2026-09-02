@@ -18,6 +18,9 @@ A rest binding becomes one child-local object state slot. Its initializer reads
 the compiler-owned full props object, excludes every directly destructured
 public key, and resolves each remaining upstream compiled binding. Bridge
 subscriptions replace the object slot whenever any included value changes.
+Before publishing, the bridge shallow-compares the projected enumerable key and
+value set. An upstream spread change that only touches excluded props therefore
+does not invalidate a rest consumer.
 Direct destructured props keep their existing independent slots, addressed by
 public key even when their child-local binding is aliased.
 The same object-slot primitive represents an identifier-form props parameter
@@ -77,6 +80,8 @@ the spread remain ordinary own properties and take precedence.
   spread publication and leaves the previous spread object current.
 - A rest object exposes resolved values, not `CompiledBinding` descriptors, and
   its consumer component does not rerun.
+- An unchanged projected rest object does not publish merely because its
+  upstream component spread published.
 - A component spread can add or delete direct and rest keys without reinvoking
   the child, and deleting a defaulted direct prop reactivates its default.
 - Deleting a top-level object used by nested destructuring re-evaluates its

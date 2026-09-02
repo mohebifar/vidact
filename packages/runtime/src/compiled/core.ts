@@ -32,7 +32,16 @@ import {
 } from '../hydration-bridge.ts'
 import { createIndexedList } from '../indexed-list.ts'
 import { createKeyedList } from '../keyed-list.ts'
-import { isRenderableProtocol, materializeRenderable } from '../renderable-protocol.ts'
+import {
+  canReconcileRenderable,
+  isRenderableProtocol,
+  materializeRenderable,
+  materializeRenderableWithInput,
+  RENDERABLE,
+  renderableIdentity,
+  renderablePropsSnapshot,
+  type RenderableProtocol,
+} from '../renderable-protocol.ts'
 import { scheduleDeferredTask, scheduleTask, type CancelScheduledTask } from '../scheduler.ts'
 import { intersectsSources, isEmptySources, unionSources, type SourceMask } from '../source-mask.ts'
 import { createStateSlot, type StateSlot } from '../state-slot.ts'
@@ -68,6 +77,7 @@ type ContextFrame = {
   readonly context: CompiledContext<unknown>
   readonly input: unknown
   readonly parent: ContextFrame | null
+  readonly owner: Owner | null
 }
 
 type ErrorBoundaryHandler = {
@@ -699,14 +709,73 @@ export function suspense(
   ]
 }
 
+type PortalRenderableProps = {
+  readonly children: CompiledRenderValue | readonly CompiledRenderValue[]
+}
+
+const keyedPortalIdentities = new WeakMap<ParentNode, Map<string | number | bigint, object>>()
+
 export function createPortal(
   children: CompiledRenderValue | readonly CompiledRenderValue[],
   container: ParentNode,
-  _key?: string | number | bigint | null,
-): StructuralBinding {
+  key?: string | number | bigint | null,
+): CompiledRenderValue {
   if (!(container instanceof Node) || typeof container.insertBefore !== 'function') {
     throw new TypeError(DEV ? 'createPortal requires a DOM container' : 'V026')
   }
+  const input: PortalRenderableProps = { children }
+  const capability = { props: input } as RenderableProtocol & {
+    readonly props: PortalRenderableProps
+  }
+  Object.defineProperty(capability, RENDERABLE, {
+    configurable: false,
+    enumerable: false,
+    value: {
+      identity: portalIdentity(container, key),
+      input,
+      reconcile: true,
+      construct: (currentInput: PortalRenderableProps | CompiledBinding<PortalRenderableProps>) =>
+        createPortalStructural(portalChildren(currentInput), container),
+    },
+  })
+  return capability as unknown as CompiledRenderValue
+}
+
+function portalIdentity(
+  container: ParentNode,
+  key: string | number | bigint | null | undefined,
+): object {
+  if (key == null) return container
+  let identities = keyedPortalIdentities.get(container)
+  if (identities === undefined) {
+    identities = new Map()
+    keyedPortalIdentities.set(container, identities)
+  }
+  let identity = identities.get(key)
+  if (identity === undefined) {
+    identity = {}
+    identities.set(key, identity)
+  }
+  return identity
+}
+
+function portalChildren(
+  input: PortalRenderableProps | CompiledBinding<PortalRenderableProps>,
+): CompiledRenderValue | readonly CompiledRenderValue[] {
+  if (!isCompiledBinding(input)) return input.children
+  return binding(
+    input[2],
+    input[3],
+    () => input[1]().children,
+    input[4],
+    input[5],
+  ) as CompiledBinding<CompiledRenderValue>
+}
+
+function createPortalStructural(
+  children: CompiledRenderValue | readonly CompiledRenderValue[],
+  container: ParentNode,
+): StructuralBinding {
   const context = activeContextFrame ?? activeOwner?.[2] ?? null
   const rootIdentity = activeOwner?.[3] ?? activeRootIdentity
   if (rootIdentity === null) {
@@ -807,9 +876,11 @@ let activeProfileName: string | null = null
 let activeErrorOwner: Owner | null = null
 let failedOwner: Owner | null = null
 let transactionDepth = 0
+let disposalCascadeDepth = 0
 let drainingFlushes = false
 let activePublication: PublicationOperation[] | null = null
 const scheduledFlushes = new Set<() => void>()
+const disposalCascadeOwners = new Set<Owner>()
 const scopeOwners = new WeakMap<CompiledScope, Owner>()
 const scopeNamespaces = new WeakMap<CompiledScope, IntrinsicNamespace>()
 const componentRanges = new WeakMap<CompiledComponentResult, ComponentRange>()
@@ -846,6 +917,7 @@ function createScope(operations: SourceOperations): CompiledScope {
   let batchDepth = 0
   let flushing = false
   let pending: SourceMask = 0
+  let cachedUpdaterOrder: number[] | undefined
 
   const flush = (): void => {
     if (owner[0] || flushing) return
@@ -853,6 +925,7 @@ function createScope(operations: SourceOperations): CompiledScope {
       flushing = true
       try {
         let pass = 0
+        const updaterOrder = (cachedUpdaterOrder ??= topologicalUpdaterOrder(updaters, operations))
         while (!operations[0](pending)) {
           pass += 1
           if (pass > MAX_FLUSH_PASSES) {
@@ -862,8 +935,7 @@ function createScope(operations: SourceOperations): CompiledScope {
 
           let active = pending
           pending = 0
-          const updaterCount = updaters.length
-          for (let index = 0; index < updaterCount; index += 1) {
+          for (const index of updaterOrder) {
             const updater = updaters[index]
             if (
               updater === undefined ||
@@ -919,11 +991,13 @@ function createScope(operations: SourceOperations): CompiledScope {
       const reusableIndex = freeUpdaterIndexes.pop()
       const index = reusableIndex ?? updaters.length
       updaters[index] = entry
+      cachedUpdaterOrder = undefined
       if (flushing) addedDuringFlush.add(entry)
       const remove = (): void => {
         if (updaters[index] !== entry) return
         entry[3] = false
         updaters[index] = undefined
+        cachedUpdaterOrder = undefined
         freeUpdaterIndexes.push(index)
       }
       if (activeOwner !== null && activeOwner !== owner) activeOwner[1].add(remove)
@@ -972,6 +1046,108 @@ function createScope(operations: SourceOperations): CompiledScope {
   activeScopeCollector?.add(scope)
   if (activeScopeCollector !== null) activeConstructionOwner = owner
   return scope
+}
+
+function topologicalUpdaterOrder(
+  updaters: ReadonlyArray<CompiledUpdater | undefined>,
+  operations: SourceOperations,
+): number[] {
+  const activeIndexes = updaters.flatMap((updater, index) =>
+    updater === undefined || !updater[3] ? [] : [index],
+  )
+  const edges = new Map<number, number[]>()
+  for (const writerIndex of activeIndexes) {
+    const writes = updaters[writerIndex]![1]
+    if (writes === undefined) continue
+    const readers: number[] = []
+    for (const readerIndex of activeIndexes) {
+      if (writerIndex !== readerIndex && operations[1](writes, updaters[readerIndex]![0])) {
+        readers.push(readerIndex)
+      }
+    }
+    if (readers.length > 0) edges.set(writerIndex, readers)
+  }
+
+  const visitIndexes = new Int32Array(updaters.length).fill(-1)
+  const lowLinks = new Int32Array(updaters.length)
+  const stack: number[] = []
+  const onStack = new Uint8Array(updaters.length)
+  const components: number[][] = []
+  let nextVisitIndex = 0
+
+  const connect = (updaterIndex: number): void => {
+    const visitIndex = nextVisitIndex++
+    visitIndexes[updaterIndex] = visitIndex
+    lowLinks[updaterIndex] = visitIndex
+    stack.push(updaterIndex)
+    onStack[updaterIndex] = 1
+
+    for (const readerIndex of edges.get(updaterIndex) ?? []) {
+      if (visitIndexes[readerIndex] === -1) {
+        connect(readerIndex)
+        lowLinks[updaterIndex] = Math.min(lowLinks[updaterIndex]!, lowLinks[readerIndex]!)
+      } else if (onStack[readerIndex] === 1) {
+        lowLinks[updaterIndex] = Math.min(lowLinks[updaterIndex]!, visitIndexes[readerIndex]!)
+      }
+    }
+
+    if (lowLinks[updaterIndex] !== visitIndexes[updaterIndex]) return
+    const component: number[] = []
+    let member: number
+    do {
+      member = stack.pop()!
+      onStack[member] = 0
+      component.push(member)
+    } while (member !== updaterIndex)
+    component.sort((left, right) => left - right)
+    components.push(component)
+  }
+
+  for (const updaterIndex of activeIndexes) {
+    if (visitIndexes[updaterIndex] === -1) connect(updaterIndex)
+  }
+
+  const componentByUpdater = new Int32Array(updaters.length).fill(-1)
+  const componentEdges = components.map(() => new Set<number>())
+  const componentIndegrees = new Uint32Array(components.length)
+  const componentFirstIndexes = components.map((component) => component[0]!)
+  for (let componentIndex = 0; componentIndex < components.length; componentIndex += 1) {
+    for (const updaterIndex of components[componentIndex]!) {
+      componentByUpdater[updaterIndex] = componentIndex
+    }
+  }
+  for (const [writerIndex, readers] of edges) {
+    const writerComponent = componentByUpdater[writerIndex]!
+    for (const readerIndex of readers) {
+      const readerComponent = componentByUpdater[readerIndex]!
+      if (
+        writerComponent === readerComponent ||
+        componentEdges[writerComponent]!.has(readerComponent)
+      ) {
+        continue
+      }
+      componentEdges[writerComponent]!.add(readerComponent)
+      componentIndegrees[readerComponent] = componentIndegrees[readerComponent]! + 1
+    }
+  }
+
+  const ready = components
+    .map((_, index) => index)
+    .filter((index) => componentIndegrees[index] === 0)
+    .sort((left, right) => componentFirstIndexes[left]! - componentFirstIndexes[right]!)
+  const ordered: number[] = []
+  while (ready.length > 0) {
+    const componentIndex = ready.shift()!
+    ordered.push(...components[componentIndex]!)
+    for (const readerComponent of componentEdges[componentIndex]!) {
+      componentIndegrees[readerComponent] = componentIndegrees[readerComponent]! - 1
+      if (componentIndegrees[readerComponent] === 0) {
+        ready.push(readerComponent)
+        ready.sort((left, right) => componentFirstIndexes[left]! - componentFirstIndexes[right]!)
+      }
+    }
+  }
+  return ordered
 }
 
 export function createCompiledState<T>(
@@ -1046,9 +1222,17 @@ export function runWithCompiledContext<Value, Result>(
   value: Value | CompiledBinding<Value>,
   operation: () => Result,
 ): Result {
+  if (!(CONTEXT in context)) {
+    throw new Error(DEV ? 'runWithCompiledContext received an unknown context' : 'V003')
+  }
   const parent = activeContextFrame ?? activeOwner?.[2] ?? null
   return withContextFrame(
-    { context: context as CompiledContext<unknown>, input: value, parent },
+    {
+      context: context as CompiledContext<unknown>,
+      input: value,
+      parent,
+      owner: activeOwner,
+    },
     operation,
   )
 }
@@ -1065,81 +1249,100 @@ export function createCompiledContext<T>(
 export function createCompiledExternalStore<T>(
   scope: CompiledScope,
   sourceMask: SourceMask,
-  storeSubscribe: (onStoreChange: () => void) => () => void,
-  getSnapshot: () => T,
+  storeSubscribe:
+    | ((onStoreChange: () => void) => () => void)
+    | CompiledBinding<readonly [(onStoreChange: () => void) => () => void, () => T, (() => T)?]>,
+  getSnapshot?: () => T,
   _getServerSnapshot?: () => T,
 ): StateSlot<T> {
   const owner = scopeOwners.get(scope)
   if (owner === undefined) {
     throw new Error(DEV ? 'createCompiledExternalStore received an unknown scope' : 'V003')
   }
-  const slot = createStateSlot(scope[1], sourceMask, getSnapshot(), stateWriteGuard(scope))
-  if (!retainedUiEnabled) {
-    let active = true
-    const checkSnapshot = (): void => {
-      if (!active) return
-      scope[2](() => slot.replace(getSnapshot()))
-    }
-    const unsubscribe = storeSubscribe(() => runOwnerTask(owner, checkSnapshot))
-    if (typeof unsubscribe !== 'function') {
-      active = false
+  const reactiveStore = isCompiledBinding(storeSubscribe) ? storeSubscribe : undefined
+  let currentSubscribe: (onStoreChange: () => void) => () => void
+  let currentGetSnapshot!: () => T
+  const readStore = (): void => {
+    const store = reactiveStore?.[1]()
+    currentSubscribe = store?.[0] ?? (storeSubscribe as (onStoreChange: () => void) => () => void)
+    currentGetSnapshot = store?.[1] ?? (getSnapshot as () => T)
+    if (typeof currentSubscribe !== 'function' || typeof currentGetSnapshot !== 'function') {
       throw new TypeError(
-        DEV ? 'external store subscribe must return an unsubscribe function' : 'V020',
+        DEV ? 'external store requires subscribe and getSnapshot functions' : 'V020',
       )
     }
-    try {
-      checkSnapshot()
-    } catch (error) {
-      active = false
-      unsubscribe()
-      throw error
-    }
-    owner[1].add(() => {
-      active = false
-      unsubscribe()
-    })
-    return slot
   }
+  readStore()
+  const slot = createStateSlot(scope[1], sourceMask, currentGetSnapshot(), stateWriteGuard(scope))
   let active = false
   let unsubscribe = noop
   const checkSnapshot = (): void => {
     if (!active) return
-    scope[2](() => slot.replace(getSnapshot()))
+    const nextSnapshot = currentGetSnapshot()
+    scope[2](() => slot.replace(nextSnapshot))
   }
-  const [activate, disposeResource] = createRetainedResource(
-    owner,
-    () => {
-      active = true
-      try {
-        const remove = storeSubscribe(() => runOwnerTask(owner, checkSnapshot))
-        if (typeof remove !== 'function') {
-          throw new TypeError(
-            DEV ? 'external store subscribe must return an unsubscribe function' : 'V020',
-          )
-        }
-        unsubscribe = remove
-        checkSnapshot()
-      } catch (error) {
-        active = false
-        unsubscribe()
-        unsubscribe = noop
-        throw error
+  const activateStore = (): void => {
+    readStore()
+    active = true
+    try {
+      const remove = currentSubscribe(() => runOwnerTask(owner, checkSnapshot))
+      if (typeof remove !== 'function') {
+        throw new TypeError(
+          DEV ? 'external store subscribe must return an unsubscribe function' : 'V020',
+        )
       }
-    },
-    () => {
+      unsubscribe = remove
+      checkSnapshot()
+    } catch (error) {
       active = false
       unsubscribe()
       unsubscribe = noop
-    },
+      throw error
+    }
+  }
+  const deactivateStore = (): void => {
+    active = false
+    unsubscribe()
+    unsubscribe = noop
+  }
+  const reconnect = (): void => {
+    if (!active) {
+      readStore()
+      return
+    }
+    deactivateStore()
+    activateStore()
+  }
+  const removeStoreUpdater =
+    reactiveStore === undefined ? noop : subscribeBinding(reactiveStore, reconnect)
+
+  if (!retainedUiEnabled) {
+    try {
+      activateStore()
+    } catch (error) {
+      removeStoreUpdater()
+      throw error
+    }
+    owner[1].add(() => {
+      removeStoreUpdater()
+      deactivateStore()
+    })
+    return slot
+  }
+  const [activateResource, disposeResource] = createRetainedResource(
+    owner,
+    activateStore,
+    deactivateStore,
     0,
   )
   try {
-    activate()
+    activateResource()
   } catch (error) {
     disposeResource()
     throw error
   }
   owner[1].add(() => {
+    removeStoreUpdater()
     disposeResource()
   })
   return slot
@@ -1278,6 +1481,18 @@ export function createCompiledRestProp(
       entries().map(([name, value]) => [name, isCompiledBinding(value) ? value[1]() : value]),
     )
   const slot = createStateSlot(scope[1], sourceMask, read(), stateWriteGuard(scope))
+  const publish = (): void => {
+    const previous = slot.get()
+    const next = read()
+    const names = Object.keys(next)
+    if (
+      names.length === Object.keys(previous).length &&
+      names.every((name) => Object.hasOwn(previous, name) && Object.is(previous[name], next[name]))
+    ) {
+      return
+    }
+    slot.replace(next)
+  }
   const componentSpreadSource = (input as Record<PropertyKey, unknown>)[COMPONENT_SPREAD_SOURCE]
   const upstreams = new Set(
     entries()
@@ -1285,9 +1500,7 @@ export function createCompiledRestProp(
       .filter(isCompiledBinding),
   )
   if (isCompiledBinding(componentSpreadSource)) upstreams.add(componentSpreadSource)
-  const removers = [...upstreams].map((upstream) =>
-    subscribeBinding(upstream, () => slot.replace(read())),
-  )
+  const removers = [...upstreams].map((upstream) => subscribeBinding(upstream, publish))
   const owner = scopeOwners.get(scope)
   if (owner === undefined) {
     throw new Error(DEV ? 'createCompiledRestProp received an unknown scope' : 'V003')
@@ -1298,13 +1511,34 @@ export function createCompiledRestProp(
   return slot
 }
 
+/** @internal */
+export function objectRest(
+  input: Record<PropertyKey, unknown>,
+  excludedNames: readonly PropertyKey[],
+): Record<PropertyKey, unknown> {
+  const excluded = new Set(excludedNames)
+  const output: Record<PropertyKey, unknown> = {}
+  for (const key of Reflect.ownKeys(input)) {
+    if (excluded.has(key) || !Object.getOwnPropertyDescriptor(input, key)?.enumerable) continue
+    Object.defineProperty(output, key, {
+      configurable: true,
+      enumerable: true,
+      value: input[key],
+      writable: true,
+    })
+  }
+  return output
+}
+
 function stateWriteGuard(scope: CompiledScope): () => void {
   const owner = scopeOwners.get(scope)
   if (owner === undefined) {
     throw new Error(DEV ? 'compiled state received an unknown scope' : 'V003')
   }
   return () => {
-    if (owner[0]) throw new Error(DEV ? 'cannot update state after disposal' : 'V012')
+    if (owner[0] && !disposalCascadeOwners.has(owner)) {
+      throw new Error(DEV ? 'cannot update state after disposal' : 'V012')
+    }
   }
 }
 
@@ -1320,7 +1554,11 @@ export function binding<T>(
 
 export function compiledEvent<Arguments extends unknown[]>(
   scope: CompiledScope,
-  handler: (...arguments_: Arguments) => void,
+  handler:
+    | ((...arguments_: Arguments) => void)
+    | CompiledBinding<((...arguments_: Arguments) => void) | null | undefined>
+    | null
+    | undefined,
 ): (...arguments_: Arguments) => void {
   const owner = scopeOwners.get(scope)
   if (owner === undefined) {
@@ -1329,7 +1567,13 @@ export function compiledEvent<Arguments extends unknown[]>(
   const errorOwner = activeOwner ?? owner
   return (...arguments_) =>
     runOwnerTask(errorOwner, () =>
-      withOwner(errorOwner, () => scope[2](() => handler(...arguments_))),
+      withOwner(errorOwner, () =>
+        scope[2](() => {
+          const current = isCompiledBinding(handler) ? handler[1]() : handler
+          if (typeof current !== 'function') return
+          return current(...arguments_)
+        }),
+      ),
     )
 }
 
@@ -2395,12 +2639,34 @@ export function mountCompiledRef(element: Element, value: CompiledBinding<unknow
       throw new TypeError(DEV ? 'ref must be null, a callback, or an object with current' : 'V006')
     }
     const previous = current
+    const previousCleanup = cleanup
     let nextCleanup: (() => void) | undefined
+    let previousDetached = false
     let committed = false
     stagePublication([
       () => {
-        nextCleanup = attachRef(next, element)
-        cleanup()
+        try {
+          previousCleanup()
+          previousDetached = true
+        } catch (error) {
+          try {
+            cleanup = attachRef(previous, element)
+          } catch {
+            // Preserve the previous-ref cleanup error.
+          }
+          throw error
+        }
+        try {
+          nextCleanup = attachRef(next, element)
+        } catch (error) {
+          try {
+            cleanup = attachRef(previous, element)
+            previousDetached = false
+          } catch {
+            // Preserve the next-ref attachment error.
+          }
+          throw error
+        }
         cleanup = nextCleanup
         current = next
         committed = true
@@ -2408,6 +2674,10 @@ export function mountCompiledRef(element: Element, value: CompiledBinding<unknow
       () => {
         if (!committed) {
           nextCleanup?.()
+          if (previousDetached) {
+            cleanup = attachRef(previous, element)
+            previousDetached = false
+          }
           return
         }
         cleanup()
@@ -3000,7 +3270,12 @@ function provideContext<T>(
       if (mounted) throw new Error(DEV ? 'context provider is already mounted' : 'V008')
       mounted = true
       withContextFrame(
-        { context: context as CompiledContext<unknown>, input, parent: parentContext },
+        {
+          context: context as CompiledContext<unknown>,
+          input,
+          parent: parentContext,
+          owner: activeOwner,
+        },
         () => insertValue(parent, children, before),
       )
     },
@@ -3078,6 +3353,8 @@ function onCleanup(cleanup: () => void): void {
 function disposeOwner(owner: Owner): void {
   if (owner[0]) return
   owner[0] = true
+  disposalCascadeDepth += 1
+  disposalCascadeOwners.add(owner)
   if (DEV) activeOwnerCount -= 1
   pendingInsertionCommits.delete(owner)
   pendingOwnerCommits.delete(owner)
@@ -3085,13 +3362,18 @@ function disposeOwner(owner: Owner): void {
   owner[1].clear()
   let firstError: unknown
   let hasError = false
-  for (let index = cleanups.length - 1; index >= 0; index -= 1) {
-    try {
-      cleanups[index]?.()
-    } catch (error) {
-      if (!hasError) firstError = error
-      hasError = true
+  try {
+    for (let index = cleanups.length - 1; index >= 0; index -= 1) {
+      try {
+        cleanups[index]?.()
+      } catch (error) {
+        if (!hasError) firstError = error
+        hasError = true
+      }
     }
+  } finally {
+    disposalCascadeDepth -= 1
+    if (disposalCascadeDepth === 0) disposalCascadeOwners.clear()
   }
   if (hasError) throw firstError
 }
@@ -3133,6 +3415,25 @@ function mountCompiledBindingBefore(
   let current: unknown = hydratedTextRange === undefined ? unset : initial
   let currentOwner: Owner | null = null
   let text: Text | null = hydratedTextRange?.[2] ?? null
+  const stableRenderable = (renderable: RenderableProtocol): unknown => {
+    const identity = renderableIdentity(renderable)
+    let previous = renderablePropsSnapshot(renderable)
+    const input = binding(
+      value[2],
+      value[3],
+      () => {
+        const next = value[1]()
+        if (!isRenderableProtocol(next) || !Object.is(renderableIdentity(next), identity)) {
+          return previous
+        }
+        previous = renderablePropsSnapshot(next)
+        return previous
+      },
+      value[4],
+      value[5],
+    )
+    return materializeRenderableWithInput(renderable, input)
+  }
 
   const clear = (): void => {
     const owner = currentOwner
@@ -3143,6 +3444,17 @@ function mountCompiledBindingBefore(
   const update = (): void => {
     const next = value[1]()
     if (current !== unset && Object.is(next, current)) return
+    if (
+      current !== unset &&
+      isRenderableProtocol(current) &&
+      isRenderableProtocol(next) &&
+      canReconcileRenderable(current) &&
+      canReconcileRenderable(next) &&
+      Object.is(renderableIdentity(current), renderableIdentity(next))
+    ) {
+      current = next
+      return
+    }
     const currentParent = rangeParent(start, end, 'binding range')
 
     if (isScalarRenderValue(next)) {
@@ -3171,7 +3483,11 @@ function mountCompiledBindingBefore(
     }
 
     const nextOwner = createOwner()
-    const [fragment, staged] = stageValue(next as RenderValue, nextOwner)
+    const stagedValue =
+      isRenderableProtocol(next) && canReconcileRenderable(next)
+        ? stableRenderable(next)
+        : (next as RenderValue)
+    const [fragment, staged] = stageValue(stagedValue as RenderValue, nextOwner)
     try {
       clear()
     } catch (error) {
@@ -3187,7 +3503,13 @@ function mountCompiledBindingBefore(
   if (hydratedStructuralRange !== undefined) {
     const nextOwner = createOwner()
     const [fragment, staged] = withHydrationInsertion(parent, end, () =>
-      stageRender(() => initial as RenderValue, nextOwner),
+      stageRender(
+        () =>
+          (isRenderableProtocol(initial) && canReconcileRenderable(initial)
+            ? stableRenderable(initial)
+            : initial) as RenderValue,
+        nextOwner,
+      ),
     )
     parent.insertBefore(fragment, end)
     commitPublishedNodes(staged)
@@ -3468,12 +3790,20 @@ function commitNodeRefs(root: Node): void {
       if (pending !== undefined) {
         pendingRefs.delete(node)
         const owner = pending[0] ?? activeOwner
+        commitContextInsertions(owner?.[2] ?? null)
+        commitOwnerInsertions(owner ?? undefined)
         const cleanup = attachRef(pending[1], node)
         if (pending[2] === undefined) owner?.[1].add(cleanup)
         else pending[2](cleanup)
       }
     }
   })
+}
+
+function commitContextInsertions(frame: ContextFrame | null): void {
+  if (frame === null) return
+  commitContextInsertions(frame.parent)
+  commitOwnerInsertions(frame.owner ?? undefined)
 }
 
 function commitNodeResources(root: Node): void {

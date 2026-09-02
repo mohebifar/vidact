@@ -78,7 +78,7 @@ function ShopLayout({ productsPromise, loadProducts }: ShopLayoutProps): JSX.Ele
               alt="A bottle, candle, canvas tote, and travel pouch"
             />
             <div
-              className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#e2bf91]/25 to-[#291f17]/50 md:bg-gradient-to-r md:from-[#332519]/20 md:to-transparent md:to-60%"
+              className="pointer-events-none absolute inset-0 bg-linear-to-b from-[#e2bf91]/25 to-[#291f17]/50 md:bg-gradient-to-r md:from-[#332519]/20 md:to-transparent md:to-60%"
               aria-hidden="true"
             />
             <div className="absolute bottom-8 z-10 w-full p-7 text-white md:relative md:bottom-auto md:w-[min(48%,580px)] md:p-0 md:pt-26 md:pb-20 md:pl-18 md:text-[#33281f]">
@@ -86,7 +86,7 @@ function ShopLayout({ productsPromise, loadProducts }: ShopLayoutProps): JSX.Ele
                 Considered goods for daily rituals
               </p>
               <h1
-                className="max-w-[620px] font-heading text-[clamp(3.625rem,20vw,5.125rem)] leading-[0.9] font-semibold tracking-[-0.08em] md:text-[clamp(4rem,7vw,6.75rem)]"
+                className="max-w-155 font-heading text-[clamp(3.625rem,20vw,5.125rem)] leading-[0.9] font-semibold tracking-[-0.08em] md:text-[clamp(4rem,7vw,6.75rem)]"
                 id="hero-title"
               >
                 Less, but better.

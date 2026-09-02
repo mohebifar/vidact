@@ -1,0 +1,147 @@
+---
+title: Forms
+description: Controlled inputs, uncontrolled inputs, submission, and React 19 form actions.
+group: Learn
+---
+
+Forms in Vidact follow React's conventions: bind `value` and `onChange` for a controlled input, or use `defaultValue` and a ref for an uncontrolled one.
+
+## Controlled inputs
+
+A controlled input's value is owned by state. Vidact keeps the DOM in sync with the state and reverts any edit the state does not accept.
+
+```tsx
+import { useState } from 'react'
+
+export function NameField() {
+  const [name, setName] = useState('')
+
+  return (
+    <label>
+      Name
+      <input value={name} onChange={(event) => setName(event.target.value)} />
+    </label>
+  )
+}
+```
+
+Because `event.target` is typed as `HTMLInputElement`, `event.target.value` needs no cast.
+
+### When onChange fires
+
+React made `onChange` fire on every keystroke, which differs from the DOM's `change` event. Vidact matches React's timing. The table shows which native event backs each control:
+
+| Control | `onChange` fires on |
+| --- | --- |
+| Text input, textarea | native `input` |
+| Checkbox, radio | native `change` |
+| Select, multiple select | native `change` |
+| File input | native `change` |
+
+`onInput` is also available on text controls and receives the same native `input` event. In both handlers you observe the browser-updated value before Vidact restores a controlled value that state rejected.
+
+### Checkboxes, radios, and selects
+
+```tsx
+const [agreed, setAgreed] = useState(false)
+<input type="checkbox" checked={agreed} onChange={(event) => setAgreed(event.target.checked)} />
+
+const [size, setSize] = useState('m')
+<select value={size} onChange={(event) => setSize(event.target.value)}>
+  <option value="s">Small</option>
+  <option value="m">Medium</option>
+  <option value="l">Large</option>
+</select>
+```
+
+Multiple selects accept an array for `value`. File inputs cannot be controlled; read `event.target.files` in the handler.
+
+## Uncontrolled inputs
+
+If you only need the value at submit time, skip the state and read the DOM.
+
+```tsx
+import { useRef } from 'react'
+
+export function Subscribe() {
+  const emailRef = useRef<HTMLInputElement | null>(null)
+
+  const onSubmit = (event: SubmitEvent) => {
+    event.preventDefault()
+    subscribe(emailRef.current?.value ?? '')
+  }
+
+  return (
+    <form onSubmit={onSubmit}>
+      <input ref={emailRef} type="email" defaultValue="" />
+      <button>Subscribe</button>
+    </form>
+  )
+}
+```
+
+## Submitting a form
+
+`onSubmit` receives a native `SubmitEvent`. Call `preventDefault()` to stop the browser navigation and read the fields with `FormData`.
+
+```tsx
+export function Login() {
+  const onSubmit = (event: SubmitEvent) => {
+    event.preventDefault()
+    const data = new FormData(event.target)
+    login(String(data.get('email')), String(data.get('password')))
+  }
+
+  return (
+    <form onSubmit={onSubmit}>
+      <input name="email" type="email" />
+      <input name="password" type="password" />
+      <button>Sign in</button>
+    </form>
+  )
+}
+```
+
+## Form actions
+
+React 19 lets you pass a function as a form's `action`. Vidact supports this, together with `useActionState`, `useOptimistic`, and `useFormStatus`, when the `actions` feature is enabled.
+
+```ts title="vite.config.ts"
+vidact({ features: ['actions'] })
+```
+
+```tsx
+import { useActionState, useOptimistic } from 'react'
+import { useFormStatus } from 'react-dom'
+
+function SubmitButton() {
+  const { pending } = useFormStatus()
+  return <button disabled={pending}>{pending ? 'Saving…' : 'Save'}</button>
+}
+
+export function Comment() {
+  const [comments, submit] = useActionState(
+    async (previous: string[], data: FormData) => [...previous, String(data.get('text'))],
+    [],
+  )
+  const [optimistic, addOptimistic] = useOptimistic(comments)
+
+  return (
+    <form action={submit} onSubmit={() => addOptimistic([...comments, 'Posting…'])}>
+      <ul>
+        {optimistic.map((text) => (
+          <li key={text}>{text}</li>
+        ))}
+      </ul>
+      <input name="text" />
+      <SubmitButton />
+    </form>
+  )
+}
+```
+
+The action runs when the form submits, `useFormStatus` reports its pending state to any descendant, and `useOptimistic` shows a provisional value until the action settles. The form is reset after the action completes, matching React. Ordinary string `action` URLs keep their normal browser behaviour and need no feature flag.
+
+## Validation and accessibility
+
+Nothing about validation is Vidact-specific. Native constraint attributes (`required`, `pattern`, `min`) work, `event.target.validity` is available in handlers, and ARIA attributes are passed through unchanged. Associate labels with `htmlFor` as you would in React.

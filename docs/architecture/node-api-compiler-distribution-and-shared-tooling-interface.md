@@ -42,7 +42,7 @@ releases use `latest`.
 ## Compiler and runtime contract
 
 The Rust protocol module is the only producer of `vidact-analysis-v1`,
-`vidact-compile-v2`, and `vidact-runtime-v1` payloads. The Node-API adapter
+`vidact-compile-v2`, and `vidact-runtime-v2` payloads. The Node-API adapter
 converts those payloads directly into structured JavaScript objects; the
 JavaScript facade validates them before exposing the public types. Only the CLI
 adapters serialize the payloads as JSON text. Vite rejects a compiler/runtime

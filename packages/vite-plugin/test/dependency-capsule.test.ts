@@ -243,6 +243,92 @@ describe('dependency capsules', () => {
     expect(code).not.toContain('useState')
   })
 
+  it('links a directly imported published hook into its consuming source owner', async () => {
+    const fixture = await capsuleFixture()
+    const app = join(fixture.root, 'src', 'main.tsx')
+    await mkdir(dirname(app), { recursive: true })
+    await writeFile(
+      app,
+      `
+        import { useLabel } from 'capsule-hooks'
+        export function App() {
+          const { label, setLabel } = useLabel()
+          return <button onClick={() => setLabel('Linked')}>{label}</button>
+        }
+      `,
+    )
+
+    const result = await build({
+      root: fixture.root,
+      configFile: false,
+      logLevel: 'silent',
+      plugins: [vidact()],
+      build: {
+        write: false,
+        lib: { entry: app, formats: ['es'] },
+        rolldownOptions: {
+          external: (specifier) => specifier.startsWith('@vidact/runtime'),
+        },
+      },
+    })
+    const outputs = Array.isArray(result) ? result : [result]
+    const code = outputs
+      .flatMap((output) => ('output' in output ? output.output : []))
+      .filter((item) => item.type === 'chunk')
+      .map((item) => item.code)
+      .join('\n')
+
+    expect(code).toContain('createCompiledState')
+    expect(code).not.toMatch(/from\s*["']react(?:\/|["'])/)
+    expect(code).not.toContain('useLabel')
+    expect(code).not.toContain('useState')
+  })
+
+  it('maps source-linked dependency failures back to the published hook source', async () => {
+    const fixture = await capsuleFixture()
+    const app = join(fixture.root, 'src', 'main.tsx')
+    await mkdir(dirname(app), { recursive: true })
+    await writeFile(
+      fixture.hook,
+      `import React, { useState } from 'react'
+export class UnsupportedPublishedClass extends React.Component {
+  render() { return React.createElement('span', null, 'unsupported') }
+}
+export function useLabel() {
+  const [label] = useState(React.createElement(UnsupportedPublishedClass, null))
+  return { label }
+}`,
+    )
+    await writeFile(
+      app,
+      `
+        import { useLabel } from 'capsule-hooks'
+        export function App() {
+          const { label } = useLabel()
+          return <output>{label}</output>
+        }
+      `,
+    )
+
+    await expect(
+      build({
+        root: fixture.root,
+        configFile: false,
+        logLevel: 'silent',
+        plugins: [vidact()],
+        build: {
+          write: false,
+          lib: { entry: app, formats: ['es'] },
+          rolldownOptions: {
+            external: (specifier) => specifier.startsWith('@vidact/runtime'),
+          },
+        },
+      }),
+    ).rejects.toThrow(
+      /Cannot compile source-linked React dependencies.*original .*use-label\.mjs:2:\d+.*React class components are unsupported/,
+    )
+  })
+
   it('keeps the qualified module analyzable in the Vite development pipeline', async () => {
     const fixture = await capsuleFixture()
     const app = join(fixture.root, 'src', 'main.tsx')

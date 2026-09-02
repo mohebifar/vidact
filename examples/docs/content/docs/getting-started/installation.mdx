@@ -1,0 +1,76 @@
+---
+title: Installation
+description: The packages Vidact is made of, how they fit together, and how to set up TypeScript, Vite, and editors.
+group: Getting started
+---
+
+Vidact ships as a small set of packages. Most applications only touch three of them directly.
+
+| Package | Role | Install as |
+| --- | --- | --- |
+| `@vidact/runtime` | The code your compiled components call at runtime: DOM helpers, the scheduler, roots, and opt-in features | dependency |
+| `@vidact/vite` | The Vite plugin that compiles `.tsx` files and resolves `react` imports | dev dependency |
+| `@vidact/react-types` | JSX and hook types that describe what Vidact actually does, built on `@types/react` | dev dependency |
+| `@vidact/start` | The full-stack framework: file routes, loaders, SSR, hydration, navigation | dependency (optional) |
+| `@vidact/compiler` | The native compiler and CLI, for tooling authors | dev dependency (optional) |
+
+```shell
+pnpm add @vidact/runtime
+pnpm add -D @vidact/vite @vidact/react-types @types/react typescript vite
+```
+
+> [!NOTE] Keep versions in sync
+>
+> The compiler and runtime share a protocol version. Always upgrade `@vidact/runtime`, `@vidact/vite`, and `@vidact/start` together. Mixing versions fails loudly at startup rather than silently misbehaving.
+
+## Vite
+
+The plugin has no required options. Add it to `plugins` and every `.tsx` file in the project is compiled.
+
+```ts title="vite.config.ts"
+import { vidact } from '@vidact/vite'
+import { defineConfig } from 'vite'
+
+export default defineConfig({
+  plugins: [vidact()],
+})
+```
+
+Two options are worth knowing about early:
+
+- `features` enables opt-in capabilities such as Suspense, transitions, and form actions. Unused features stay out of your bundle. See [Opt-in features](/docs/learn/features).
+- `target` selects `client` (the default), `hydrate`, or `server` output. You only set this by hand when you build server rendering yourself; [Vidact Start](/docs/start/getting-started) configures it for you.
+
+The full option list is in the [@vidact/vite reference](/docs/reference/vite).
+
+## TypeScript
+
+Vidact needs three things from `tsconfig.json`:
+
+```json title="tsconfig.json"
+{
+  "compilerOptions": {
+    "jsx": "preserve",
+    "jsxImportSource": "@vidact/react-types",
+    "types": ["@vidact/react-types", "vite/client"]
+  }
+}
+```
+
+- `"jsx": "preserve"` leaves JSX in place so the Vidact compiler sees it. Do not use `react-jsx`.
+- `jsxImportSource` points JSX element types at `@vidact/react-types`.
+- Listing the package in `types` makes `react` and `react-dom` module declarations available without installing React.
+
+`@vidact/react-types` reuses `@types/react` for HTML attributes, ARIA, `key`, and `ref`, and replaces the parts that differ. Event handlers receive native DOM events, and `event.target` is typed as the element the handler is attached to, so `event.target.value` works in an input handler without a cast. Component children are typed as `VidactNode` rather than `ReactNode`.
+
+## Editors
+
+Because your code is ordinary TSX, any editor with TypeScript support works. There is no Vidact-specific extension to install. ESLint's `react-hooks` rules are worth keeping; Vidact enforces the Rules of Hooks at compile time, but editor feedback is faster.
+
+## Package managers and monorepos
+
+Nothing about Vidact is pnpm-specific. In a monorepo, install `@vidact/vite` and `@vidact/react-types` in each package that contains components, and make sure they resolve to the same version.
+
+## Without Vite
+
+Vite is the supported integration today. If you are building your own tooling, `@vidact/compiler` exposes `compile()` and a CLI that turn a single file into compiled output; see the [@vidact/compiler reference](/docs/reference/compiler). You are responsible for resolving `react` imports to `@vidact/runtime` in that setup.

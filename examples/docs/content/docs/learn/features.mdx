@@ -1,0 +1,109 @@
+---
+title: Opt-in features
+description: Suspense, transitions, form actions, and other capabilities that you enable per project so unused ones never reach your bundle.
+group: Learn
+---
+
+Everything in the Learn section so far is available in every Vidact project with no configuration. A second group of capabilities is opt-in. They are all part of React's API and they all work the way you expect; they are just switched off until you ask for them.
+
+```ts title="vite.config.ts"
+import { vidact } from '@vidact/vite'
+
+export default defineConfig({
+  plugins: [vidact({ features: ['async', 'concurrent'] })],
+})
+```
+
+## Why opt in?
+
+Two reasons. First, size: a Suspense implementation, a transition scheduler, and an action queue each add code to the runtime. If your app never uses them, they should not be in the bundle, and with feature flags they are not. Second, clarity: when a teammate uses `useTransition` in a project that has not enabled `concurrent`, they get a compile error naming the flag, rather than a runtime surprise three months later.
+
+A feature flag is a switch for real capability, not a compatibility mode. Enabling one does not change how the rest of your code compiles.
+
+## The features
+
+| Feature | What it enables |
+| --- | --- |
+| `async` | `Suspense`, `lazy`, and `use(promise)` |
+| `concurrent` | `useTransition`, `startTransition`, `useDeferredValue`, `flushSync` |
+| `actions` | Function-valued form `action`, `useActionState`, `useOptimistic`, `useFormStatus` |
+| `retained-ui` | `Activity` for hiding UI while keeping its state |
+| `css-insertion` | `useInsertionEffect` |
+| `unsafe-html` | `dangerouslySetInnerHTML` |
+| `profiling` | `Profiler`, `useDebugValue`, `captureOwnerStack` |
+| `framework` | Streaming and static server rendering, document metadata, resource hints, `cache`, server components and functions. Enabled automatically by Vidact Start. |
+
+### async
+
+Suspend on data with `use(promise)` and show a fallback with `Suspense`. Code-split components with `lazy`.
+
+```tsx
+import { lazy, Suspense, use } from 'react'
+
+const Chart = lazy(() => import('./Chart.tsx'))
+
+function Report({ dataPromise }: { dataPromise: Promise<Report> }) {
+  const report = use(dataPromise)
+  return <Chart data={report.series} />
+}
+
+export function Dashboard({ dataPromise }: { dataPromise: Promise<Report> }) {
+  return (
+    <Suspense fallback={<p>Loading…</p>}>
+      <Report dataPromise={dataPromise} />
+    </Suspense>
+  )
+}
+```
+
+Reading a context with `use(context)` does not need this feature.
+
+### concurrent
+
+Mark an update as non-urgent so the UI stays responsive while it is applied:
+
+```tsx
+import { useDeferredValue, useState, useTransition } from 'react'
+
+export function Search({ items }: { items: string[] }) {
+  const [query, setQuery] = useState('')
+  const [isPending, startTransition] = useTransition()
+  const deferredQuery = useDeferredValue(query)
+
+  return (
+    <div>
+      <input
+        value={query}
+        onChange={(event) => startTransition(() => setQuery(event.target.value))}
+      />
+      <ul style={{ opacity: isPending ? 0.5 : 1 }}>
+        {items
+          .filter((item) => item.includes(deferredQuery))
+          .map((item) => <li key={item}>{item}</li>)}
+      </ul>
+    </div>
+  )
+}
+```
+
+Vidact implements transitions with an interruptible scheduler rather than emulating them with timers. Without the feature, all updates are synchronous.
+
+### actions
+
+Covered in [Forms](/docs/learn/forms).
+
+### retained-ui
+
+Covered in [Conditional rendering](/docs/learn/conditional-rendering).
+
+### unsafe-html
+
+`dangerouslySetInnerHTML` is what it says. It accepts a string or a `TrustedHTML` value, cannot be combined with children, and is not allowed on void elements, `<textarea>`, SVG, or MathML. Inserting executable `<script>` content is rejected. Sanitize on the way in.
+
+### profiling
+
+`Profiler` reports the updater and effect work Vidact performed rather than React's render durations, since there are no renders. `captureOwnerStack` returns Vidact's owner chain, which is useful in error reporting.
+
+## Checking what a feature costs
+
+Because features map to separate runtime entry points (`@vidact/runtime/async`, `@vidact/runtime/concurrent`, and so on), a bundle analyzer shows exactly what each one contributed. Remove the flag and the module disappears.

@@ -1,0 +1,80 @@
+---
+title: "@vidact/compiler"
+description: The compiler as a library and a command-line tool, for building your own integrations.
+group: Reference
+---
+
+`@vidact/compiler` wraps the native Rust compiler in a Node API. The Vite plugin uses it internally; you only need it directly when writing tooling, such as a plugin for another bundler, a test harness, or an editor integration.
+
+```shell
+pnpm add -D @vidact/compiler
+```
+
+## compile(source, options)
+
+Compiles one module and returns its code, source map, and analysis.
+
+```ts
+import { compile } from '@vidact/compiler'
+
+const result = await compile(source, {
+  filename: '/src/App.tsx',
+  target: 'client',
+  features: ['async'],
+})
+
+result.code       // compiled JavaScript with JSX already lowered
+result.sourceMap  // source map back to the original TSX
+```
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `filename` | `string` | required | Used for diagnostics, module identity, and source maps |
+| `target` | `'client' \| 'hydrate' \| 'server'` | `'client'` | Output kind |
+| `features` | `VidactFeature[]` | `[]` | Enabled feature families |
+
+The result also carries the effective `configuration`, the per-component `analysis`, and the protocol versions the output expects (`protocol` and `runtimeProtocol`).
+
+`compileSync` is the synchronous variant. Prefer the asynchronous form in long-lived tools so native work does not block the event loop.
+
+## analyze(source, options)
+
+Runs the analysis phase only and returns what the compiler learned about each component: its name and span, its reactive `sources` (state, props, and other inputs), the `updaters` it would emit with the sources each one reads and writes, and the control-flow graph it analyzed. Useful for linting and for understanding why a component compiles the way it does.
+
+```ts
+import { analyze } from '@vidact/compiler'
+
+const analysis = await analyze(source, { filename: '/src/App.tsx' })
+for (const component of analysis.components) {
+  console.log(component.name, component.sources.length, component.updaters.length)
+}
+```
+
+`analyzeSync` is the synchronous variant.
+
+## Errors
+
+Both functions throw `VidactCompilerError` on failure. Its message lists every diagnostic as `file:line:column: Code: message`, one per line, where `Code` is one of the codes described in [Troubleshooting](/docs/guides/troubleshooting).
+
+## Command line
+
+The package installs a `vidactc` binary. It reads source on standard input and writes JSON to standard output.
+
+```shell
+vidactc compile --filename src/App.tsx --target client --feature async < src/App.tsx
+vidactc analyze --filename src/App.tsx < src/App.tsx
+```
+
+`--feature` may be repeated. The JSON has the same shape as the result of `compile` or `analyze`.
+
+## What the compiler expects from you
+
+If you integrate the compiler yourself, the Vite plugin's other jobs become yours:
+
+- Resolve `react`, `react-dom`, `react/jsx-runtime`, and `react-dom/server` imports to the `@vidact/runtime` entry point for the target.
+- Compile dependencies that ship React-shaped source, or ensure they are not imported.
+- Keep the compiler and runtime versions aligned.
+
+## Platform support
+
+The compiler is a native binary published for the common Linux, macOS, and Windows targets. Installation picks the right one automatically; there is no build step and no Rust toolchain required.

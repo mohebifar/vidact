@@ -1,0 +1,84 @@
+---
+title: Navigation
+description: Move between routes without a page reload using Link and the client's navigate function.
+group: Vidact Start
+---
+
+Vidact Start renders every route on the server, but once the page has hydrated, moving between routes happens in the browser. The server sends only the new loader data, and the client swaps the route content in place.
+
+## Link
+
+`Link` renders an `<a>` element. On the server it is a normal anchor, so the page works before JavaScript loads. After hydration, a click on it is intercepted and handled as a client navigation.
+
+```tsx
+import { Link } from '@vidact/start'
+
+export function Nav() {
+  return (
+    <nav>
+      <Link href="/">Home</Link>
+      <Link href="/blog">Blog</Link>
+      <Link href="/login" replace>Sign in</Link>
+    </nav>
+  )
+}
+```
+
+`Link` accepts every attribute an `<a>` accepts, plus two of its own:
+
+| Prop | Effect |
+| --- | --- |
+| `replace` | Replace the current history entry instead of pushing a new one |
+| `reloadDocument` | Opt out of client navigation and let the browser load the page |
+
+Clicks that should not be intercepted are left alone automatically: modified clicks (Ctrl, Cmd, Shift, Alt), non-primary buttons, links with a `target` other than `_self`, a `download` attribute, `rel="external"`, or a different origin, and clicks whose default was already prevented.
+
+## Marking the active link
+
+Route components receive `requestUrl`. Compare its pathname to the link target:
+
+```tsx
+export function Nav({ requestUrl }: { requestUrl: string }) {
+  const pathname = new URL(requestUrl).pathname
+  return (
+    <Link aria-current={pathname === '/blog' ? 'page' : undefined} href="/blog">
+      Blog
+    </Link>
+  )
+}
+```
+
+## Programmatic navigation
+
+`hydrateStart` returns a client with a `navigate` method. Keep a reference to it where your code needs it, for example in a module-level store.
+
+```ts title="src/client.ts"
+import { hydrateStart } from '@vidact/start/client'
+import { routeManifest } from 'virtual:vidact-start/routes'
+
+export const client = await hydrateStart({ manifest: routeManifest })
+```
+
+```ts
+await client.navigate('/products/42')
+await client.navigate('/login', { replace: true, scroll: false })
+```
+
+`navigate` resolves to `true` when the navigation completed and `false` when it was cancelled by a newer navigation or the server declined. It accepts a string or a `URL`.
+
+## What a navigation does
+
+1. The client requests the target URL with a header asking for a snapshot rather than a document.
+2. The server runs the matched loaders and responds with serialized loader data.
+3. The client disposes the current route tree and constructs the new one with that data.
+4. Browser history is updated and, unless `scroll: false`, the window scrolls to the top.
+
+Navigations are cancellable: clicking two links quickly discards the first response. Back and forward buttons restore previous entries the same way.
+
+## State across navigations
+
+Because step 3 replaces the whole route tree, including layouts, component state does not survive a navigation. This is the main difference from routers that keep layout instances mounted, and it is a known limitation of the current release. Keep state that must persist, such as a shopping cart or a sidebar's open state, in a module-level store and read it with `useSyncExternalStore`; see [Context and external stores](/docs/learn/context).
+
+## Scroll and focus
+
+By default the page scrolls to the top after a navigation. Pass `scroll: false` to `navigate` when you are updating a filter or a tab and want the viewport to stay put. Focus is not moved automatically; move it yourself in an effect if the new content needs it for accessibility.

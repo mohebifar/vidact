@@ -8,7 +8,7 @@ import {
 
 export const VIDACT_ANALYSIS_PROTOCOL = 'vidact-analysis-v1' as const
 export const VIDACT_COMPILE_PROTOCOL = 'vidact-compile-v2' as const
-export const VIDACT_RUNTIME_PROTOCOL = 'vidact-runtime-v1' as const
+export const VIDACT_RUNTIME_PROTOCOL = 'vidact-runtime-v2' as const
 
 export type VidactTarget = 'client' | 'hydrate' | 'server'
 export type VidactFeature =

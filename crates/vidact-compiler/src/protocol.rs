@@ -12,7 +12,7 @@ use crate::{
 
 pub const ANALYSIS_PROTOCOL: &str = "vidact-analysis-v1";
 pub const COMPILE_PROTOCOL: &str = "vidact-compile-v2";
-pub const RUNTIME_PROTOCOL: &str = "vidact-runtime-v1";
+pub const RUNTIME_PROTOCOL: &str = "vidact-runtime-v2";
 
 pub fn compile_module_json(
     input: ModuleInput<'_>,

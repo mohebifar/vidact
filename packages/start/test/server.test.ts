@@ -20,6 +20,19 @@ function entry(
   return { id, path, parentId, load: async () => ({ Route: definition }) }
 }
 
+function createForeignRealmResponse(body: BodyInit | null, init: ResponseInit): Response {
+  const response = new Response(body, init)
+  return new Proxy(response, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target) as unknown
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+    getPrototypeOf() {
+      return null
+    },
+  })
+}
+
 describe('Vidact Start server', () => {
   it('renders nested file routes with loader data and a hydration snapshot', async () => {
     const manifest = createRouteManifest([
@@ -185,5 +198,99 @@ describe('Vidact Start server', () => {
       loaderData: { 'products/$productId': { productId: 'bottle' } },
     })
     expect(component).not.toHaveBeenCalled()
+  })
+
+  it('uses a cross-realm Response thrown by a loader as the route response', async () => {
+    const component = vi.fn<() => string>(() => 'rendered')
+    const manifest = createRouteManifest([
+      entry(
+        'docs/$',
+        '/docs/*',
+        null,
+        defineFileRoute({
+          loader: () => {
+            throw createForeignRealmResponse('Unknown document', {
+              status: 404,
+              headers: { 'x-docs-miss': '1' },
+            })
+          },
+          component,
+        }),
+      ),
+    ])
+    const handler = createStartHandler({ manifest })
+    const foreignResponse = createForeignRealmResponse(null, { status: 404 })
+
+    expect(foreignResponse).not.toBeInstanceOf(Response)
+    expect(Object.prototype.toString.call(foreignResponse)).toBe('[object Response]')
+
+    const documentResponse = await handler(new Request('https://example.test/docs/missing'))
+    const navigationResponse = await handler(
+      new Request('https://example.test/docs/missing', {
+        headers: { [VIDACT_START_NAVIGATION_HEADER]: '1' },
+      }),
+    )
+    const headResponse = await handler(
+      new Request('https://example.test/docs/missing', { method: 'HEAD' }),
+    )
+
+    expect(documentResponse.status).toBe(404)
+    expect(await documentResponse.text()).toBe('Unknown document')
+    expect(documentResponse.headers.get('x-docs-miss')).toBe('1')
+    expect(navigationResponse.status).toBe(404)
+    expect(headResponse.status).toBe(404)
+    expect(headResponse.headers.get('x-docs-miss')).toBe('1')
+    expect(await headResponse.text()).toBe('')
+    expect(component).not.toHaveBeenCalled()
+  })
+
+  it('does not treat an arbitrary response-shaped loader error as a Response', async () => {
+    const responseLikeError = { arrayBuffer() {}, headers: {}, status: 404 }
+    const manifest = createRouteManifest([
+      entry(
+        'docs/$',
+        '/docs/*',
+        null,
+        defineFileRoute({
+          loader: () => {
+            throw responseLikeError
+          },
+          component: () => 'unreachable',
+        }),
+      ),
+    ])
+
+    await expect(
+      createStartHandler({ manifest })(new Request('https://example.test/docs/missing')),
+    ).rejects.toBe(responseLikeError)
+  })
+
+  it('does not treat an own-tagged response lookalike as a Response', async () => {
+    const taggedError = {
+      [Symbol.toStringTag]: 'Response',
+      arrayBuffer() {},
+      clone() {
+        return this
+      },
+      headers: new Headers(),
+      status: 404,
+    }
+    const manifest = createRouteManifest([
+      entry(
+        'docs/$',
+        '/docs/*',
+        null,
+        defineFileRoute({
+          loader: () => {
+            throw taggedError
+          },
+          component: () => 'unreachable',
+        }),
+      ),
+    ])
+
+    await expect(
+      createStartHandler({ manifest })(new Request('https://example.test/docs/missing')),
+    ).rejects.toBe(taggedError)
   })
 })

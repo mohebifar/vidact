@@ -1,7 +1,12 @@
 import { binding, isCompiledBinding } from './compiled/core.ts'
 import type { CompiledBinding, CompiledRenderValue, CompiledScope } from './compiled/types.ts'
 import { Fragment, h, type DirectComponent } from './direct-dom.ts'
-import { isRenderableProtocol, RENDERABLE } from './renderable-protocol.ts'
+import {
+  installRenderableClone,
+  isRenderableProtocol,
+  RENDERABLE,
+  type RenderableClone,
+} from './renderable-protocol.ts'
 import type { SourceMask } from './source-mask.ts'
 import { unionSources } from './source-mask.ts'
 import { compiledSpread } from './spread.ts'
@@ -13,7 +18,9 @@ type Props = Record<string, unknown>
 export type RenderablePropsInput = Props | CompiledBinding<Props>
 
 type RenderableInternals = {
+  readonly identity: unknown
   readonly input: RenderablePropsInput
+  readonly reconcile: boolean
   readonly construct: (input: RenderablePropsInput) => CompiledRenderValue
 }
 
@@ -25,7 +32,10 @@ export interface CompiledRenderable {
 export function createRenderable(
   input: RenderablePropsInput,
   construct: (input: RenderablePropsInput) => CompiledRenderValue,
+  identity: unknown = construct,
+  reconcile = false,
 ): CompiledRenderable {
+  installRenderableClone(cloneRenderable as RenderableClone)
   readPropsInput(input)
   const capability = {
     props: propsView(input),
@@ -33,7 +43,7 @@ export function createRenderable(
   Object.defineProperty(capability, RENDERABLE, {
     configurable: false,
     enumerable: false,
-    value: { input, construct } satisfies RenderableInternals,
+    value: { identity, input, reconcile, construct } satisfies RenderableInternals,
   })
   return capability
 }
@@ -51,14 +61,21 @@ export function createReactElement(
   if (children.length === 1) input.children = children[0]
   else if (children.length > 1) input.children = children
 
-  return createRenderable(input, (currentInput) => {
-    if (isRenderable(type)) return cloneRenderable(type, currentInput)
-    const resolved = readPropsInput(currentInput)
-    const { children: currentChildren, key: _key, ...currentProps } = resolved
-    return Object.hasOwn(resolved, 'children')
-      ? h(type, currentProps, currentChildren as CompiledRenderValue)
-      : h(type, currentProps)
-  })
+  if (typeof type === 'string') return createIntrinsicRenderable(type, input)
+
+  return createRenderable(
+    input,
+    (currentInput) => {
+      if (isRenderable(type)) return cloneRenderable(type, currentInput)
+      const resolved = readPropsInput(currentInput)
+      const { children: currentChildren, key: _key, ...currentProps } = resolved
+      return Object.hasOwn(resolved, 'children')
+        ? h(type, currentProps, currentChildren as CompiledRenderValue)
+        : h(type, currentProps)
+    },
+    type,
+    false,
+  )
 }
 
 export function renderableToArray(value: unknown): [CompiledRenderable] {
@@ -81,23 +98,46 @@ export function renderableMarker(value: unknown): undefined {
 
 export function cloneRenderable(
   value: unknown,
-  overrides?: RenderablePropsInput,
+  overrides?: RenderablePropsInput | null,
+  childrenOverride?: CompiledRenderValue | CompiledBinding<CompiledRenderValue>,
 ): CompiledRenderValue {
   if (!isRenderable(value)) {
     throw new TypeError(DEV ? 'cloneRenderable requires a compiled renderable capability' : 'V107')
   }
   const internals = value[RENDERABLE]
-  return internals.construct(mergeInputs(internals.input, overrides))
+  let input = mergeInputs(internals.input, overrides)
+  if (arguments.length >= 3) input = mergeInputs(input, childrenInput(childrenOverride))
+  return createRenderable(
+    input,
+    internals.construct,
+    internals.identity,
+    internals.reconcile,
+  ) as unknown as CompiledRenderValue
 }
 
 export function cloneRenderableComponent(props: Record<string, unknown>): CompiledRenderValue {
   const value = isCompiledBinding(props.value) ? props.value[1]() : props.value
-  return cloneRenderable(value, props.overrides as RenderablePropsInput | undefined)
+  if (Object.hasOwn(props, 'childrenOverride')) {
+    return cloneRenderable(
+      value,
+      props.overrides as RenderablePropsInput | null | undefined,
+      props.childrenOverride as CompiledRenderValue | CompiledBinding<CompiledRenderValue>,
+    )
+  }
+  return cloneRenderable(value, props.overrides as RenderablePropsInput | null | undefined)
+}
+
+export function keyedFragmentComponent(props: Record<string, unknown>): CompiledRenderValue {
+  return props.children as CompiledRenderValue
 }
 
 export function renderableProps(input: RenderablePropsInput): Record<string, unknown> {
   const ordinary = projectInput(input, (props) =>
-    Object.fromEntries(Object.entries(props).filter(([name]) => !SPECIAL_PROPS.has(name))),
+    Object.fromEntries(
+      Reflect.ownKeys(props)
+        .filter((name) => typeof name !== 'string' || !SPECIAL_PROPS.has(name))
+        .map((name) => [name, Reflect.get(props, name)]),
+    ),
   )
   return isCompiledBinding(ordinary) ? compiledSpread(ordinary, []) : ordinary
 }
@@ -119,8 +159,30 @@ export function dynamicIntrinsicComponent(props: Record<string, unknown>): Compi
   if (typeof tag !== 'string') {
     throw new TypeError(DEV ? 'dynamic intrinsic construction requires a string tag' : 'V107')
   }
-  const input = props.props as RenderablePropsInput
-  return h(tag, { ...renderableProps(input), ref: renderableRef(input) }, renderableChildren(input))
+  let input = props.props as RenderablePropsInput
+  if (Object.hasOwn(props, 'childrenOverride')) {
+    input = mergeInputs(
+      input,
+      childrenInput(
+        props.childrenOverride as CompiledRenderValue | CompiledBinding<CompiledRenderValue>,
+      ),
+    )
+  }
+  return createIntrinsicRenderable(tag, input) as unknown as CompiledRenderValue
+}
+
+function createIntrinsicRenderable(tag: string, input: RenderablePropsInput): CompiledRenderable {
+  return createRenderable(
+    input,
+    (currentInput) =>
+      h(
+        tag,
+        { ...renderableProps(currentInput), ref: renderableRef(currentInput) },
+        renderableChildren(currentInput),
+      ),
+    tag,
+    true,
+  )
 }
 
 function propsView(input: RenderablePropsInput): Props {
@@ -146,11 +208,18 @@ function propsView(input: RenderablePropsInput): Props {
   )
 }
 
+function childrenInput(
+  value: CompiledRenderValue | CompiledBinding<CompiledRenderValue> | undefined,
+): RenderablePropsInput {
+  if (!isCompiledBinding(value)) return { children: value }
+  return binding(value[2], value[3], () => ({ children: value[1]() }), value[4], value[5])
+}
+
 function mergeInputs(
   authored: RenderablePropsInput,
-  overrides: RenderablePropsInput | undefined,
+  overrides: RenderablePropsInput | null | undefined,
 ): RenderablePropsInput {
-  if (overrides === undefined) return authored
+  if (overrides == null) return authored
   if (!isCompiledBinding(authored) && !isCompiledBinding(overrides)) {
     return { ...readPropsInput(authored), ...readPropsInput(overrides) }
   }

@@ -1,0 +1,167 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mohamad Mohebifar <mohebifar@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 20:46:39 -0700
+Subject: [PATCH] feat(react-compiler): expose reactive mutation analysis
+
+---
+ .../src/react_compiler/entrypoint/pipeline.rs     |  8 ++++++--
+ .../src/react_compiler_hir/environment.rs         |  8 ++++++++
+ .../src/react_compiler_hir/environment_config.rs  |  7 +++++++
+ .../infer_mutation_aliasing_effects.rs            | 15 ++++++++++++++-
+ .../infer_mutation_aliasing_ranges.rs             |  5 ++++-
+ .../src/react_compiler_lowering/build_hir.rs      |  4 +++-
+ 6 files changed, 42 insertions(+), 5 deletions(-)
+
+diff --git a/crates/oxc_react_compiler/src/react_compiler/entrypoint/pipeline.rs b/crates/oxc_react_compiler/src/react_compiler/entrypoint/pipeline.rs
+index 06616e9d1dca12..faf66beb8866c7 100644
+--- a/crates/oxc_react_compiler/src/react_compiler/entrypoint/pipeline.rs
++++ b/crates/oxc_react_compiler/src/react_compiler/entrypoint/pipeline.rs
+@@ -211,7 +211,9 @@ fn run_pipeline<'a>(
+     infer_mutation_aliasing_ranges(&mut hir, &mut env, false)?;
+ 
+     if env.enable_validations() {
+-        validate_locals_not_reassigned_after_render(&hir, &mut env);
++        if !env.config.enable_allow_reactive_mutations {
++            validate_locals_not_reassigned_after_render(&hir, &mut env);
++        }
+ 
+         if env.config.validate_ref_access_during_render {
+             validate_no_ref_access_in_render(&hir, &mut env);
+@@ -240,7 +242,9 @@ fn run_pipeline<'a>(
+             log_errors_as_events(&errors, context);
+         }
+ 
+-        validate_no_freezing_known_mutable_functions(&hir, &mut env);
++        if !env.config.enable_allow_reactive_mutations {
++            validate_no_freezing_known_mutable_functions(&hir, &mut env);
++        }
+     }
+ 
+     infer_reactive_places(&mut hir, &mut env)?;
+diff --git a/crates/oxc_react_compiler/src/react_compiler_hir/environment.rs b/crates/oxc_react_compiler/src/react_compiler_hir/environment.rs
+index d173ab209d1171..cfd83fcdf6a2ea 100644
+--- a/crates/oxc_react_compiler/src/react_compiler_hir/environment.rs
++++ b/crates/oxc_react_compiler/src/react_compiler_hir/environment.rs
+@@ -349,11 +349,19 @@ impl<'a> Environment<'a> {
+             self.errors.push(diagnostic.clone());
+             return Err(diagnostic);
+         }
++        if self.config.enable_allow_reactive_mutations {
++            return Ok(());
++        }
+         self.errors.push(diagnostic);
+         Ok(())
+     }
+ 
+     pub fn record_diagnostic(&mut self, diagnostic: OxcDiagnostic) {
++        if self.config.enable_allow_reactive_mutations
++            && !ErrorCategory::Invariant.matches(&diagnostic)
++        {
++            return;
++        }
+         self.errors.push(diagnostic);
+     }
+ 
+diff --git a/crates/oxc_react_compiler/src/react_compiler_hir/environment_config.rs b/crates/oxc_react_compiler/src/react_compiler_hir/environment_config.rs
+index 4fe72934a0a953..47f9b7f744835b 100644
+--- a/crates/oxc_react_compiler/src/react_compiler_hir/environment_config.rs
++++ b/crates/oxc_react_compiler/src/react_compiler_hir/environment_config.rs
+@@ -111,6 +111,12 @@ pub struct EnvironmentConfig {
+     pub validate_no_void_use_memo: bool,
+     pub enable_allow_set_state_from_refs_in_effects: bool,
+     pub enable_verbose_no_set_state_in_effect: bool,
++    /// Treat writes to otherwise frozen values as ordinary reactive writes.
++    ///
++    /// Integrations that consume the compiler's dependency analysis without
++    /// applying React's memoizing output can use this for library code that
++    /// React would normally leave uncompiled after an immutability bailout.
++    pub enable_allow_reactive_mutations: bool,
+ 
+     // 🌲
+     pub enable_forest: bool,
+@@ -156,6 +162,7 @@ impl Default for EnvironmentConfig {
+             validate_no_void_use_memo: true,
+             enable_allow_set_state_from_refs_in_effects: true,
+             enable_verbose_no_set_state_in_effect: false,
++            enable_allow_reactive_mutations: false,
+             enable_forest: false,
+             custom_macros: None,
+         }
+diff --git a/crates/oxc_react_compiler/src/react_compiler_inference/infer_mutation_aliasing_effects.rs b/crates/oxc_react_compiler/src/react_compiler_inference/infer_mutation_aliasing_effects.rs
+index 40fc6ea3029364..230a7de1d06e3b 100644
+--- a/crates/oxc_react_compiler/src/react_compiler_inference/infer_mutation_aliasing_effects.rs
++++ b/crates/oxc_react_compiler/src/react_compiler_inference/infer_mutation_aliasing_effects.rs
+@@ -1917,7 +1917,10 @@ fn apply_effect<'a>(
+             };
+             let value = mutate_place;
+             let mutation_kind = state.mutate_with_span(variant, value.identifier, env, value.span);
+-            if mutation_kind == MutationResult::Mutate {
++            if mutation_kind == MutationResult::Mutate
++                || (env.config.enable_allow_reactive_mutations
++                    && !matches!(mutation_kind, MutationResult::None | MutationResult::MutateRef))
++            {
+                 effects.push(effect.clone_in(context.alloc));
+             } else if mutation_kind == MutationResult::MutateRef {
+                 // no-op
+@@ -1994,6 +1997,11 @@ fn apply_effect<'a>(
+                 }
+             }
+         }
++        AliasingEffect::MutateFrozen { place, .. } | AliasingEffect::MutateGlobal { place, .. }
++            if env.config.enable_allow_reactive_mutations =>
++        {
++            effects.push(AliasingEffect::Mutate { value: place, reason: None });
++        }
+         AliasingEffect::Impure { .. }
+         | AliasingEffect::Render { .. }
+         | AliasingEffect::MutateFrozen { .. }
+@@ -2350,6 +2358,11 @@ fn compute_signature_for_instruction<'a>(
+             });
+         }
+         InstructionValue::StoreGlobal { name, value: sg_value, .. } => {
++            if env.config.enable_allow_reactive_mutations {
++                effects.push(AliasingEffect::Mutate { value: *sg_value, reason: None });
++                effects.push(AliasingEffect::Assign { from: *sg_value, into: *lvalue });
++                return InstructionSignature { effects };
++            }
+             let variable = format!("`{}`", name);
+             let diagnostic = ErrorCategory::Globals
+                 .diagnostic("Cannot reassign variables declared outside of the component/hook")
+diff --git a/crates/oxc_react_compiler/src/react_compiler_inference/infer_mutation_aliasing_ranges.rs b/crates/oxc_react_compiler/src/react_compiler_inference/infer_mutation_aliasing_ranges.rs
+index 3ac47281ce69dc..301f5e47f3adf9 100644
+--- a/crates/oxc_react_compiler/src/react_compiler_inference/infer_mutation_aliasing_ranges.rs
++++ b/crates/oxc_react_compiler/src/react_compiler_inference/infer_mutation_aliasing_ranges.rs
+@@ -399,6 +399,9 @@ impl AliasingState {
+ // =============================================================================
+ 
+ fn append_function_errors(env: &mut Environment, function_id: FunctionId) {
++    if env.config.enable_allow_reactive_mutations {
++        return;
++    }
+     let func = &env.functions[function_id];
+     // Collect diagnostic ids first to avoid borrow conflict, then resolve + record.
+     let ids: Vec<_> = if let Some(ref effects) = func.aliasing_effects {
+@@ -592,7 +595,7 @@ pub fn infer_mutation_aliasing_ranges<'a>(
+                     AliasingEffect::MutateFrozen { .. }
+                     | AliasingEffect::MutateGlobal { .. }
+                     | AliasingEffect::Impure { .. } => {
+-                        if should_record_errors {
++                        if should_record_errors && !env.config.enable_allow_reactive_mutations {
+                             match effect {
+                                 AliasingEffect::MutateFrozen { error, .. }
+                                 | AliasingEffect::MutateGlobal { error, .. }
+diff --git a/crates/oxc_react_compiler/src/react_compiler_lowering/build_hir.rs b/crates/oxc_react_compiler/src/react_compiler_lowering/build_hir.rs
+index 856bafbbcac45d..a524c6ba2a7fd2 100644
+--- a/crates/oxc_react_compiler/src/react_compiler_lowering/build_hir.rs
++++ b/crates/oxc_react_compiler/src/react_compiler_lowering/build_hir.rs
+@@ -5343,7 +5343,9 @@ fn lower_reorderable_expression<'a>(
+     builder: &mut HirBuilder<'a, '_>,
+     expr: &oxc::Expression<'a>,
+ ) -> Result<Place, OxcDiagnostic> {
+-    if !is_reorderable_expression(builder, expr, true) {
++    if !builder.environment().config.enable_allow_reactive_mutations
++        && !is_reorderable_expression(builder, expr, true)
++    {
+         builder.record_error(
+             ErrorCategory::Todo
+                 .diagnostic(format!(

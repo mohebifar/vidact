@@ -1,0 +1,147 @@
+---
+title: Components and props
+description: Write function components, pass data down with props, and compose them with JSX.
+group: Learn
+---
+
+A Vidact component is a function that returns JSX. If you have written a React function component, you have written a Vidact component.
+
+```tsx
+export function Welcome({ name }: { name: string }) {
+  return <h1>Hello, {name}!</h1>
+}
+```
+
+## Defining components
+
+Components can be function declarations, arrow functions, or function expressions, and they can be named exports, default exports, or module-local. The compiler identifies a component by how it is used, not by its name, but the React convention of capitalized names still applies to JSX: `<welcome />` is an HTML element, `<Welcome />` is your component.
+
+```tsx
+export function Card(props: CardProps) { /* ... */ }
+
+export const Card = (props: CardProps) => { /* ... */ }
+
+export default function (props: CardProps) { /* ... */ }
+```
+
+Because the compiler needs to see the component's body, a component must be defined in a file Vidact compiles. Components from packages work when the package ships source that Vidact can compile; see [dependency compilation](/docs/reference/vite) for the details.
+
+## Props
+
+Props are the first argument to the component. Destructure them in the parameter list or read them from the object; both are fine.
+
+```tsx
+type ButtonProps = {
+  label: string
+  disabled?: boolean
+  onPress: () => void
+}
+
+export function Button({ label, disabled, onPress }: ButtonProps) {
+  return (
+    <button disabled={disabled} onClick={onPress}>
+      {label}
+    </button>
+  )
+}
+```
+
+When the parent passes a new value for `label`, Vidact updates the button's text in place. The parent does not rebuild `Button`, and `Button` does not run again. Props are reactive inputs, just like state.
+
+> [!NOTE] Two things to avoid in props
+>
+> Do not reassign a prop or mutate a prop object inside the component body; the compiler rejects both. And prefer `name ?? 'World'` in the body over a destructuring default like `{ name = 'World' }`, which is not tracked reactively yet.
+
+### Children
+
+`children` is an ordinary prop. Type it as `VidactNode`, which is Vidact's equivalent of `ReactNode`.
+
+```tsx
+import type { VidactNode } from '@vidact/react-types'
+
+export function Panel({ title, children }: { title: string; children: VidactNode }) {
+  return (
+    <section>
+      <h2>{title}</h2>
+      {children}
+    </section>
+  )
+}
+
+<Panel title="Settings">
+  <p>Nothing to configure yet.</p>
+</Panel>
+```
+
+You can render `children` where you like, but you cannot inspect or transform it. `React.Children.map`, `cloneElement` over arbitrary children, and similar element-tree manipulation are not available because there is no element tree. If a component needs to decorate what it wraps, accept a render function or explicit props instead.
+
+### Spreading props
+
+Rest and spread work on both elements and components, and they are reactive. A key that disappears from the spread object is removed from the element.
+
+```tsx
+export function Input({ label, ...inputProps }: InputProps) {
+  return (
+    <label>
+      {label}
+      <input {...inputProps} />
+    </label>
+  )
+}
+```
+
+## Refs as props
+
+Vidact follows React 19: `ref` is a regular prop. Forward it like any other value; there is no need for `forwardRef`.
+
+```tsx
+export function TextField({ ref, ...props }: TextFieldProps) {
+  return <input ref={ref} {...props} />
+}
+```
+
+`forwardRef` is accepted as a migration aid for the simple inline case, but new code should use ref-as-prop. [Refs](/docs/learn/refs) covers this in more depth.
+
+## Composition
+
+Components compose the same way they do in React. Small components with clear props are still the right default; the compiler handles the boundaries between them without extra cost. A child component is constructed once when its parent mounts it, and its DOM is disposed when the parent removes it.
+
+```tsx
+export function App() {
+  return (
+    <Layout>
+      <Header />
+      <ProductList category="shoes" />
+    </Layout>
+  )
+}
+```
+
+## Custom hooks
+
+A custom hook is a function whose name starts with `use` and that calls other hooks. Vidact supports custom hooks defined in the same module as the component that calls them. The compiler expands the hook into the component at build time, so state and effects inside the hook belong to the component and are cleaned up with it.
+
+```tsx
+import { useEffect, useState } from 'react'
+
+function useWindowWidth() {
+  const [width, setWidth] = useState(window.innerWidth)
+  useEffect(() => {
+    const update = () => setWidth(window.innerWidth)
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
+  return width
+}
+
+export function Viewport() {
+  const width = useWindowWidth()
+  return <p>{width}px wide</p>
+}
+```
+
+The Rules of Hooks apply: call hooks unconditionally, at the top level of a component or another hook. The compiler checks this and reports violations.
+
+## Fragments and multiple roots
+
+Use `<>...</>` or `<Fragment>` to return several siblings. A component may also return a string, a number, `null`, or an array. Vidact tracks the range of nodes a component owns so it can replace or remove them as a unit.

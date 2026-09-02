@@ -34,9 +34,22 @@ custom-hook call cannot hide invalid ordering.
 Identifier and primitive-literal arguments are substituted into the expanded
 body. Identifier substitution preserves the caller's semantic source identity,
 which lets effects and derivations subscribe directly to reactive props or
-state without an intermediate runtime hook dispatcher. Value-producing hook
-returns lower through one hidden result binding followed by ordinary derived
-bindings for identifier, array, object, and nested destructuring.
+state without an intermediate runtime hook dispatcher. A final identifier rest
+parameter lowers to one generated `const` array containing the remaining direct,
+non-spread call arguments in source order. Value-producing hook returns lower
+through one hidden result binding followed by ordinary derived bindings for
+identifier, array, object, and nested destructuring.
+
+When that generated rest array is used as a React hook dependency list, the
+compiler reconstructs an inline array from its elements and omits write-free
+module bindings and primitive literals that cannot change. Ordinary references
+still observe the single generated array. Dependency-source compilation also
+accepts the Radix composed-ref factory shape: a namespace `useCallback` value
+created by calling a write-free top-level function whose entire body returns a
+function. It normalizes that case to memoized factory evaluation, and replaces a
+spread of the generated rest array with the same statically known elements, so
+reactive sources are read when the memo updates rather than from a stale array.
+Arbitrary callback-producing expressions remain unsupported.
 
 Every invocation receives unique generated names. Generated binding spans are
 also normalized to distinct valid source offsets before semantic analysis so
@@ -48,8 +61,8 @@ The initial cross-module boundary remains explicit. Exported custom hooks are
 diagnosed until dependency-source compilation supplies a versioned hook ABI;
 silently leaving their React primitives for runtime execution would produce
 stale values in construct-once components. Current expansion also requires
-identifier parameters, direct top-level calls, side-effect-free supported
-arguments, and one final top-level return.
+identifier parameters (including any final rest binding), direct top-level
+calls, non-spread arguments, and one final top-level return.
 
 ## Invariants
 
@@ -58,6 +71,10 @@ arguments, and one final top-level return.
   owner.
 - Repeated and nested invocations have distinct state and lexical bindings.
 - Reactive identifier arguments retain their caller source dependencies.
+- A supported rest binding evaluates every remaining call argument once, from
+  left to right, and ordinary uses observe one array identity.
+- Rest-derived memo dependencies expose their individual reactive sources and
+  never capture a construct-time array snapshot.
 - Cleanup runs on dependency change, conditional removal, keyed removal, root
   disposal, and boundary-driven abandonment exactly as if the primitives were
   written directly in the component.
@@ -101,5 +118,8 @@ longer use literal body expansion.
 - `tests/browser/corpus/apps/custom-hooks/CustomHooksApp.browser.test.ts` proves
   reactive arguments, state and memo updates, mutation envelopes, cleanup on
   rerun, conditional removal, remount, and root disposal.
+- `tests/browser/corpus/apps/composed-refs/ComposedRefsApp.browser.test.ts`
+  proves rest-expanded composed refs detach and attach in order while retaining
+  the same host node with an empty mutation envelope.
 - `cargo test -p vidact-compiler`
 - `pnpm --filter @vidact/browser-corpus test`

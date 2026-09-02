@@ -13,8 +13,8 @@ function readSpreadValue(value: unknown): Props {
       DEV ? 'reactive component spread value must be an object or nullish' : 'V106',
     )
   }
-  if (Object.hasOwn(value, 'key') || Object.hasOwn(value, 'children')) {
-    throw new TypeError(DEV ? 'reactive component spreads cannot supply key or children' : 'V106')
+  if (Object.hasOwn(value, 'key')) {
+    throw new TypeError(DEV ? 'reactive component spreads cannot supply key' : 'V106')
   }
   return value as Props
 }

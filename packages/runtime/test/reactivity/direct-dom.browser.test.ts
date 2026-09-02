@@ -22,17 +22,22 @@ describe('direct DOM construction', () => {
     )
 
     const result = jsx(component as never, { className: 'override', children: 'Save' })
+    const host = h('main', null, result as never)
 
-    expect((result as HTMLButtonElement).outerHTML).toBe('<button class="override">Save</button>')
+    expect(isRenderable(result)).toBe(true)
+    expect((host as HTMLElement).innerHTML).toBe('<button class="override">Save</button>')
   })
 
-  it('supports residual classic element factories without materializing an element tree', () => {
+  it('keeps residual classic element factories opaque until insertion', () => {
     const fromProps = createElement('button', { type: 'button', children: 'Save' })
     const fromArguments = createElement('a', { href: '/shop', children: 'ignored' }, 'Shop')
+    const host = h('main', null, fromProps as never, fromArguments as never)
 
-    expect(fromProps).toBeInstanceOf(HTMLButtonElement)
-    expect((fromProps as HTMLButtonElement).outerHTML).toBe('<button type="button">Save</button>')
-    expect((fromArguments as HTMLAnchorElement).outerHTML).toBe('<a href="/shop">Shop</a>')
+    expect(isRenderable(fromProps)).toBe(true)
+    expect(isRenderable(fromArguments)).toBe(true)
+    expect((host as HTMLElement).innerHTML).toBe(
+      '<button type="button">Save</button><a href="/shop">Shop</a>',
+    )
   })
 
   it('defers React facade element factories as renderable values', () => {

@@ -2,10 +2,21 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use oxc_allocator::{Allocator, CloneIn, GetAllocator, TakeIn};
 use oxc_ast::{ast::*, builder::AstBuilder};
-use oxc_ast_visit::{Visit, VisitMut, walk::walk_call_expression, walk_mut::walk_expression};
+use oxc_ast_visit::{
+    Visit, VisitMut,
+    walk::{
+        walk_call_expression, walk_computed_member_expression, walk_method_definition,
+        walk_static_member_expression,
+    },
+    walk_mut::{walk_class_body, walk_expression, walk_if_statement},
+};
 use oxc_semantic::Scoping;
 use oxc_span::{GetSpan, SPAN, Span};
-use oxc_syntax::{operator::AssignmentOperator, reference::ReferenceId, symbol::SymbolId};
+use oxc_syntax::{
+    operator::{AssignmentOperator, BinaryOperator},
+    reference::ReferenceId,
+    symbol::SymbolId,
+};
 
 use crate::{
     Diagnostic, DiagnosticCode, SourceSpan,
@@ -15,15 +26,290 @@ use crate::{
 const GENERATED_PREFIX: &str = "__vidactHook";
 const MAX_EXPANSION_PASSES: usize = 100;
 
+pub(crate) fn normalize_dependency_class_hook_methods<'a>(
+    allocator: &'a Allocator,
+    program: &mut Program<'a>,
+) {
+    let mut collector = ClassHookMethodCollector {
+        allocator,
+        methods: BTreeMap::new(),
+        duplicates: BTreeSet::new(),
+    };
+    collector.visit_program(program);
+    collector
+        .methods
+        .retain(|name, _| !collector.duplicates.contains(name));
+    if collector.methods.is_empty() {
+        return;
+    }
+
+    let synthetic_names = collector
+        .methods
+        .keys()
+        .enumerate()
+        .map(|(ordinal, name)| (name.clone(), format!("useVidactClassMethod{ordinal}")))
+        .collect::<BTreeMap<_, _>>();
+    let mut rewriter = ClassHookCallRewriter {
+        allocator,
+        synthetic_names: &synthetic_names,
+        rewritten: BTreeSet::new(),
+    };
+    rewriter.visit_program(program);
+    if rewriter.rewritten.is_empty() {
+        return;
+    }
+
+    let mut remaining = ClassHookMemberUseCollector {
+        candidates: &rewriter.rewritten,
+        names: BTreeSet::new(),
+    };
+    remaining.visit_program(program);
+    let removable = rewriter
+        .rewritten
+        .difference(&remaining.names)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if removable.is_empty() {
+        return;
+    }
+
+    ClassHookMethodRemover { names: &removable }.visit_program(program);
+
+    for name in removable {
+        let Some(mut function) = collector.methods.remove(&name) else {
+            continue;
+        };
+        let ast = AstBuilder::new(allocator);
+        let synthetic_name = synthetic_names
+            .get(&name)
+            .expect("each class hook method receives a synthetic name");
+        let receiver_name = allocator.alloc_str(&format!("__vidactClassReceiver{name}"));
+        function.r#type = FunctionType::FunctionDeclaration;
+        function.id = Some(BindingIdentifier::new(
+            SPAN,
+            allocator.alloc_str(synthetic_name),
+            &ast,
+        ));
+        function.params.items.insert(
+            0,
+            FormalParameter::new(
+                SPAN,
+                [],
+                BindingPattern::new_binding_identifier(SPAN, receiver_name, &ast),
+                None,
+                None,
+                false,
+                None,
+                false,
+                false,
+                &ast,
+            ),
+        );
+        if let Some(body) = &mut function.body {
+            ThisExpressionRewriter {
+                allocator,
+                receiver_name,
+            }
+            .visit_function_body(body);
+        }
+        program.body.push(Statement::FunctionDeclaration(function));
+    }
+}
+
+struct ClassHookMethodCollector<'a> {
+    allocator: &'a Allocator,
+    methods: BTreeMap<String, oxc_allocator::Box<'a, Function<'a>>>,
+    duplicates: BTreeSet<String>,
+}
+
+impl<'a> Visit<'a> for ClassHookMethodCollector<'a> {
+    fn visit_method_definition(&mut self, method: &MethodDefinition<'a>) {
+        let Some(name) = method.key.static_name().map(|name| name.to_string()) else {
+            walk_method_definition(self, method);
+            return;
+        };
+        if method.decorators.is_empty()
+            && method.kind == MethodDefinitionKind::Method
+            && is_hook_name(&name)
+            && method.value.body.is_some()
+        {
+            let mut finder = SyntacticHookCallFinder { found: false };
+            if let Some(body) = &method.value.body {
+                finder.visit_function_body(body);
+            }
+            if finder.found {
+                if self.methods.contains_key(&name) {
+                    self.duplicates.insert(name);
+                } else {
+                    self.methods
+                        .insert(name, method.value.clone_in(self.allocator));
+                }
+            }
+        }
+        walk_method_definition(self, method);
+    }
+}
+
+struct SyntacticHookCallFinder {
+    found: bool,
+}
+
+impl<'a> Visit<'a> for SyntacticHookCallFinder {
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if self.found {
+            return;
+        }
+        self.found = match call.callee.without_parentheses() {
+            Expression::Identifier(identifier) => is_hook_name(identifier.name.as_str()),
+            expression => expression
+                .get_member_expr()
+                .and_then(MemberExpression::static_property_name)
+                .is_some_and(is_hook_name),
+        };
+        if !self.found {
+            walk_call_expression(self, call);
+        }
+    }
+}
+
+struct ClassHookCallRewriter<'a, 'r> {
+    allocator: &'a Allocator,
+    synthetic_names: &'r BTreeMap<String, String>,
+    rewritten: BTreeSet<String>,
+}
+
+impl<'a> VisitMut<'a> for ClassHookCallRewriter<'a, '_> {
+    fn visit_call_expression(&mut self, call: &mut CallExpression<'a>) {
+        let candidate = match call.callee.without_parentheses() {
+            Expression::StaticMemberExpression(member) => Some((
+                member.property.name.to_string(),
+                member.object.clone_in(self.allocator),
+            )),
+            Expression::ComputedMemberExpression(member) => member
+                .static_property_name()
+                .map(|name| (name.to_string(), member.object.clone_in(self.allocator))),
+            _ => None,
+        };
+        let Some((name, receiver)) = candidate else {
+            oxc_ast_visit::walk_mut::walk_call_expression(self, call);
+            return;
+        };
+        let Some(synthetic_name) = self.synthetic_names.get(&name) else {
+            oxc_ast_visit::walk_mut::walk_call_expression(self, call);
+            return;
+        };
+        if is_react_namespace_expression(&receiver) {
+            oxc_ast_visit::walk_mut::walk_call_expression(self, call);
+            return;
+        }
+
+        call.arguments.insert(0, Argument::from(receiver));
+        call.callee = Expression::new_identifier(
+            SPAN,
+            self.allocator.alloc_str(synthetic_name),
+            &AstBuilder::new(self.allocator),
+        );
+        self.rewritten.insert(name);
+        oxc_ast_visit::walk_mut::walk_call_expression(self, call);
+    }
+}
+
+fn is_react_namespace_expression(expression: &Expression<'_>) -> bool {
+    expression
+        .get_identifier_reference()
+        .is_some_and(|identifier| {
+            let name = identifier.name.as_str();
+            name.ends_with("React")
+                || name.strip_prefix("React").is_some_and(|suffix| {
+                    suffix.is_empty()
+                        || suffix.strip_prefix('$').is_some_and(|ordinal| {
+                            ordinal.chars().all(|character| character.is_ascii_digit())
+                        })
+                })
+        })
+}
+
+struct ClassHookMemberUseCollector<'r> {
+    candidates: &'r BTreeSet<String>,
+    names: BTreeSet<String>,
+}
+
+impl<'a> Visit<'a> for ClassHookMemberUseCollector<'_> {
+    fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
+        let name = member.property.name.as_str();
+        if self.candidates.contains(name) && !is_react_namespace_expression(&member.object) {
+            self.names.insert(name.to_string());
+        }
+        walk_static_member_expression(self, member);
+    }
+
+    fn visit_computed_member_expression(&mut self, member: &ComputedMemberExpression<'a>) {
+        if let Some(name) = member.static_property_name()
+            && self.candidates.contains(name.as_str())
+            && !is_react_namespace_expression(&member.object)
+        {
+            self.names.insert(name.to_string());
+        }
+        walk_computed_member_expression(self, member);
+    }
+}
+
+struct ClassHookMethodRemover<'r> {
+    names: &'r BTreeSet<String>,
+}
+
+impl<'a> VisitMut<'a> for ClassHookMethodRemover<'_> {
+    fn visit_class_body(&mut self, body: &mut ClassBody<'a>) {
+        body.body.retain(|element| {
+            let ClassElement::MethodDefinition(method) = element else {
+                return true;
+            };
+            method
+                .key
+                .static_name()
+                .is_none_or(|name| !self.names.contains(name.as_ref()))
+        });
+        walk_class_body(self, body);
+    }
+}
+
+struct ThisExpressionRewriter<'a> {
+    allocator: &'a Allocator,
+    receiver_name: &'a str,
+}
+
+impl<'a> VisitMut<'a> for ThisExpressionRewriter<'a> {
+    fn visit_expression(&mut self, expression: &mut Expression<'a>) {
+        if matches!(expression, Expression::ThisExpression(_)) {
+            *expression = Expression::new_identifier(
+                SPAN,
+                self.receiver_name,
+                &AstBuilder::new(self.allocator),
+            );
+            return;
+        }
+        walk_expression(self, expression);
+    }
+
+    fn visit_function(
+        &mut self,
+        _function: &mut Function<'a>,
+        _flags: oxc_syntax::scope::ScopeFlags,
+    ) {
+    }
+}
+
 pub(crate) struct CustomHookPlan<'a> {
     allocator: &'a Allocator,
     hooks: BTreeMap<SymbolId, HookTemplate<'a>>,
     references: BTreeMap<ReferenceId, SymbolId>,
+    dead_class_hook_methods: BTreeSet<u32>,
 }
 
 struct HookTemplate<'a> {
     name: String,
     params: Vec<HookParameter<'a>>,
+    rest: Option<BindingPattern<'a>>,
     statements: Vec<Statement<'a>>,
     exported: bool,
     span: Span,
@@ -44,6 +330,7 @@ pub(crate) fn plan_local_custom_hooks<'a>(
     allocator: &'a Allocator,
     program: &Program<'a>,
     scoping: &Scoping,
+    prune_dead_class_hook_methods: bool,
 ) -> Result<Option<CustomHookPlan<'a>>, Diagnostic> {
     let mut references = BTreeMap::new();
     let mut reference_collector = ReferenceCollector {
@@ -54,7 +341,7 @@ pub(crate) fn plan_local_custom_hooks<'a>(
     reference_collector.visit_program(program);
     let generated_conflict = reference_collector.generated_conflict;
 
-    let candidates = collect_candidates(allocator, program)?;
+    let candidates = collect_candidates(allocator, program, scoping)?;
     if candidates.is_empty() {
         return Ok(None);
     }
@@ -101,6 +388,11 @@ pub(crate) fn plan_local_custom_hooks<'a>(
         ));
     }
 
+    let dead_class_hook_methods = if prune_dead_class_hook_methods {
+        collect_dead_class_hook_methods(program, &references, &active)
+    } else {
+        BTreeSet::new()
+    };
     let hooks = candidates
         .into_iter()
         .filter(|(symbol, _)| active.contains(symbol))
@@ -119,6 +411,7 @@ pub(crate) fn plan_local_custom_hooks<'a>(
         allocator,
         hooks,
         references,
+        dead_class_hook_methods,
     }))
 }
 
@@ -128,6 +421,10 @@ impl CustomHookPlan<'_> {
         Self: 'a,
     {
         let ast = AstBuilder::new(self.allocator);
+        DeadClassHookMethodRemover {
+            starts: &self.dead_class_hook_methods,
+        }
+        .visit_program(program);
         let mut invocation = 0_u32;
         for statement in &mut program.body {
             expand_top_level_components(
@@ -145,12 +442,14 @@ impl CustomHookPlan<'_> {
         let mut residual = ResidualHookReference {
             hooks: &self.hooks,
             references: &self.references,
-            span: None,
+            hook: None,
         };
         residual.visit_program(program);
-        if let Some(span) = residual.span {
+        if let Some((name, span)) = residual.hook {
             return Err(unsupported_at(
-                "custom hooks must be called directly and unconditionally in a component or custom-hook body",
+                format!(
+                    "custom hook {name} must be called directly and unconditionally in a component or custom-hook body"
+                ),
                 span,
             ));
         }
@@ -312,6 +611,7 @@ fn normalize_expanded_binding_spans(program: &mut Program<'_>) -> Result<(), Dia
 fn collect_candidates<'a>(
     allocator: &'a Allocator,
     program: &Program<'a>,
+    scoping: &Scoping,
 ) -> Result<BTreeMap<SymbolId, HookTemplate<'a>>, Diagnostic> {
     let mut candidates = BTreeMap::new();
     for statement in &program.body {
@@ -332,6 +632,77 @@ fn collect_candidates<'a>(
                 _ => {}
             },
             _ => {}
+        }
+    }
+    loop {
+        let previous = candidates.len();
+        for statement in &program.body {
+            let declaration = match statement {
+                Statement::VariableDeclaration(declaration) => Some((declaration.as_ref(), false)),
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    Declaration::VariableDeclaration(declaration) => {
+                        Some((declaration.as_ref(), true))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
+            let Some((declaration, exported)) = declaration else {
+                continue;
+            };
+            for declarator in &declaration.declarations {
+                let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+                    continue;
+                };
+                if !is_hook_name(identifier.name.as_str()) {
+                    continue;
+                }
+                let Some(symbol) = identifier.symbol_id.get() else {
+                    continue;
+                };
+                if candidates.contains_key(&symbol) {
+                    continue;
+                }
+                let Some(target) = declarator
+                    .init
+                    .as_ref()
+                    .and_then(Expression::get_identifier_reference)
+                    .and_then(|reference| reference_symbol(reference, scoping))
+                    .and_then(|target| candidates.get(&target))
+                else {
+                    continue;
+                };
+                candidates.insert(
+                    symbol,
+                    HookTemplate {
+                        name: identifier.name.to_string(),
+                        params: target
+                            .params
+                            .iter()
+                            .map(|parameter| HookParameter {
+                                pattern: parameter.pattern.clone_in_with_semantic_ids(allocator),
+                                default: parameter.default.as_ref().map(|expression| {
+                                    expression.clone_in_with_semantic_ids(allocator)
+                                }),
+                            })
+                            .collect(),
+                        rest: target
+                            .rest
+                            .as_ref()
+                            .map(|pattern| pattern.clone_in_with_semantic_ids(allocator)),
+                        statements: target
+                            .statements
+                            .iter()
+                            .map(|statement| statement.clone_in_with_semantic_ids(allocator))
+                            .collect(),
+                        exported,
+                        span: declarator.span,
+                    },
+                );
+            }
+        }
+        if candidates.len() == previous {
+            break;
         }
     }
     Ok(candidates)
@@ -429,12 +800,6 @@ fn hook_template<'a>(
     exported: bool,
     span: Span,
 ) -> Result<HookTemplate<'a>, Diagnostic> {
-    if params.rest.is_some() {
-        return Err(unsupported_at(
-            "custom hook rest parameters are unsupported",
-            params.span,
-        ));
-    }
     let mut parameters = Vec::with_capacity(params.items.len());
     for parameter in &params.items {
         parameters.push(HookParameter {
@@ -445,9 +810,23 @@ fn hook_template<'a>(
                 .map(|expression| expression.as_ref().clone_in_with_semantic_ids(allocator)),
         });
     }
+    let rest = params
+        .rest
+        .as_ref()
+        .map(|rest| {
+            if !matches!(rest.rest.argument, BindingPattern::BindingIdentifier(_)) {
+                return Err(unsupported_at(
+                    "custom hook rest parameters must bind to an identifier",
+                    rest.span,
+                ));
+            }
+            Ok(rest.rest.argument.clone_in_with_semantic_ids(allocator))
+        })
+        .transpose()?;
     Ok(HookTemplate {
         name: name.to_string(),
         params: parameters,
+        rest,
         statements: body
             .statements
             .iter()
@@ -465,10 +844,20 @@ fn expand_body<'a>(
     references: &BTreeMap<ReferenceId, SymbolId>,
     invocation: &mut u32,
 ) -> Result<(), Diagnostic> {
+    expand_statement_list(ast, &mut body.statements, hooks, references, invocation)
+}
+
+fn expand_statement_list<'a>(
+    ast: &AstBuilder<'a>,
+    statements: &mut oxc_allocator::Vec<'a, Statement<'a>>,
+    hooks: &BTreeMap<SymbolId, HookTemplate<'a>>,
+    references: &BTreeMap<ReferenceId, SymbolId>,
+    invocation: &mut u32,
+) -> Result<(), Diagnostic> {
     for pass in 0..MAX_EXPANSION_PASSES {
         let mut changed = false;
         let mut next = oxc_allocator::Vec::new_in(ast);
-        for mut statement in body.statements.drain(..) {
+        for mut statement in statements.drain(..) {
             if let Some(expansion) =
                 expand_statement(ast, &statement, hooks, references, invocation)?
             {
@@ -481,6 +870,7 @@ fn expand_body<'a>(
                     references,
                     invocation,
                     statements: Vec::new(),
+                    conditional_depth: 0,
                 };
                 hoister.visit_statement(&mut statement);
                 if hoister.statements.is_empty() {
@@ -492,12 +882,17 @@ fn expand_body<'a>(
                 }
             }
         }
-        body.statements = next;
+        *statements = next;
         if !changed {
+            for statement in statements {
+                expand_if_branches(ast, statement, hooks, references, invocation)?;
+            }
             return Ok(());
         }
         if pass + 1 == MAX_EXPANSION_PASSES {
-            let span = body.span;
+            let span = statements
+                .first()
+                .map_or(SPAN, |statement| statement.span());
             return Err(unsupported_at(
                 "recursive custom hooks are unsupported",
                 span,
@@ -507,28 +902,138 @@ fn expand_body<'a>(
     unreachable!()
 }
 
+fn expand_if_branches<'a>(
+    ast: &AstBuilder<'a>,
+    statement: &mut Statement<'a>,
+    hooks: &BTreeMap<SymbolId, HookTemplate<'a>>,
+    references: &BTreeMap<ReferenceId, SymbolId>,
+    invocation: &mut u32,
+) -> Result<(), Diagnostic> {
+    let Statement::IfStatement(statement) = statement else {
+        return Ok(());
+    };
+    expand_if_branch(
+        ast,
+        &mut statement.consequent,
+        hooks,
+        references,
+        invocation,
+    )?;
+    if let Some(alternate) = &mut statement.alternate {
+        expand_if_branch(ast, alternate, hooks, references, invocation)?;
+    }
+    Ok(())
+}
+
+fn expand_if_branch<'a>(
+    ast: &AstBuilder<'a>,
+    statement: &mut Statement<'a>,
+    hooks: &BTreeMap<SymbolId, HookTemplate<'a>>,
+    references: &BTreeMap<ReferenceId, SymbolId>,
+    invocation: &mut u32,
+) -> Result<(), Diagnostic> {
+    match statement {
+        Statement::BlockStatement(block) => {
+            expand_statement_list(ast, &mut block.body, hooks, references, invocation)
+        }
+        Statement::IfStatement(_) => {
+            expand_if_branches(ast, statement, hooks, references, invocation)
+        }
+        _ if contains_hook_reference(statement, hooks, references) => {
+            let span = statement.span();
+            let mut statements = oxc_allocator::Vec::from_array_in([statement.take_in(ast)], ast);
+            expand_statement_list(ast, &mut statements, hooks, references, invocation)?;
+            *statement = Statement::new_block_statement(span, statements, ast);
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn contains_hook_reference<'a>(
+    statement: &Statement<'a>,
+    hooks: &BTreeMap<SymbolId, HookTemplate<'a>>,
+    references: &BTreeMap<ReferenceId, SymbolId>,
+) -> bool {
+    let mut finder = HookReferenceFinder {
+        hooks,
+        references,
+        found: false,
+    };
+    finder.visit_statement(statement);
+    finder.found
+}
+
+struct HookReferenceFinder<'h, 'r, 'a> {
+    hooks: &'h BTreeMap<SymbolId, HookTemplate<'a>>,
+    references: &'r BTreeMap<ReferenceId, SymbolId>,
+    found: bool,
+}
+
+impl<'a> Visit<'a> for HookReferenceFinder<'_, '_, 'a> {
+    fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
+        if self.found {
+            return;
+        }
+        self.found = identifier
+            .reference_id
+            .get()
+            .and_then(|reference| self.references.get(&reference))
+            .is_some_and(|symbol| self.hooks.contains_key(symbol));
+    }
+
+    fn visit_function(&mut self, _function: &Function<'a>, _flags: oxc_syntax::scope::ScopeFlags) {}
+
+    fn visit_arrow_function_expression(&mut self, _function: &ArrowFunctionExpression<'a>) {}
+}
+
 struct NestedHookCallHoister<'a, 'h, 'r, 'i> {
     ast: &'h AstBuilder<'a>,
     hooks: &'h BTreeMap<SymbolId, HookTemplate<'a>>,
     references: &'r BTreeMap<ReferenceId, SymbolId>,
     invocation: &'i mut u32,
     statements: Vec<Statement<'a>>,
+    conditional_depth: u32,
 }
 
 impl<'a> VisitMut<'a> for NestedHookCallHoister<'a, '_, '_, '_> {
     fn visit_expression(&mut self, expression: &mut Expression<'a>) {
-        if matches!(
-            expression.without_parentheses(),
-            Expression::ConditionalExpression(_)
-                | Expression::LogicalExpression(_)
-                | Expression::ChainExpression(_)
-        ) {
+        if let Expression::ChainExpression(chain) = expression.without_parentheses_mut() {
+            let base = match &mut chain.expression {
+                ChainElement::StaticMemberExpression(member) => {
+                    static_member_chain_base(&mut member.object)
+                }
+                ChainElement::ComputedMemberExpression(member) => {
+                    static_member_chain_base(&mut member.object)
+                }
+                _ => return,
+            };
+            self.hoist_direct_call(base);
+            return;
+        }
+        if let Expression::LogicalExpression(logical) = expression.without_parentheses_mut() {
+            self.visit_expression(&mut logical.left);
+            return;
+        }
+        if let Expression::ConditionalExpression(conditional) = expression.without_parentheses_mut()
+        {
+            self.visit_expression(&mut conditional.test);
             return;
         }
         if let Expression::CallExpression(call) = expression.without_parentheses()
             && direct_callee_symbol(call, self.references)
                 .is_some_and(|symbol| self.hooks.contains_key(&symbol))
         {
+            if self.conditional_depth > 0
+                && call.arguments.iter().any(|argument| {
+                    argument
+                        .as_expression()
+                        .is_none_or(|expression| !is_supported_hook_argument(expression))
+                })
+            {
+                walk_expression(self, expression);
+                return;
+            }
             let span = call.span;
             let name = self
                 .ast
@@ -556,6 +1061,53 @@ impl<'a> VisitMut<'a> for NestedHookCallHoister<'a, '_, '_, '_> {
     }
 
     fn visit_arrow_function_expression(&mut self, _function: &mut ArrowFunctionExpression<'a>) {}
+
+    fn visit_if_statement(&mut self, statement: &mut IfStatement<'a>) {
+        self.conditional_depth += 1;
+        walk_if_statement(self, statement);
+        self.conditional_depth -= 1;
+    }
+}
+
+impl<'a> NestedHookCallHoister<'a, '_, '_, '_> {
+    fn hoist_direct_call(&mut self, expression: &mut Expression<'a>) -> bool {
+        let Expression::CallExpression(call) = expression.without_parentheses() else {
+            return false;
+        };
+        if !direct_callee_symbol(call, self.references)
+            .is_some_and(|symbol| self.hooks.contains_key(&symbol))
+        {
+            return false;
+        }
+        let span = call.span;
+        let name = self
+            .ast
+            .allocator()
+            .alloc_str(&format!("{GENERATED_PREFIX}Call{}", *self.invocation));
+        *self.invocation += 1;
+        let initializer = expression.take_in(self.ast);
+        self.statements.push(generated_variable_statement(
+            self.ast,
+            name,
+            initializer,
+            span,
+        ));
+        *expression = identifier_expression(self.ast, name);
+        true
+    }
+}
+
+fn static_member_chain_base<'a, 'b>(expression: &'b mut Expression<'a>) -> &'b mut Expression<'a> {
+    match expression {
+        Expression::StaticMemberExpression(member) => static_member_chain_base(&mut member.object),
+        Expression::ComputedMemberExpression(member) => {
+            static_member_chain_base(&mut member.object)
+        }
+        Expression::ParenthesizedExpression(parenthesized) => {
+            static_member_chain_base(&mut parenthesized.expression)
+        }
+        _ => expression,
+    }
 }
 
 fn expand_statement<'a>(
@@ -596,7 +1148,7 @@ fn expand_statement<'a>(
             call.span,
         ));
     }
-    if call.arguments.len() > template.params.len() {
+    if template.rest.is_none() && call.arguments.len() > template.params.len() {
         return Err(unsupported_at(
             format!(
                 "custom hook {} accepts at most {} arguments, received {}",
@@ -616,6 +1168,9 @@ fn expand_statement<'a>(
     };
     for parameter in &template.params {
         collector.visit_binding_pattern(&parameter.pattern);
+    }
+    if let Some(rest) = &template.rest {
+        collector.visit_binding_pattern(rest);
     }
     for statement in &template.statements {
         collector.visit_statement(statement);
@@ -676,6 +1231,39 @@ fn expand_statement<'a>(
             }
         }
     }
+    if let Some(BindingPattern::BindingIdentifier(identifier)) = &template.rest {
+        let symbol = identifier.symbol_id.get().ok_or_else(|| {
+            Diagnostic::new(
+                DiagnosticCode::AnalysisFailed,
+                format!(
+                    "custom hook rest parameter {} has no semantic symbol",
+                    identifier.name
+                ),
+            )
+        })?;
+        let mut values = oxc_allocator::Vec::new_in(ast);
+        values.extend(
+            call.arguments
+                .iter()
+                .skip(template.params.len())
+                .map(|argument| {
+                    ArrayExpressionElement::from(
+                        argument
+                            .as_expression()
+                            .expect("spread arguments were rejected")
+                            .clone_in_with_semantic_ids(ast.allocator()),
+                    )
+                }),
+        );
+        let expression = Expression::new_array_expression(call.span, values, ast);
+        let name = ast
+            .allocator()
+            .alloc_str(&format!("{GENERATED_PREFIX}{id}Rest"));
+        argument_statements.push(generated_variable_statement(
+            ast, name, expression, call.span,
+        ));
+        substitutions.insert(symbol, identifier_expression(ast, name));
+    }
 
     let mut expanded = argument_statements;
     let mut statements = template
@@ -683,6 +1271,7 @@ fn expand_statement<'a>(
         .iter()
         .map(|statement| statement.clone_in_with_semantic_ids(ast.allocator()))
         .collect::<Vec<_>>();
+    let generated_prefix = destructuring_statements.len();
     statements.splice(0..0, destructuring_statements);
     let return_expression = take_final_return(
         ast,
@@ -706,6 +1295,7 @@ fn expand_statement<'a>(
         rewriter.visit_expression(&mut expression);
         expression
     });
+    flatten_expanded_destructuring_statements(ast, &mut statements, generated_prefix, invocation);
     expanded.extend(statements);
 
     match (binding, return_expression) {
@@ -727,6 +1317,174 @@ fn expand_statement<'a>(
         (None, None) => {}
     }
     Ok(Some(expanded))
+}
+
+fn flatten_expanded_destructuring_statements<'a>(
+    ast: &AstBuilder<'a>,
+    statements: &mut Vec<Statement<'a>>,
+    skip: usize,
+    invocation: &mut u32,
+) {
+    let mut flattened = Vec::with_capacity(statements.len());
+    for (index, statement) in statements.drain(..).enumerate() {
+        if index < skip {
+            flattened.push(statement);
+            continue;
+        }
+        let candidate = match &statement {
+            Statement::VariableDeclaration(declaration) => {
+                let [declarator] = declaration.declarations.as_slice() else {
+                    flattened.push(statement);
+                    continue;
+                };
+                if !matches!(declarator.id, BindingPattern::ObjectPattern(_)) {
+                    flattened.push(statement);
+                    continue;
+                }
+                declarator.init.as_ref().map(|initializer| {
+                    (
+                        declarator.id.clone_in_with_semantic_ids(ast.allocator()),
+                        initializer.clone_in_with_semantic_ids(ast.allocator()),
+                        declarator.span,
+                    )
+                })
+            }
+            _ => None,
+        };
+        let Some((pattern, initializer, span)) = candidate else {
+            flattened.push(statement);
+            continue;
+        };
+        let name = ast
+            .allocator()
+            .alloc_str(&format!("{GENERATED_PREFIX}Destructure{}", *invocation));
+        let Some(bindings) =
+            flattened_parameter_statements(ast, &pattern, identifier_expression(ast, name), span)
+        else {
+            flattened.push(statement);
+            continue;
+        };
+        *invocation += 1;
+        flattened.push(generated_variable_statement(ast, name, initializer, span));
+        flattened.extend(bindings);
+    }
+    *statements = flattened;
+}
+
+fn flattened_parameter_statements<'a>(
+    ast: &AstBuilder<'a>,
+    pattern: &BindingPattern<'a>,
+    value: Expression<'a>,
+    span: Span,
+) -> Option<Vec<Statement<'a>>> {
+    let mut statements = Vec::new();
+    if flatten_parameter_pattern(ast, pattern, value, span, &mut statements) {
+        Some(statements)
+    } else {
+        None
+    }
+}
+
+fn flatten_parameter_pattern<'a>(
+    ast: &AstBuilder<'a>,
+    pattern: &BindingPattern<'a>,
+    value: Expression<'a>,
+    span: Span,
+    statements: &mut Vec<Statement<'a>>,
+) -> bool {
+    match pattern {
+        BindingPattern::BindingIdentifier(identifier) => {
+            statements.push(pattern_variable_statement(
+                ast,
+                BindingPattern::BindingIdentifier(
+                    identifier.clone_in_with_semantic_ids(ast.allocator()),
+                ),
+                value,
+                span,
+            ));
+            true
+        }
+        BindingPattern::ObjectPattern(object) => {
+            if object.rest.is_some() {
+                return false;
+            }
+            for property in &object.properties {
+                if property.computed {
+                    return false;
+                }
+                let Some(name) = property.key.static_name() else {
+                    return false;
+                };
+                let property_value =
+                    Expression::from(MemberExpression::new_computed_member_expression(
+                        SPAN,
+                        value.clone_in_with_semantic_ids(ast.allocator()),
+                        Expression::new_string_literal(
+                            SPAN,
+                            ast.allocator().alloc_str(name.as_ref()),
+                            None,
+                            ast,
+                        ),
+                        false,
+                        ast,
+                    ));
+                if !flatten_parameter_pattern(
+                    ast,
+                    &property.value,
+                    property_value,
+                    span,
+                    statements,
+                ) {
+                    return false;
+                }
+            }
+            true
+        }
+        BindingPattern::ArrayPattern(array) => {
+            if array.rest.is_some() {
+                return false;
+            }
+            for (index, element) in array.elements.iter().enumerate() {
+                let Some(element) = element else {
+                    continue;
+                };
+                let item = Expression::from(MemberExpression::new_computed_member_expression(
+                    SPAN,
+                    value.clone_in_with_semantic_ids(ast.allocator()),
+                    Expression::new_numeric_literal(
+                        SPAN,
+                        index as f64,
+                        None,
+                        oxc_syntax::number::NumberBase::Decimal,
+                        ast,
+                    ),
+                    false,
+                    ast,
+                ));
+                if !flatten_parameter_pattern(ast, element, item, span, statements) {
+                    return false;
+                }
+            }
+            true
+        }
+        BindingPattern::AssignmentPattern(assignment) => {
+            let test = Expression::new_binary_expression(
+                SPAN,
+                value.clone_in_with_semantic_ids(ast.allocator()),
+                BinaryOperator::StrictEquality,
+                identifier_expression(ast, "undefined"),
+                ast,
+            );
+            let resolved = Expression::new_conditional_expression(
+                SPAN,
+                test,
+                assignment.right.clone_in_with_semantic_ids(ast.allocator()),
+                value,
+                ast,
+            );
+            flatten_parameter_pattern(ast, &assignment.left, resolved, span, statements)
+        }
+    }
 }
 
 fn take_final_return<'a>(
@@ -1078,7 +1836,7 @@ fn pattern_variable_statement<'a>(
 ) -> Statement<'a> {
     let declarator = VariableDeclarator::new(
         span,
-        VariableDeclarationKind::Const,
+        VariableDeclarationKind::Let,
         pattern,
         None,
         Some(initializer),
@@ -1087,7 +1845,7 @@ fn pattern_variable_statement<'a>(
     );
     Statement::from(Declaration::new_variable_declaration(
         span,
-        VariableDeclarationKind::Const,
+        VariableDeclarationKind::Let,
         oxc_allocator::Vec::from_array_in([declarator], ast),
         false,
         ast,
@@ -1367,6 +2125,113 @@ impl<'a> Visit<'a> for HookCallFinder<'_, '_> {
     }
 }
 
+fn collect_dead_class_hook_methods(
+    program: &Program<'_>,
+    references: &BTreeMap<ReferenceId, SymbolId>,
+    active: &BTreeSet<SymbolId>,
+) -> BTreeSet<u32> {
+    let mut property_uses = StaticMemberPropertyCollector {
+        names: BTreeSet::new(),
+    };
+    property_uses.visit_program(program);
+
+    let mut collector = DeadClassHookMethodCollector {
+        references,
+        active,
+        used_properties: &property_uses.names,
+        starts: BTreeSet::new(),
+    };
+    collector.visit_program(program);
+    collector.starts
+}
+
+struct StaticMemberPropertyCollector {
+    names: BTreeSet<String>,
+}
+
+impl<'a> Visit<'a> for StaticMemberPropertyCollector {
+    fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
+        self.names.insert(member.property.name.to_string());
+        walk_static_member_expression(self, member);
+    }
+
+    fn visit_computed_member_expression(&mut self, member: &ComputedMemberExpression<'a>) {
+        if let Some(name) = member.static_property_name() {
+            self.names.insert(name.to_string());
+        }
+        walk_computed_member_expression(self, member);
+    }
+}
+
+struct DeadClassHookMethodCollector<'r> {
+    references: &'r BTreeMap<ReferenceId, SymbolId>,
+    active: &'r BTreeSet<SymbolId>,
+    used_properties: &'r BTreeSet<String>,
+    starts: BTreeSet<u32>,
+}
+
+impl<'a> Visit<'a> for DeadClassHookMethodCollector<'_> {
+    fn visit_method_definition(&mut self, method: &MethodDefinition<'a>) {
+        let removable = method.decorators.is_empty()
+            && method.kind == MethodDefinitionKind::Method
+            && method
+                .key
+                .static_name()
+                .is_some_and(|name| !self.used_properties.contains(name.as_ref()));
+        if removable {
+            let mut finder = ActiveHookReferenceFinder {
+                references: self.references,
+                active: self.active,
+                found: false,
+            };
+            if let Some(body) = &method.value.body {
+                for statement in &body.statements {
+                    finder.visit_statement(statement);
+                }
+            }
+            if finder.found {
+                self.starts.insert(method.span.start);
+            }
+        }
+        walk_method_definition(self, method);
+    }
+}
+
+struct ActiveHookReferenceFinder<'r> {
+    references: &'r BTreeMap<ReferenceId, SymbolId>,
+    active: &'r BTreeSet<SymbolId>,
+    found: bool,
+}
+
+impl<'a> Visit<'a> for ActiveHookReferenceFinder<'_> {
+    fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
+        if self.found {
+            return;
+        }
+        self.found = identifier
+            .reference_id
+            .get()
+            .and_then(|reference| self.references.get(&reference))
+            .is_some_and(|symbol| self.active.contains(symbol));
+    }
+}
+
+struct DeadClassHookMethodRemover<'r> {
+    starts: &'r BTreeSet<u32>,
+}
+
+impl<'a> VisitMut<'a> for DeadClassHookMethodRemover<'_> {
+    fn visit_class_body(&mut self, body: &mut ClassBody<'a>) {
+        body.body.retain(|element| {
+            let ClassElement::MethodDefinition(method) = element else {
+                return true;
+            };
+            !self.starts.contains(&method.span.start)
+        });
+        walk_class_body(self, body);
+    }
+}
+
 struct BindingCollector {
     symbols: Vec<(SymbolId, String, Span)>,
 }
@@ -1449,21 +2314,21 @@ impl<'a> Visit<'a> for ReturnCollector {
 struct ResidualHookReference<'h, 'r, 'a> {
     hooks: &'h BTreeMap<SymbolId, HookTemplate<'a>>,
     references: &'r BTreeMap<ReferenceId, SymbolId>,
-    span: Option<Span>,
+    hook: Option<(String, Span)>,
 }
 
 impl<'a> Visit<'a> for ResidualHookReference<'_, '_, 'a> {
     fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
-        if self.span.is_some() {
+        if self.hook.is_some() {
             return;
         }
-        if identifier
+        if let Some(template) = identifier
             .reference_id
             .get()
             .and_then(|reference| self.references.get(&reference))
-            .is_some_and(|symbol| self.hooks.contains_key(symbol))
+            .and_then(|symbol| self.hooks.get(symbol))
         {
-            self.span = Some(identifier.span);
+            self.hook = Some((template.name.clone(), identifier.span));
         }
     }
 }

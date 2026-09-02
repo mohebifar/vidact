@@ -15,7 +15,7 @@ describe('@vidact/compiler', () => {
     const result = compileSync(source, { filename: '/fixture/Counter.tsx' })
 
     expect(result.protocol).toBe('vidact-compile-v2')
-    expect(result.runtimeProtocol).toBe('vidact-runtime-v1')
+    expect(result.runtimeProtocol).toBe('vidact-runtime-v2')
     expect(result.configuration).toEqual({ target: 'client', features: [] })
     expect(result.code).toContain('__vidact')
     expect(result.analysis.components[0]?.name).toBe('Counter')

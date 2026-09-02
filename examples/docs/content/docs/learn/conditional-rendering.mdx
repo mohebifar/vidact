@@ -1,0 +1,108 @@
+---
+title: Conditional rendering
+description: Show, hide, and switch between pieces of UI with ternaries, logical operators, and early returns.
+group: Learn
+---
+
+Use ordinary JavaScript to decide what to render. The patterns from React work unchanged.
+
+```tsx
+export function Status({ online }: { online: boolean }) {
+  return online ? <span>Online</span> : <span>Offline</span>
+}
+```
+
+<Preview variant="toggle" />
+
+## Supported forms
+
+Vidact recognizes each of these and compiles it into a region of the DOM that can be swapped when the condition changes:
+
+```tsx
+{isLoading ? <Spinner /> : <Results items={items} />}
+
+{error && <p role="alert">{error.message}</p>}
+
+{title ?? <em>Untitled</em>}
+
+{!isEmpty || <EmptyState />}
+```
+
+Early returns and `switch` statements at the top level of a component work too:
+
+```tsx
+export function Page({ state }: { state: PageState }) {
+  if (state.kind === 'loading') return <Spinner />
+  if (state.kind === 'error') return <ErrorMessage error={state.error} />
+
+  return <Article article={state.article} />
+}
+```
+
+```tsx
+export function Icon({ kind }: { kind: 'check' | 'cross' | 'none' }) {
+  switch (kind) {
+    case 'check':
+      return <CheckIcon />
+    case 'cross':
+      return <CrossIcon />
+    default:
+      return null
+  }
+}
+```
+
+Render `null`, `undefined`, `false`, or an empty string to render nothing.
+
+When you use early returns, declare your local variables before the first `return`. A `const` that sits between two returning branches is reported as `UnsupportedControlFlow`, because the compiler cannot tell which branch it belongs to.
+
+## What happens when the condition changes
+
+Each branch is a separate piece of DOM with its own lifetime. When the condition flips:
+
+1. The old branch's DOM is removed, and any components inside it are disposed. Their state is gone, and their effect cleanups run.
+2. The new branch is constructed from scratch and inserted in the same place.
+
+This matches React's behaviour when the element type at a position changes. It also means a branch that stays selected keeps its DOM, its focus, and its component state untouched, even when other values change.
+
+If you switch between two instances of the *same* component with different props, Vidact still treats them as two branches: the first instance is disposed and a second is created. If you want a single instance whose props change, render it unconditionally and pass the varying prop.
+
+```tsx
+{compact ? <Card size="small" /> : <Card size="large" />}
+
+<Card size={compact ? 'small' : 'large'} />
+```
+
+## Keeping hidden content alive
+
+Sometimes you want to hide UI without losing its state: a tab panel with a half-filled form, for example. Use the `Activity` component, available with the `retained-ui` feature. It keeps the DOM and state of hidden content while pausing its effects.
+
+```tsx
+import { Activity } from 'react'
+
+<Activity mode={selected === 'editor' ? 'visible' : 'hidden'}>
+  <Editor />
+</Activity>
+```
+
+For simple show/hide of already-cheap content, toggling a CSS class or the `hidden` attribute is often enough and needs no feature flag.
+
+## Conditions in attributes
+
+Conditional attribute values do not create branches; they are ordinary bindings.
+
+```tsx
+<button className={active ? 'tab active' : 'tab'} disabled={!enabled}>
+```
+
+An attribute set to `undefined`, `null`, or `false` is removed from the element.
+
+## Things the compiler cannot follow
+
+Vidact needs to see the shape of your conditional at compile time. A few patterns are rejected because they hide that shape:
+
+- Returning from inside a `try`/`finally`, or throwing inside a `try` that also renders.
+- Building elements with `createElement` from values that are only known at runtime.
+- Rendering elements that were created by code Vidact did not compile.
+
+In each case the fix is to move the decision into a ternary, a logical expression, or an early return. The [troubleshooting guide](/docs/guides/troubleshooting) lists the diagnostics you may see.

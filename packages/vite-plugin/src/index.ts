@@ -15,16 +15,28 @@ import {
   type VidactTarget,
 } from './compiler-client.ts'
 import {
+  BASE_UI_FAST_HOOKS_SHIM_ID,
   createDependencyCapsuleBuilder,
+  EXTERNAL_STORE_SELECTOR_SHIM_ID,
+  EXTERNAL_STORE_SHIM_ID,
   isDependencyCapsuleModule,
   type DependencyCapsule,
+  type SourceDependencyCapsule,
 } from './dependency-capsule.ts'
 import { createDependencyQualifier, isDependencyModuleId } from './dependency-qualification.ts'
 
 const REACT_MODULE = '\0vidact:react'
+const REACT_JSX_RUNTIME_MODULE = '\0vidact:react-jsx-runtime'
+const REACT_JSX_DEV_RUNTIME_MODULE = '\0vidact:react-jsx-dev-runtime'
 const REACT_DOM_MODULE = '\0vidact:react-dom'
 const REACT_DOM_SERVER_MODULE = '\0vidact:react-dom-server'
 const REACT_DOM_STATIC_MODULE = '\0vidact:react-dom-static'
+const ROLLDOWN_RUNTIME_MODULE = '\0rolldown/runtime.js'
+const SANITIZED_ROLLDOWN_RUNTIME_MODULE = 'vidact:rolldown/runtime.js'
+const VIDACT_DEPENDENCY_RUNTIME_MODULE = '\0vidact:dependency-runtime'
+const REACT_IMPORT_PATTERN = /^(?:react|react-dom)(?:\/|$)/
+const MODULE_SPECIFIER_PATTERN =
+  /\b(?:import|export)\s+(?:type\s+)?(?:[^'";()]*?\sfrom\s*)?['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g
 
 export interface VidactPluginOptions {
   /** Compiler target. Server and hydration targets use separate entry points. */
@@ -84,6 +96,7 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
   const extensions = options.extensions ?? ['.tsx']
   const dependencyQualifier = createDependencyQualifier()
   const dependencyCapsules = createDependencyCapsuleBuilder()
+  const helperBearingCapsules = new Set<string>()
   let capsuleDefines: Record<string, string> = {}
 
   return {
@@ -121,13 +134,54 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
         dependencyQualifier.invalidate(context.file),
       ])
     },
-    resolveId(source) {
+    resolveId(source, importer) {
+      if (
+        source === BASE_UI_FAST_HOOKS_SHIM_ID ||
+        source === EXTERNAL_STORE_SHIM_ID ||
+        source === EXTERNAL_STORE_SELECTOR_SHIM_ID
+      ) {
+        return source
+      }
+      if (
+        (source === ROLLDOWN_RUNTIME_MODULE || source === SANITIZED_ROLLDOWN_RUNTIME_MODULE) &&
+        importer !== undefined &&
+        helperBearingCapsules.has(importer.split('?', 1)[0] ?? importer)
+      ) {
+        return VIDACT_DEPENDENCY_RUNTIME_MODULE
+      }
       if (source === 'react') return REACT_MODULE
+      if (source === 'react/jsx-runtime') return REACT_JSX_RUNTIME_MODULE
+      if (source === 'react/jsx-dev-runtime') return REACT_JSX_DEV_RUNTIME_MODULE
       if (source === 'react-dom') return REACT_DOM_MODULE
-      if (source === 'react-dom/server') return REACT_DOM_SERVER_MODULE
+      if (source === 'react-dom/server' || source === 'react-dom/server.edge') {
+        return REACT_DOM_SERVER_MODULE
+      }
       return source === 'react-dom/static' ? REACT_DOM_STATIC_MODULE : null
     },
     load(id) {
+      if (id === BASE_UI_FAST_HOOKS_SHIM_ID) {
+        return `
+          export function memo() { throw new Error("Base UI fastComponent must be lowered during dependency compilation") }
+          export function forwardRef() { throw new Error("Base UI fastComponentRef must be lowered during dependency compilation") }
+        `
+      }
+      if (id === EXTERNAL_STORE_SHIM_ID) {
+        return `export function useSyncExternalStore() { throw new Error("useSyncExternalStore shim must be lowered during dependency compilation") }`
+      }
+      if (id === EXTERNAL_STORE_SELECTOR_SHIM_ID) {
+        return `export function useSyncExternalStoreWithSelector() { throw new Error("useSyncExternalStoreWithSelector shim must be lowered during dependency compilation") }`
+      }
+      if (id === VIDACT_DEPENDENCY_RUNTIME_MODULE) return 'export {}'
+      if (id === REACT_JSX_RUNTIME_MODULE || id === REACT_JSX_DEV_RUNTIME_MODULE) {
+        const suffix = id === REACT_JSX_DEV_RUNTIME_MODULE ? 'jsx-dev-runtime' : 'jsx-runtime'
+        const runtime =
+          configuration.target === 'server'
+            ? `@vidact/runtime/server/${suffix}`
+            : configuration.target === 'hydrate'
+              ? `@vidact/runtime/hydrate/${suffix}`
+              : '@vidact/runtime/jsx-runtime'
+        return `export * from "${runtime}"`
+      }
       if (id === REACT_MODULE) {
         const asyncEnabled = configuration.features.includes('async')
         const concurrentEnabled = configuration.features.includes('concurrent')
@@ -141,8 +195,8 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
         const actionExports = actionsEnabled ? 'useActionState, useOptimistic, ' : ''
         const core =
           configuration.target === 'server'
-            ? `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}${frameworkEnabled ? 'cache, cacheSignal, ' : ''}cloneRenderable as cloneElement, createContext, createElement, isRenderable as isValidElement, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "@vidact/runtime/server"`
-            : `export { cloneRenderable as cloneElement, createContext, createReactElement as createElement, isRenderable as isValidElement, ${asyncEnabled ? '' : 'use, '}useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "@vidact/runtime"`
+            ? `export { ${asyncEnabled ? 'Suspense, lazy, ' : ''}${concurrentExports}${actionExports}${frameworkEnabled ? 'cache, cacheSignal, ' : ''}cloneRenderable as cloneElement, createContext, createElement, createRef, isRenderable as isValidElement, use, useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "@vidact/runtime/server"`
+            : `export { cloneRenderable as cloneElement, createContext, createReactElement as createElement, createRef, isRenderable as isValidElement, ${asyncEnabled ? '' : 'use, '}useCallback, useContext, useEffect, useEffectEvent, useId, useImperativeHandle, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "@vidact/runtime"`
         const exports = [core, 'export const version = "19.2.0"']
         if (configuration.target !== 'server') {
           if (configuration.target === 'hydrate')
@@ -212,9 +266,7 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
             ].join('\n')
       if (!frameworkEnabled) return core
       const frameworkRuntime =
-        configuration.target === 'server'
-          ? '@vidact/runtime/framework/server'
-          : '@vidact/runtime/framework'
+        configuration.target === 'server' ? '@vidact/runtime/server' : '@vidact/runtime/framework'
       return `${core}\nexport { preconnect, prefetchDNS, preinit, preinitModule, preload, preloadModule } from "${frameworkRuntime}"`
     },
     async transform(source, id) {
@@ -229,7 +281,9 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
         return null
       }
 
+      helperBearingCapsules.delete(filename)
       let capsule: DependencyCapsule | undefined
+      let sourceCapsule: SourceDependencyCapsule | undefined
       if (dependencyModule) {
         const qualification = await dependencyQualifier.qualify(filename, {
           includeOverride: includeDependency(filename),
@@ -259,12 +313,32 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
           ...configuration,
         })
         for (const contributor of capsule.contributors) this.addWatchFile(contributor)
+      } else {
+        const candidateImport = await hasCandidateDependencyImport(
+          source,
+          async (specifier) => this.resolve(specifier, filename, { skipSelf: true }),
+          dependencyQualifier,
+          includeDependency,
+        )
+        if (candidateImport) {
+          sourceCapsule = await dependencyCapsules.buildSource({
+            source,
+            entry: filename,
+            environment: this.environment.name,
+            defines: capsuleDefines,
+            ...configuration,
+          })
+          if (sourceCapsule !== undefined) {
+            for (const contributor of sourceCapsule.contributors) this.addWatchFile(contributor)
+          }
+        }
       }
 
-      const compilationSource = capsule?.code ?? source
+      const linkedCapsule = capsule ?? sourceCapsule
+      const compilationSource = linkedCapsule?.code ?? source
 
       const cacheKey = compilationCacheKey({
-        source: capsule?.fingerprint ?? compilationSource,
+        source: linkedCapsule?.fingerprint ?? compilationSource,
         filename,
         environment: this.environment.name,
         ...configuration,
@@ -276,7 +350,7 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
           result = await compileWithCompiler(
             compilationSource,
             filename,
-            capsule === undefined
+            linkedCapsule === undefined
               ? configuration
               : {
                   ...configuration,
@@ -284,15 +358,20 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
                 },
           )
         } catch (error) {
-          if (capsule === undefined) throw error
-          throw dependencyCompilationError(capsule, configuration.target, error)
+          if (capsule !== undefined) {
+            throw dependencyCompilationError(capsule, configuration.target, error)
+          }
+          if (sourceCapsule !== undefined) {
+            throw sourceDependencyCompilationError(sourceCapsule, configuration.target, error)
+          }
+          throw error
         }
         compilation = {
           code: result.code,
           sourceMap:
-            capsule === undefined
+            linkedCapsule === undefined
               ? result.sourceMap
-              : composeSourceMaps(result.sourceMap, capsule.sourceMap),
+              : composeSourceMaps(result.sourceMap, linkedCapsule.sourceMap),
           analysis: result.analysis,
         }
         compilationCache.set(cacheKey, compilation)
@@ -317,13 +396,54 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
         },
         compilation.sourceMap,
       )
+      if (
+        linkedCapsule !== undefined &&
+        (transformed.code.includes('\\0rolldown/runtime.js') ||
+          transformed.code.includes(ROLLDOWN_RUNTIME_MODULE))
+      ) {
+        helperBearingCapsules.add(filename)
+      }
       return {
-        code: transformed.code,
+        code:
+          linkedCapsule === undefined
+            ? transformed.code
+            : sanitizeDependencyVirtualSourceIds(transformed.code),
         ...(transformed.map === undefined ? {} : { map: transformed.map }),
         meta: { vidact: compilation.analysis },
       }
     },
   }
+}
+
+export function sourceDependencySpecifiers(source: string): string[] {
+  return [...source.matchAll(MODULE_SPECIFIER_PATTERN)].flatMap((match) => {
+    const specifier = match[1] ?? match[2]
+    return specifier === undefined ? [] : [specifier]
+  })
+}
+
+async function hasCandidateDependencyImport(
+  source: string,
+  resolveModule: (specifier: string) => Promise<{ readonly id: string } | null>,
+  qualifier: ReturnType<typeof createDependencyQualifier>,
+  includeDependency: (id: string) => boolean,
+): Promise<boolean> {
+  for (const specifier of sourceDependencySpecifiers(source)) {
+    if (REACT_IMPORT_PATTERN.test(specifier) || specifier.startsWith('node:')) continue
+    const resolved = await resolveModule(specifier).catch(() => null)
+    if (resolved === null || !isDependencyModuleId(resolved.id)) continue
+    const qualification = await qualifier.qualify(resolved.id, {
+      includeOverride: includeDependency(resolved.id),
+    })
+    if (qualification?.status === 'candidate') return true
+  }
+  return false
+}
+
+function sanitizeDependencyVirtualSourceIds(source: string): string {
+  return source
+    .replaceAll('\\0rolldown/runtime.js', SANITIZED_ROLLDOWN_RUNTIME_MODULE)
+    .replaceAll('\0rolldown/runtime.js', SANITIZED_ROLLDOWN_RUNTIME_MODULE)
 }
 
 function composeSourceMaps(
@@ -346,6 +466,19 @@ function dependencyCompilationError(
   const originalLocation = dependencyOriginalLocation(detail, capsule.sourceMap)
   return new Error(
     `Cannot compile React dependency ${identity} for ${target} from ${capsule.entry}${originalLocation === undefined ? '' : ` (original ${originalLocation})`}: ${detail}`,
+    { cause },
+  )
+}
+
+function sourceDependencyCompilationError(
+  capsule: SourceDependencyCapsule,
+  target: VidactTarget,
+  cause: unknown,
+): Error {
+  const detail = cause instanceof Error ? cause.message : String(cause)
+  const originalLocation = dependencyOriginalLocation(detail, capsule.sourceMap)
+  return new Error(
+    `Cannot compile source-linked React dependencies for ${target} from ${capsule.entry}${originalLocation === undefined ? '' : ` (original ${originalLocation})`}: ${detail}`,
     { cause },
   )
 }

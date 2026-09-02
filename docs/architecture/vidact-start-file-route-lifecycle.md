@@ -39,6 +39,10 @@ composes its declared parent chain from the leaf outward. Route modules load in
 parallel; loaders execute sequentially from root to leaf so each descendant gets
 a frozen record of already loaded parent data.
 
+A loader may throw a Web `Response` to terminate UI rendering with an explicit
+HTTP result, such as a content-backed `404`. The Start handler returns that
+response unchanged instead of wrapping it as an internal server error.
+
 The leaf route may expose Web request handlers by HTTP method. A matching handler
 runs before UI loaders. Unsupported methods return `405` with the methods actually
 available from handlers and UI rendering. `HEAD` may use a `GET` endpoint but
@@ -110,6 +114,7 @@ builds, one client and one SSR entry, followed by a host adapter.
   snapshot.
 - Parent loaders settle before descendant loaders and expose only prior data.
 - Endpoint dispatch never runs unrelated UI loaders.
+- A loader-thrown Web `Response` preserves its status, headers, and body.
 - Query text survives the snapshot and becomes part of the hydration request URL.
 - Untrusted loader data cannot terminate the snapshot script element.
 - Route-module changes invalidate the virtual module and trigger a development
@@ -164,8 +169,8 @@ framework trust boundary.
 - `packages/start/test/router.test.ts` covers specificity, parameters, parent
   chains, loader ordering, loader-data typing, and layout composition.
 - `packages/start/test/server.test.ts` covers nested SSR, query and navigation
-  snapshots, endpoints, `HEAD`, method negotiation, missing routes, and
-  script-text safety.
+  snapshots, endpoints, `HEAD`, method negotiation, missing routes,
+  loader-thrown responses, and script-text safety.
 - `packages/start/test/link.test.ts` covers progressively enhanced server anchor
   output, `replace`, and `reloadDocument`.
 - `packages/start/test/vite.test.ts` covers file conventions and environment

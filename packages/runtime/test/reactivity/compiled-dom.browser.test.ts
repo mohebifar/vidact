@@ -14,9 +14,15 @@ import {
   compiledImperativeHandle,
   compiledInsertionEffect,
   compiledRoot,
+  compiledSpread,
+  createCompiledContext,
   createCompiledProp,
   createCompiledScope,
   createCompiledState,
+  createContext,
+  createPortal,
+  createReactElement,
+  deferred,
   type DirectComponent,
   Fragment,
   h,
@@ -41,6 +47,91 @@ interface Item {
 }
 
 describe('compiled DOM corpus', () => {
+  it('reconciles repeated portal descriptors without replacing the portal owner', async () => {
+    const logicalHost = document.createElement('div')
+    const portalHost = document.createElement('div')
+    document.body.append(logicalHost, portalHost)
+    const labelSource = source(0)
+    let setLabel!: (value: string) => void
+    const portalRef: { current: Element | null } = { current: null }
+
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const label = createCompiledState(scope, labelSource, 'first')
+      setLabel = label.set
+      return compiledRoot(scope, () =>
+        binding(scope, labelSource, () =>
+          createPortal(
+            createReactElement('div', {
+              'data-portal-owner': true,
+              children: label.get(),
+              ref: portalRef,
+            }),
+            portalHost,
+          ),
+        ),
+      )
+    }, logicalHost)
+    const owner = portalHost.querySelector<HTMLElement>('[data-portal-owner]')!
+
+    const mutation = await captureMutations(portalHost, () => setLabel('second'))
+
+    expect(portalHost.querySelector('[data-portal-owner]')).toBe(owner)
+    expect(owner.textContent).toBe('second')
+    expect(portalRef.current).toBe(owner)
+    expect(() =>
+      assertMutationEnvelope(
+        mutation.records,
+        [{ type: 'characterData', within: owner }],
+        'portal descriptor reconciliation',
+      ),
+    ).not.toThrow()
+
+    mounted.dispose()
+    logicalHost.remove()
+    portalHost.remove()
+  })
+
+  it('propagates a reactive provider value into a deferred descendant context slot', () => {
+    const host = document.createElement('div')
+    const OpenContext = createContext({ open: false })
+    let setOpen!: (value: boolean) => void
+
+    const Child: DirectComponent = () => {
+      const scope = createCompiledScope()
+      const context = createCompiledContext(scope, source(0), OpenContext)
+      let open = context.get().open
+      scope[0](
+        source(0),
+        () => {
+          open = context.get().open
+        },
+        source(1),
+      )
+      return compiledRoot(scope, () =>
+        h('button', { 'aria-expanded': binding(scope, source(1), () => open) }),
+      )
+    }
+
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const open = createCompiledState(scope, source(0), false)
+      setOpen = open.set
+      return compiledRoot(scope, () =>
+        h(OpenContext.Provider, {
+          value: binding(scope, source(0), () => ({ open: open.get() })),
+          children: deferred(() => h(Child, null)),
+        }),
+      )
+    }, host)
+
+    const trigger = host.querySelector('button')!
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    setOpen(true)
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    mounted.dispose()
+  })
+
   it('runs insertion effects before callback refs in a staged binding', () => {
     const host = document.createElement('div')
     let insertionCommitted = false
@@ -63,6 +154,48 @@ describe('compiled DOM corpus', () => {
     }, host)
 
     expect(refSawInsertion).toBe(true)
+    mounted.dispose()
+  })
+
+  it('runs ancestor insertion effects before callback refs in deferred descendants', () => {
+    const host = document.createElement('div')
+    let callback: () => void = () => {
+      throw new Error('callback ref ran before its ancestor insertion effect')
+    }
+    let attached = false
+    const ListContext = createContext({})
+    const Child: DirectComponent = (props) => {
+      const scope = createCompiledScope()
+      return compiledRoot(scope, () =>
+        h('button', {
+          ref: () => (props.onAttach as () => void)(),
+        }),
+      )
+    }
+    const List: DirectComponent = (props) => {
+      const scope = createCompiledScope()
+      compiledInsertionEffect(scope, source(0), () => () => {
+        callback = () => {
+          attached = true
+        }
+      })
+      return compiledRoot(scope, () =>
+        h(ListContext.Provider, {
+          value: {},
+          children: deferred(() => props.children as never),
+        }),
+      )
+    }
+
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const child = h(Child, {
+        onAttach: () => callback(),
+      })
+      return compiledRoot(scope, () => h(List, { children: child }))
+    }, host)
+
+    expect(attached).toBe(true)
     mounted.dispose()
   })
 
@@ -112,9 +245,9 @@ describe('compiled DOM corpus', () => {
       expect(renderableToArray(render)).toEqual([render])
       expect(renderableMarker(render)).toBeUndefined()
       expect(() => renderableToArray({ props: {} })).toThrow('compiled renderable capability')
-      return compiledRoot(scope, () =>
-        cloneRenderable(render, binding(scope, overridesSource, overrides.get)),
-      )
+      const clone = cloneRenderable(render, binding(scope, overridesSource, overrides.get))
+      expect(isRenderable(clone)).toBe(true)
+      return compiledRoot(scope, () => clone)
     }, host)
 
     const anchor = host.querySelector('a')!
@@ -155,6 +288,100 @@ describe('compiled DOM corpus', () => {
     mounted.dispose()
   })
 
+  it('preserves a reactive component spread through a renderable wrapper', async () => {
+    const propsSource = source(0)
+    let setProps!: ReturnType<typeof createCompiledState<Record<string, unknown>>>['set']
+    const host = document.createElement('div')
+    const Child: DirectComponent = (props) => {
+      const scope = createCompiledScope()
+      const title = createCompiledProp(scope, source(0), props.title)
+      const children = createCompiledProp(scope, source(1), props.children)
+      return compiledRoot(scope, () =>
+        h(
+          'button',
+          { title: binding(scope, source(0), title.get) },
+          binding(scope, source(1), children.get),
+        ),
+      )
+    }
+
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const props = createCompiledState<Record<string, unknown>>(scope, propsSource, {
+        title: 'first',
+      })
+      setProps = props.set
+      const render = createRenderable(
+        {
+          ...compiledComponentSpread(binding(scope, propsSource, props.get), ['children']),
+          children: 'content',
+        },
+        (input) =>
+          h(
+            Child,
+            {
+              ...renderableProps(input),
+              ref: renderableRef(input),
+            },
+            renderableChildren(input),
+          ),
+      )
+      return compiledRoot(scope, () => render)
+    }, host)
+    const button = host.querySelector('button')!
+
+    expect(button.title).toBe('first')
+    expect(button.textContent).toBe('content')
+
+    await setProps({ title: 'second' })
+
+    expect(host.querySelector('button')).toBe(button)
+    expect(button.title).toBe('second')
+    mounted.dispose()
+  })
+
+  it('reconciles repeated renderable descriptors from the same intrinsic family', async () => {
+    const activeSource = source(0)
+    let setActive!: ReturnType<typeof createCompiledState<boolean>>['set']
+    const host = document.createElement('div')
+    document.body.append(host)
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const active = createCompiledState(scope, activeSource, false)
+      setActive = active.set
+      return compiledRoot(scope, () =>
+        binding(scope, activeSource, () =>
+          createReactElement(
+            'button',
+            { 'aria-pressed': active.get() },
+            active.get() ? 'Active' : 'Inactive',
+          ),
+        ),
+      )
+    }, host)
+    const button = host.querySelector('button')!
+    button.focus()
+
+    const capture = await captureMutations(host, () => setActive(true))
+
+    expect(host.querySelector('button')).toBe(button)
+    expect(document.activeElement).toBe(button)
+    expect(button.getAttribute('aria-pressed')).toBe('true')
+    expect(button.textContent).toBe('Active')
+    expect(() =>
+      assertMutationEnvelope(
+        capture.records,
+        [
+          { type: 'attributes', target: button, attributeName: 'aria-pressed' },
+          { type: 'characterData', within: button },
+        ],
+        'same-family renderable update',
+      ),
+    ).not.toThrow()
+    mounted.dispose()
+    host.remove()
+  })
+
   it('applies nested container defaults and rejects unguarded nullish destructuring', () => {
     expect(nestedProp(undefined, ['name'], [() => ({ name: 'fallback' })])).toBe('fallback')
     expect(() => nestedProp(null, ['name'], [null])).toThrow(
@@ -162,21 +389,50 @@ describe('compiled DOM corpus', () => {
     )
   })
 
-  it('rejects reserved values in reactive component spreads before child construction', () => {
+  it('forwards reactive component-spread children through the child owner', async () => {
     const propsSource = source(0)
+    let setProps!: ReturnType<typeof createCompiledState<Record<string, unknown>>>['set']
     let childRuns = 0
     const host = document.createElement('div')
-    const Child: DirectComponent = () => {
+    const Child: DirectComponent = (props) => {
       childRuns += 1
       const scope = createCompiledScope()
-      return compiledRoot(scope, () => h('p', null, 'child'))
+      const children = createCompiledProp(scope, source(0), props.children)
+      return compiledRoot(scope, () => h('p', null, binding(scope, source(0), children.get)))
     }
+
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const props = createCompiledState<Record<string, unknown>>(scope, propsSource, {
+        children: 'first',
+      })
+      setProps = props.set
+      return compiledRoot(scope, () =>
+        h(Child, {
+          ...compiledComponentSpread(binding(scope, propsSource, props.get), []),
+        }),
+      )
+    }, host)
+    const paragraph = host.querySelector('p')!
+
+    await setProps({ children: 'second' })
+
+    expect(childRuns).toBe(1)
+    expect(host.querySelector('p')).toBe(paragraph)
+    expect(paragraph.textContent).toBe('second')
+    mounted.dispose()
+  })
+
+  it('rejects keys in reactive component spreads before child construction', () => {
+    const propsSource = source(0)
+    const host = document.createElement('div')
+    const Child: DirectComponent = () => compiledRoot(createCompiledScope(), () => null)
 
     expect(() =>
       mountCompiled(() => {
         const scope = createCompiledScope()
         const props = createCompiledState<Record<string, unknown>>(scope, propsSource, {
-          children: 'unsupported',
+          key: 'unstable-owner',
         })
         return compiledRoot(scope, () =>
           h(Child, {
@@ -184,9 +440,7 @@ describe('compiled DOM corpus', () => {
           }),
         )
       }, host),
-    ).toThrow('reactive component spreads cannot supply key or children')
-    expect(childRuns).toBe(0)
-    expect(host.textContent).toBe('')
+    ).toThrow('reactive component spreads cannot supply key')
   })
 
   it('updates scalar, branch, and keyed parts without rerunning the component', async () => {
@@ -990,6 +1244,69 @@ describe('compiled DOM corpus', () => {
     expect(callbackCleanups).toBe(1)
   })
 
+  it('owns a callback ref supplied by a reactive intrinsic spread', () => {
+    const propsSource = source(0)
+    let attached: HTMLButtonElement | null = null
+    let cleanups = 0
+    const host = document.createElement('div')
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const props = createCompiledState<Record<string, unknown>>(scope, propsSource, {
+        ref: (element: HTMLButtonElement | null) => {
+          attached = element
+          return () => {
+            cleanups += 1
+          }
+        },
+      })
+      return compiledRoot(scope, () =>
+        h('button', {
+          ...compiledSpread(binding(scope, propsSource, props.get), []),
+        }),
+      )
+    }, host)
+
+    expect(attached).toBe(host.querySelector('button'))
+
+    mounted.dispose()
+    expect(cleanups).toBe(1)
+  })
+
+  it('preserves a reactive spread ref through a generated renderable wrapper', () => {
+    const propsSource = source(0)
+    let attached: HTMLInputElement | null = null
+    let cleanups = 0
+    const host = document.createElement('div')
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const props = createCompiledState<Record<string, unknown>>(scope, propsSource, {
+        ref: (element: HTMLInputElement | null) => {
+          attached = element
+          return () => {
+            cleanups += 1
+          }
+        },
+      })
+      const render = createRenderable(
+        {
+          ...compiledSpread(binding(scope, propsSource, props.get), ['suppressHydrationWarning']),
+          suppressHydrationWarning: true,
+        },
+        (input) =>
+          h('input', {
+            ...renderableProps(input),
+            ref: renderableRef(input),
+          }),
+      )
+      return compiledRoot(scope, () => render)
+    }, host)
+
+    expect(attached).toBe(host.querySelector('input'))
+
+    mounted.dispose()
+    expect(cleanups).toBe(1)
+  })
+
   it('retains the previous reactive ref when the next attachment throws', () => {
     const refSource = source(0)
     let setBroken!: ReturnType<typeof createCompiledState<boolean>>['set']
@@ -1013,11 +1330,40 @@ describe('compiled DOM corpus', () => {
     }, host)
 
     expect(() => setBroken(true)).toThrow('reactive ref failed')
-    expect(previousCleanups).toBe(0)
+    expect(previousCleanups).toBe(1)
     expect(host.querySelector('input')).not.toBeNull()
 
     mounted.dispose()
-    expect(previousCleanups).toBe(1)
+    expect(previousCleanups).toBe(2)
+  })
+
+  it('detaches the previous reactive callback ref before attaching its replacement', () => {
+    const refSource = source(0)
+    let setAlternate!: ReturnType<typeof createCompiledState<boolean>>['set']
+    const trace: string[] = []
+    const primaryRef = (node: Element | null): void => {
+      trace.push(`primary:${node === null ? 'detach' : 'attach'}`)
+    }
+    const alternateRef = (node: Element | null): void => {
+      trace.push(`alternate:${node === null ? 'detach' : 'attach'}`)
+    }
+    const host = document.createElement('div')
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const alternate = createCompiledState(scope, refSource, false)
+      setAlternate = alternate.set
+      return compiledRoot(scope, () =>
+        h('input', {
+          ref: binding(scope, refSource, () => (alternate.get() ? alternateRef : primaryRef)),
+        }),
+      )
+    }, host)
+
+    setAlternate(true)
+    expect(trace).toEqual(['primary:attach', 'primary:detach', 'alternate:attach'])
+
+    mounted.dispose()
+    expect(trace.at(-1)).toBe('alternate:detach')
   })
 
   it('rolls back DOM and retains the previous imperative handle when its factory throws', () => {

@@ -21,6 +21,26 @@ fn compiles_minified_automatic_runtime_output_by_import_identity() {
 }
 
 #[test]
+fn exposes_the_same_react_version_as_the_vite_compatibility_facade() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "react-version.jsx",
+            source: r#"
+                import * as React from "react";
+                export function Version() {
+                    return <output>{React.version}</output>;
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("React.version should lower to the compatibility target");
+
+    assert!(output.contains("19.2.0"), "{output}");
+    assert!(!output.contains("React.version"), "{output}");
+}
+
+#[test]
 fn normalizes_jsxs_fragments_and_nested_factory_calls() {
     let source = r#"
         import { Fragment as F, jsx as h, jsxs as m } from "react/jsx-runtime";
@@ -42,6 +62,32 @@ fn normalizes_jsxs_fragments_and_nested_factory_calls() {
     assert!(output.contains("<p"), "{output}");
     assert!(output.contains("data-state"), "{output}");
     assert!(!output.contains("react/jsx-runtime"), "{output}");
+}
+
+#[test]
+fn lowers_factory_fragments_with_keys_to_owned_fragment_components() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "published-keyed-fragment.mjs",
+            source: r#"
+                import * as React from "react";
+                import { jsx } from "react/jsx-runtime";
+                export function Label({ value, keyValue }) {
+                    return jsx(React.Fragment, {
+                        children: value,
+                    }, keyValue);
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("factory fragments with keys should lower into Vidact-owned keyed fragments");
+
+    assert!(
+        output.contains("keyedFragmentComponent as __vidactKeyedFragmentComponent"),
+        "{output}"
+    );
+    assert!(!output.contains("React.Fragment"), "{output}");
 }
 
 #[test]
@@ -100,6 +146,166 @@ fn normalizes_forward_ref_and_plain_memo_component_wrappers() {
         "{output}"
     );
     assert!(!output.contains("props, ref"), "{output}");
+}
+
+#[test]
+fn binds_forward_ref_component_analysis_to_the_exported_variable_name() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "renamed-forward-ref.mjs",
+        source: r#"
+            import React from "react";
+            import { jsx as h } from "react/jsx-runtime";
+            export const Separator = React.forwardRef(function SeparatorComponent(props, ref) {
+                return h("div", { ...props, ref });
+            });
+        "#,
+    })
+    .expect("the exported binding should identify a differently named forwardRef function");
+
+    assert!(
+        output.contains("export const Separator = function SeparatorComponent"),
+        "{output}"
+    );
+    assert!(!output.contains("forwardRef"), "{output}");
+}
+
+#[test]
+fn normalizes_expression_bodied_forward_ref_arrows_from_published_output() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "published-icon.mjs",
+            source: r#"
+                import * as React from "react";
+                function IconBase(props) {
+                    return React.createElement("svg", { ...props });
+                }
+                export const CaretRightIcon = React.forwardRef((props, ref) =>
+                    React.createElement(IconBase, { ref, ...props })
+                );
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("published expression-bodied forwardRef arrows should become component bodies");
+
+    assert!(
+        output.contains("export const CaretRightIcon = (__vidactProps) =>"),
+        "{output}"
+    );
+    assert!(!output.contains("forwardRef"), "{output}");
+    assert!(
+        output.contains("forwardedRef as __vidactForwardedRef"),
+        "{output}"
+    );
+}
+
+#[test]
+fn unwraps_transpiler_named_forward_ref_functions() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "transpiled-forward-ref.mjs",
+        source: r#"
+            import * as React from "react";
+            import { jsx } from "react/jsx-runtime";
+            const __defProp = Object.defineProperty;
+            const __name = (target, value) => __defProp(target, "name", { value, configurable: true });
+            export const Layer = React.forwardRef(
+                __name(function LayerImpl(props, forwardedRef) {
+                    return jsx("div", { ...props, ref: forwardedRef });
+                }, "LayerImpl"),
+            );
+        "#,
+    })
+    .expect("a standard transpiler name helper should not hide an inline forwardRef component");
+
+    assert!(
+        output.contains("export const Layer = function LayerImpl"),
+        "{output}"
+    );
+    assert!(!output.contains("forwardRef"), "{output}");
+    assert!(!output.contains("__name(function"), "{output}");
+}
+
+#[test]
+fn erases_transpiler_name_metadata_on_custom_hook_bindings() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "named-hook.mjs",
+            source: r#"
+                import * as React from "react";
+                const __defProp = Object.defineProperty;
+                const __name = (target, value) => __defProp(target, "name", { value, configurable: true });
+                function useValue() {
+                    const [value, setValue] = React.useState("ready");
+                    return { value, setValue };
+                }
+                __name(useValue, "useValue");
+                export function NamedHook() {
+                    const { value } = useValue();
+                    return React.createElement("output", null, value);
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("verified transpiler name metadata must not keep a hook binding reachable");
+
+    assert!(!output.contains("__name(useValue"), "{output}");
+    assert!(!output.contains("useValue"), "{output}");
+}
+
+#[test]
+fn rejects_user_defined_name_helpers_around_forward_ref_functions() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "opaque-forward-ref-helper.mjs",
+        source: r#"
+            import * as React from "react";
+            import { jsx } from "react/jsx-runtime";
+            const Object = {
+                defineProperty(target) {
+                    globalThis.forwardRefHelperCalls += 1;
+                    return target;
+                },
+            };
+            const __name = (target, value) => Object.defineProperty(target, "name", { value });
+            export const Layer = React.forwardRef(__name(function LayerImpl(props) {
+                return jsx("div", props);
+            }, "LayerImpl"));
+        "#,
+    })
+    .expect_err("an opaque user helper must not be erased as transpiler name metadata");
+
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("forwardRef requires one inline component function")),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn rejects_effectful_name_descriptors_around_forward_ref_functions() {
+    let diagnostics = compile_surgical_module(ModuleInput {
+        filename: "effectful-forward-ref-helper.mjs",
+        source: r#"
+            import * as React from "react";
+            import { jsx } from "react/jsx-runtime";
+            const __name = (target, value) => Object.defineProperty(target, "name", {
+                value,
+                configurable: globalThis.recordForwardRefName(),
+            });
+            export const Layer = React.forwardRef(__name(function LayerImpl(props) {
+                return jsx("div", props);
+            }, "LayerImpl"));
+        "#,
+    })
+    .expect_err("an effectful name descriptor must not be erased as transpiler metadata");
+
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("forwardRef requires one inline component function")),
+        "{diagnostics:?}"
+    );
 }
 
 #[test]
@@ -222,6 +428,27 @@ fn lowers_dynamic_string_create_element_to_the_direct_intrinsic_path() {
 }
 
 #[test]
+fn lowers_one_dynamic_intrinsic_child_into_the_direct_intrinsic_path() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "dynamic-intrinsic-child.mjs",
+        source: r#"
+            import React from 'react';
+            export function DynamicIntrinsic({ Tag, props, children }) {
+                return React.createElement(Tag, props, children);
+            }
+        "#,
+    })
+    .expect("one explicit dynamic intrinsic child should stay under direct DOM ownership");
+
+    assert!(
+        output.contains("dynamicIntrinsicComponent as __vidactDynamicIntrinsicComponent"),
+        "{output}"
+    );
+    assert!(output.contains("childrenOverride"), "{output}");
+    assert!(!output.contains("React.createElement"), "{output}");
+}
+
+#[test]
 fn coalesces_classic_factory_props_before_a_reactive_spread() {
     let output = compile_surgical_module(ModuleInput {
         filename: "factory-spread.tsx",
@@ -240,6 +467,28 @@ fn coalesces_classic_factory_props_before_a_reactive_spread() {
 
     assert!(output.contains("<button"), "{output}");
     assert!(output.contains("type: \"button\""), "{output}");
+    assert!(!output.contains("React.createElement"), "{output}");
+}
+
+#[test]
+fn coalesces_classic_factory_props_before_a_final_children_property() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "factory-spread-children.tsx",
+        source: r#"
+            import React from 'react';
+            export function FactorySpreadChildren({ props, label }) {
+                return React.createElement('button', {
+                    type: 'button',
+                    ...props,
+                    children: React.createElement('span', null, label),
+                });
+            }
+        "#,
+    })
+    .expect("a final children property should remain a child after ordered prop coalescing");
+
+    assert!(output.contains("<button"), "{output}");
+    assert!(output.contains("<span"), "{output}");
     assert!(!output.contains("React.createElement"), "{output}");
 }
 

@@ -8,7 +8,7 @@ use oxc_ast_visit::{
     walk_mut::{walk_expression, walk_statements},
 };
 use oxc_semantic::{Scoping, SemanticBuilder};
-use oxc_span::{SPAN, Span};
+use oxc_span::{GetSpan, SPAN, Span};
 use oxc_syntax::{operator::BinaryOperator, symbol::SymbolId};
 
 use crate::{Diagnostic, DiagnosticCode, SourceSpan, react_bindings::reference_symbol};
@@ -62,6 +62,8 @@ struct LoweredReactBindings {
     removable_namespaces: BTreeSet<SymbolId>,
     clone_elements: BTreeSet<SymbolId>,
     lazy_sentinels: BTreeSet<SymbolId>,
+    react_version_predicates: BTreeSet<SymbolId>,
+    transparent_name_helpers: BTreeSet<SymbolId>,
     wrappers: BTreeMap<SymbolId, WrapperKind>,
 }
 
@@ -135,6 +137,9 @@ impl LoweredReactBindings {
         };
         lazy_sentinels.visit_program(program);
         bindings.lazy_sentinels = lazy_sentinels.symbols;
+        bindings.react_version_predicates =
+            collect_react_version_predicates(program, scoping, &bindings.react_namespaces);
+        bindings.transparent_name_helpers = collect_transparent_name_helpers(program, scoping);
         bindings
     }
 
@@ -245,6 +250,299 @@ impl LoweredReactBindings {
             _ => None,
         }
     }
+
+    fn transparent_name_call(&self, call: &CallExpression<'_>, scoping: &Scoping) -> bool {
+        if call.arguments.len() != 2 || call.arguments.iter().any(Argument::is_spread) {
+            return false;
+        }
+        let Some(identifier) = call.callee.without_parentheses().get_identifier_reference() else {
+            return false;
+        };
+        let Some(symbol) = reference_symbol(identifier, scoping) else {
+            return false;
+        };
+        self.transparent_name_helpers.contains(&symbol)
+            && matches!(
+                call.arguments[0]
+                    .as_expression()
+                    .map(Expression::without_parentheses),
+                Some(Expression::FunctionExpression(_) | Expression::ArrowFunctionExpression(_))
+                    | Some(Expression::Identifier(_))
+            )
+            && matches!(
+                call.arguments[1]
+                    .as_expression()
+                    .map(Expression::without_parentheses),
+                Some(Expression::StringLiteral(_))
+            )
+    }
+}
+
+fn collect_react_version_predicates(
+    program: &Program<'_>,
+    scoping: &Scoping,
+    react_namespaces: &BTreeSet<SymbolId>,
+) -> BTreeSet<SymbolId> {
+    let major_versions = program
+        .body
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::VariableDeclaration(declaration) => Some(declaration.as_ref()),
+            _ => None,
+        })
+        .flat_map(|declaration| &declaration.declarations)
+        .filter_map(|declarator| {
+            let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+                return None;
+            };
+            is_react_major_version(
+                declarator.init.as_ref()?.without_parentheses(),
+                scoping,
+                react_namespaces,
+            )
+            .then(|| identifier.symbol_id.get())
+            .flatten()
+        })
+        .collect::<BTreeSet<_>>();
+
+    program
+        .body
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::FunctionDeclaration(function) => Some(function.as_ref()),
+            _ => None,
+        })
+        .filter_map(|function| {
+            let identifier = function.id.as_ref()?;
+            let [parameter] = function.params.items.as_slice() else {
+                return None;
+            };
+            let BindingPattern::BindingIdentifier(parameter) = &parameter.pattern else {
+                return None;
+            };
+            let parameter_symbol = parameter.symbol_id.get()?;
+            let [Statement::ReturnStatement(return_statement)] =
+                function.body.as_ref()?.statements.as_slice()
+            else {
+                return None;
+            };
+            let Expression::BinaryExpression(comparison) =
+                return_statement.argument.as_ref()?.without_parentheses()
+            else {
+                return None;
+            };
+            if comparison.operator != BinaryOperator::GreaterEqualThan {
+                return None;
+            }
+            let major_symbol = comparison
+                .left
+                .without_parentheses()
+                .get_identifier_reference()
+                .and_then(|reference| reference_symbol(reference, scoping));
+            let threshold_symbol = comparison
+                .right
+                .without_parentheses()
+                .get_identifier_reference()
+                .and_then(|reference| reference_symbol(reference, scoping));
+            (major_symbol.is_some_and(|symbol| major_versions.contains(&symbol))
+                && threshold_symbol == Some(parameter_symbol))
+            .then(|| identifier.symbol_id.get())
+            .flatten()
+        })
+        .collect()
+}
+
+fn is_react_major_version(
+    expression: &Expression<'_>,
+    scoping: &Scoping,
+    react_namespaces: &BTreeSet<SymbolId>,
+) -> bool {
+    let Expression::CallExpression(call) = expression else {
+        return false;
+    };
+    let Some(callee) = call.callee.get_identifier_reference() else {
+        return false;
+    };
+    if callee.name != "parseInt" || reference_symbol(callee, scoping).is_some() {
+        return false;
+    }
+    let [version, radix] = call.arguments.as_slice() else {
+        return false;
+    };
+    let Some(Expression::StaticMemberExpression(version)) = version.as_expression() else {
+        return false;
+    };
+    let namespace = version
+        .object
+        .without_parentheses()
+        .get_identifier_reference()
+        .and_then(|reference| reference_symbol(reference, scoping));
+    version.property.name == "version"
+        && namespace.is_some_and(|symbol| react_namespaces.contains(&symbol))
+        && matches!(
+            radix.as_expression().map(Expression::without_parentheses),
+            Some(Expression::NumericLiteral(value)) if value.value == 10.0
+        )
+}
+
+fn collect_transparent_name_helpers(
+    program: &Program<'_>,
+    scoping: &Scoping,
+) -> BTreeSet<SymbolId> {
+    let define_property_aliases = program
+        .body
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::VariableDeclaration(declaration) => Some(declaration.as_ref()),
+            _ => None,
+        })
+        .flat_map(|declaration| &declaration.declarations)
+        .filter_map(|declarator| {
+            let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+                return None;
+            };
+            is_object_define_property(declarator.init.as_ref()?.without_parentheses(), scoping)
+                .then(|| identifier.symbol_id.get())
+                .flatten()
+        })
+        .collect::<BTreeSet<_>>();
+
+    program
+        .body
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::VariableDeclaration(declaration) => Some(declaration.as_ref()),
+            _ => None,
+        })
+        .flat_map(|declaration| &declaration.declarations)
+        .filter_map(|declarator| {
+            let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
+                return None;
+            };
+            is_transparent_name_helper(
+                declarator.init.as_ref()?.without_parentheses(),
+                &define_property_aliases,
+                scoping,
+            )
+            .then(|| identifier.symbol_id.get())
+            .flatten()
+        })
+        .collect()
+}
+
+fn is_transparent_name_helper(
+    expression: &Expression<'_>,
+    define_property_aliases: &BTreeSet<SymbolId>,
+    scoping: &Scoping,
+) -> bool {
+    let Expression::ArrowFunctionExpression(function) = expression else {
+        return false;
+    };
+    if function.params.rest.is_some() || function.params.items.len() != 2 {
+        return false;
+    }
+    let BindingPattern::BindingIdentifier(target) = &function.params.items[0].pattern else {
+        return false;
+    };
+    let Some(target_symbol) = target.symbol_id.get() else {
+        return false;
+    };
+    let BindingPattern::BindingIdentifier(value) = &function.params.items[1].pattern else {
+        return false;
+    };
+    let Some(value_symbol) = value.symbol_id.get() else {
+        return false;
+    };
+    let Some(Expression::CallExpression(call)) = function.body.as_expression() else {
+        return false;
+    };
+    if call.arguments.len() != 3 || call.arguments.iter().any(Argument::is_spread) {
+        return false;
+    }
+    let callee_is_define_property = match call.callee.without_parentheses() {
+        expression if is_object_define_property(expression, scoping) => true,
+        Expression::Identifier(identifier) => reference_symbol(identifier, scoping)
+            .is_some_and(|symbol| define_property_aliases.contains(&symbol)),
+        _ => false,
+    };
+    if !callee_is_define_property {
+        return false;
+    }
+    let target_matches = call.arguments[0]
+        .as_expression()
+        .and_then(Expression::get_identifier_reference)
+        .and_then(|identifier| reference_symbol(identifier, scoping))
+        == Some(target_symbol);
+    let names_function = matches!(
+        call.arguments[1].as_expression().map(Expression::without_parentheses),
+        Some(Expression::StringLiteral(value)) if value.value == "name"
+    );
+    let static_descriptor = call.arguments[2]
+        .as_expression()
+        .map(Expression::without_parentheses)
+        .is_some_and(|expression| {
+            let Expression::ObjectExpression(descriptor) = expression else {
+                return false;
+            };
+            is_static_name_descriptor(descriptor, value_symbol, scoping)
+        });
+    target_matches && names_function && static_descriptor
+}
+
+fn is_static_name_descriptor(
+    descriptor: &ObjectExpression<'_>,
+    value_symbol: SymbolId,
+    scoping: &Scoping,
+) -> bool {
+    let mut has_value = false;
+    let mut has_configurable = false;
+    for property in &descriptor.properties {
+        let ObjectPropertyKind::ObjectProperty(property) = property else {
+            return false;
+        };
+        if property.computed || property.kind != PropertyKind::Init || property.method {
+            return false;
+        }
+        match property.key.static_name().as_deref() {
+            Some("value") if !has_value => {
+                has_value = property
+                    .value
+                    .without_parentheses()
+                    .get_identifier_reference()
+                    .and_then(|identifier| reference_symbol(identifier, scoping))
+                    == Some(value_symbol);
+                if !has_value {
+                    return false;
+                }
+            }
+            Some("configurable") if !has_configurable => {
+                has_configurable = matches!(
+                    property.value.without_parentheses(),
+                    Expression::BooleanLiteral(value) if value.value
+                );
+                if !has_configurable {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
+    has_value
+}
+
+fn is_object_define_property(expression: &Expression<'_>, scoping: &Scoping) -> bool {
+    matches!(
+        expression,
+        Expression::StaticMemberExpression(member)
+            if member.property.name == "defineProperty"
+                && member
+                    .object
+                    .without_parentheses()
+                    .get_identifier_reference()
+                    .is_some_and(|identifier| {
+                        identifier.name == "Object" && reference_symbol(identifier, scoping).is_none()
+                    })
+    )
 }
 
 struct LazySentinelCollector<'s> {
@@ -920,6 +1218,16 @@ struct LoweredReactNormalizer<'a, 'b> {
 
 impl<'a> VisitMut<'a> for LoweredReactNormalizer<'a, '_> {
     fn visit_statements(&mut self, statements: &mut ArenaVec<'a, Statement<'a>>) {
+        statements.retain(|statement| {
+            let Statement::ExpressionStatement(statement) = statement else {
+                return true;
+            };
+            let Expression::CallExpression(call) = statement.expression.without_parentheses()
+            else {
+                return true;
+            };
+            !self.bindings.transparent_name_call(call, self.scoping)
+        });
         walk_statements(self, statements);
         statements.retain(|statement| {
             !matches!(
@@ -939,6 +1247,46 @@ impl<'a> VisitMut<'a> for LoweredReactNormalizer<'a, '_> {
             return;
         }
         walk_expression(self, expression);
+        if let Expression::StaticMemberExpression(member) = expression.without_parentheses()
+            && member.property.name == "version"
+            && let Some(symbol) = member
+                .object
+                .without_parentheses()
+                .get_identifier_reference()
+                .and_then(|identifier| reference_symbol(identifier, self.scoping))
+            && self.bindings.react_namespaces.contains(&symbol)
+        {
+            let span = member.span;
+            *expression = Expression::new_string_literal(span, "19.2.0", None, &self.ast);
+            *self.consumed.entry(symbol).or_default() += 1;
+            self.changed = true;
+            return;
+        }
+        if let Expression::CallExpression(call) = expression.without_parentheses()
+            && call.arguments.len() == 1
+            && !call.arguments[0].is_spread()
+            && let Some(identifier) = call.callee.get_identifier_reference()
+            && reference_symbol(identifier, self.scoping)
+                .is_some_and(|symbol| self.bindings.react_version_predicates.contains(&symbol))
+            && let Some(Expression::NumericLiteral(version)) = call.arguments[0].as_expression()
+        {
+            let span = call.span;
+            *expression = Expression::new_boolean_literal(span, 19.0 >= version.value, &self.ast);
+            self.changed = true;
+            return;
+        }
+        if let Expression::ConditionalExpression(conditional) = expression.without_parentheses_mut()
+            && let Expression::BooleanLiteral(test) = conditional.test.without_parentheses()
+        {
+            let selected = if test.value {
+                conditional.consequent.take_in(&self.ast)
+            } else {
+                conditional.alternate.take_in(&self.ast)
+            };
+            *expression = selected;
+            self.changed = true;
+            return;
+        }
         if let Expression::BinaryExpression(binary) = expression
             && matches!(
                 binary.operator,
@@ -1042,7 +1390,23 @@ impl<'a> LoweredReactNormalizer<'a, '_> {
                 WrapperKind::Memo => "memo custom comparators are unsupported",
             });
         }
-        let mut component = call.arguments.into_iter().next().unwrap().into_expression();
+        let component = call.arguments.into_iter().next().unwrap().into_expression();
+        let mut component = match component {
+            Expression::CallExpression(name_call)
+                if self
+                    .bindings
+                    .transparent_name_call(&name_call, self.scoping) =>
+            {
+                name_call
+                    .unbox()
+                    .arguments
+                    .into_iter()
+                    .next()
+                    .unwrap()
+                    .into_expression()
+            }
+            component => component,
+        };
         match (kind, &mut component) {
             (WrapperKind::ForwardRef, Expression::FunctionExpression(function)) => {
                 if let Some((symbol, props_name)) =
@@ -1073,6 +1437,23 @@ impl<'a> LoweredReactNormalizer<'a, '_> {
                         props_name,
                     }
                     .visit_arrow_function_body(&mut function.body);
+                }
+                if let Some(expression) = function.body.as_expression() {
+                    let span = expression.span();
+                    let expression = expression.clone_in_with_semantic_ids(self.ast.allocator());
+                    function.body = ArrowFunctionBody::new_function_body(
+                        span,
+                        [],
+                        ArenaVec::from_iter_in(
+                            [Statement::new_return_statement(
+                                span,
+                                Some(expression),
+                                &self.ast,
+                            )],
+                            &self.ast,
+                        ),
+                        &self.ast,
+                    );
                 }
                 Ok(component)
             }
@@ -1117,10 +1498,12 @@ impl<'a> LoweredReactNormalizer<'a, '_> {
         &self,
         call: CallExpression<'a>,
     ) -> Result<Expression<'a>, &'static str> {
-        if !(1..=2).contains(&call.arguments.len())
+        if !(1..=3).contains(&call.arguments.len())
             || call.arguments.iter().any(Argument::is_spread)
         {
-            return Err("cloneElement requires a renderable and optional props object");
+            return Err(
+                "cloneElement supports a renderable, optional props object, and one replacement child",
+            );
         }
         let span = call.span;
         let mut arguments = call.arguments.into_iter();
@@ -1131,6 +1514,14 @@ impl<'a> LoweredReactNormalizer<'a, '_> {
             attributes.push(attribute(
                 "overrides",
                 overrides.into_expression(),
+                span,
+                &self.ast,
+            ));
+        }
+        if let Some(children_override) = arguments.next() {
+            attributes.push(attribute(
+                "childrenOverride",
+                children_override.into_expression(),
                 span,
                 &self.ast,
             ));
@@ -1170,10 +1561,19 @@ impl<'a> LoweredReactNormalizer<'a, '_> {
                 Expression::ObjectExpression(_) | Expression::NullLiteral(_)
             )
         {
+            let children_override = arguments
+                .next()
+                .map(|argument| {
+                    argument_expression(
+                        Some(argument),
+                        "spread children in dynamic React.createElement are unsupported",
+                    )
+                })
+                .transpose()?;
             if arguments.next().is_some() {
-                return Err("dynamic React.createElement children must be supplied through props");
+                return Err("dynamic React.createElement supports at most one explicit child");
             }
-            return Ok(self.lower_dynamic_intrinsic(span, tag, props));
+            return Ok(self.lower_dynamic_intrinsic(span, tag, props, children_override));
         }
         let (mut attributes, mut children) = self.lower_props(props)?;
 
@@ -1205,11 +1605,19 @@ impl<'a> LoweredReactNormalizer<'a, '_> {
         span: Span,
         tag: Expression<'a>,
         props: Expression<'a>,
+        children_override: Option<Expression<'a>>,
     ) -> Expression<'a> {
-        let attributes = [
-            attribute("tag", tag, span, &self.ast),
-            attribute("props", props, span, &self.ast),
-        ];
+        let mut attributes = ArenaVec::new_in(&self.ast);
+        attributes.push(attribute("tag", tag, span, &self.ast));
+        attributes.push(attribute("props", props, span, &self.ast));
+        if let Some(children_override) = children_override {
+            attributes.push(attribute(
+                "childrenOverride",
+                children_override,
+                span,
+                &self.ast,
+            ));
+        }
         let name = JSXElementName::new_identifier_reference(
             span,
             "__vidactDynamicIntrinsicComponent",
@@ -1233,14 +1641,36 @@ impl<'a> LoweredReactNormalizer<'a, '_> {
         fragment: bool,
     ) -> Result<Expression<'a>, &'static str> {
         if fragment {
-            if !attributes.is_empty() {
+            if attributes.is_empty() {
+                return Ok(Expression::new_jsx_fragment(
+                    span,
+                    JSXOpeningFragment::new(span, &self.ast),
+                    children,
+                    JSXClosingFragment::new(span, &self.ast),
+                    &self.ast,
+                ));
+            }
+            if attributes.len() != 1
+                || !matches!(
+                    &attributes[0],
+                    JSXAttributeItem::Attribute(attribute) if attribute.is_identifier("key")
+                )
+            {
                 return Err("React.Fragment props other than children are unsupported");
             }
-            return Ok(Expression::new_jsx_fragment(
+            let name = JSXElementName::new_identifier_reference(
                 span,
-                JSXOpeningFragment::new(span, &self.ast),
+                "__vidactKeyedFragmentComponent",
+                &self.ast,
+            );
+            let closing =
+                JSXClosingElement::boxed(span, name.clone_in(self.ast.allocator()), &self.ast);
+            let opening = JSXOpeningElement::boxed(span, name, None, attributes, &self.ast);
+            return Ok(Expression::new_jsx_element(
+                span,
+                opening,
                 children,
-                JSXClosingFragment::new(span, &self.ast),
+                Some(closing),
                 &self.ast,
             ));
         }
@@ -1280,6 +1710,7 @@ impl<'a> LoweredReactNormalizer<'a, '_> {
                 .any(|property| matches!(property, ObjectPropertyKind::ObjectProperty(_)))
         }) {
             let mut key = None;
+            let mut children = ArenaVec::new_in(&self.ast);
             for (index, property) in object.properties.iter().enumerate() {
                 let ObjectPropertyKind::ObjectProperty(property) = property else {
                     continue;
@@ -1288,9 +1719,12 @@ impl<'a> LoweredReactNormalizer<'a, '_> {
                     return Err("React factory prop name must be statically known");
                 };
                 if name == "children" {
-                    return Err(
-                        "React factory props mixing leading properties, spreads, and children are unsupported",
-                    );
+                    if index + 1 != object.properties.len() {
+                        return Err(
+                            "React factory children after a leading prop and spread must be last",
+                        );
+                    }
+                    append_children(&property.value, property.span, &mut children, &self.ast);
                 }
                 if name == "key" {
                     if index + 1 != object.properties.len() {
@@ -1308,7 +1742,7 @@ impl<'a> LoweredReactNormalizer<'a, '_> {
             }
             let mut merged = object.clone_in_with_semantic_ids(self.ast.allocator());
             merged.properties.retain(|property| {
-                !matches!(property, ObjectPropertyKind::ObjectProperty(property) if property.key.static_name().as_deref() == Some("key"))
+                !matches!(property, ObjectPropertyKind::ObjectProperty(property) if matches!(property.key.static_name().as_deref(), Some("key" | "children")))
             });
             let mut attributes = ArenaVec::new_in(&self.ast);
             attributes.push(JSXAttributeItem::new_spread_attribute(
@@ -1319,7 +1753,7 @@ impl<'a> LoweredReactNormalizer<'a, '_> {
             if let Some((span, value)) = key {
                 attributes.push(attribute("key", value, span, &self.ast));
             }
-            return Ok((attributes, ArenaVec::new_in(&self.ast)));
+            return Ok((attributes, children));
         }
         let mut attributes = ArenaVec::new_in(&self.ast);
         let mut children = ArenaVec::new_in(&self.ast);

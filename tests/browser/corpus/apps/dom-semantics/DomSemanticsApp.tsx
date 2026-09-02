@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 const forgedNamespace = { __vidactNamespace: 'svg' }
 
@@ -66,6 +66,7 @@ function DeferredMath({ visible }: { visible: boolean }): JSX.Element {
 }
 
 export function DomSemanticsApp(): JSX.Element {
+  const multiSpreadRef = useRef<HTMLSpanElement>(null)
   const [active, setActive] = useState(true)
   const [value, setValue] = useState('seed')
   const [checked, setChecked] = useState(false)
@@ -79,6 +80,7 @@ export function DomSemanticsApp(): JSX.Element {
   const [notes, setNotes] = useState('notes')
   const [radio, setRadio] = useState('a')
   const [spreadClicks, setSpreadClicks] = useState(0)
+  const [multiSpreadPhase, setMultiSpreadPhase] = useState(false)
   const [spreadProps, setSpreadProps] = useState<{
     title?: string
     hidden?: boolean
@@ -117,6 +119,22 @@ export function DomSemanticsApp(): JSX.Element {
       >
         Toggle spread
       </button>
+      <button data-toggle-multi-spread onClick={() => setMultiSpreadPhase((current) => !current)}>
+        Toggle ordered spreads
+      </button>
+
+      <span
+        {...(multiSpreadPhase
+          ? { title: 'first updated', hidden: true, 'data-layer': 'first updated' }
+          : { title: 'first', hidden: false, 'data-layer': 'first' })}
+        ref={multiSpreadRef}
+        role={multiSpreadPhase ? 'status' : 'button'}
+        {...(multiSpreadPhase
+          ? { title: 'second updated', hidden: false }
+          : { title: 'second', hidden: false, 'data-layer': 'second' })}
+        data-final={multiSpreadPhase ? 'two' : 'one'}
+        data-multi-spread-target
+      />
 
       <button {...spreadProps} data-fixed="explicit" data-spread-target>
         Spread target
@@ -187,6 +205,7 @@ export function DomSemanticsApp(): JSX.Element {
         />
       </label>
       <output data-controlled-output>{value}</output>
+      <input data-uncontrolled-default defaultValue="draft" />
       <input data-controlled-restore value="locked" />
       <input data-controlled-stop value="locked" onChange={(event) => event.stopPropagation()} />
       <input

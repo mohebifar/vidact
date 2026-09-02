@@ -1,0 +1,117 @@
+---
+title: State
+description: Add memory to a component with useState and useReducer, and learn what happens when you update it.
+group: Learn
+---
+
+State is a value a component remembers between interactions. Declare it with `useState`, read it in JSX, and change it with the setter. That is the entire API, and it works like React's.
+
+```tsx
+import { useState } from 'react'
+
+export function Counter() {
+  const [count, setCount] = useState(0)
+
+  return (
+    <button onClick={() => setCount(count + 1)}>
+      Clicked {count} times
+    </button>
+  )
+}
+```
+
+<Preview variant="counter" />
+
+## What a state update does
+
+Calling `setCount` stores the new value and marks `count` as changed. Vidact then runs every updater the compiler attached to `count`: here, the one that rewrites the button's text. The `Counter` function itself does not run again.
+
+This has two consequences you will feel right away:
+
+- **Derived values update automatically.** If you write `const doubled = count * 2` and use `doubled` in JSX, the compiler generates a step that recomputes `doubled` when `count` changes.
+- **Handlers read fresh values.** The `count` inside `onClick` is rewritten to read the current slot, so `setCount(count + 1)` never sees a stale value.
+
+Functional updates are still supported and still useful when you want to apply several changes in one event:
+
+```tsx
+const increment = () => {
+  setCount((value) => value + 1)
+  setCount((value) => value + 1)
+}
+```
+
+Both updates are applied before the DOM is touched, and the text updates once.
+
+## Initial values
+
+Pass a value or a function. A function initializer runs once, when the component mounts.
+
+```tsx
+const [items, setItems] = useState(() => loadFromStorage())
+```
+
+## Batching
+
+Every synchronous state write inside a Vidact-managed event handler is batched. The DOM is updated once at the end of the handler, and each affected updater runs at most once per batch, even if several sources changed. You never need to think about this, but it means intermediate states are never painted.
+
+Writes outside an event handler, for example in a `setTimeout` callback or after an `await`, are flushed at the end of the current microtask, so consecutive writes there still produce a single DOM update. If you need the DOM updated before the next line of code runs, `flushSync` from `react-dom` is available with the `concurrent` feature.
+
+## Objects and arrays
+
+Treat state as immutable, exactly as in React. Replace objects and arrays rather than mutating them, so that Vidact can see that something changed.
+
+```tsx
+const [todo, setTodo] = useState({ title: '', done: false })
+
+setTodo({ ...todo, done: true })
+
+const [todos, setTodos] = useState<Todo[]>([])
+
+setTodos((current) => [...current, newTodo])
+setTodos((current) => current.filter((item) => item.id !== id))
+```
+
+When an array is rendered with `.map()` and keys, replacing it does not rebuild the list. Vidact compares keys and only inserts, moves, or removes the rows that changed. [Lists and keys](/docs/learn/lists-and-keys) explains how.
+
+## Reducers
+
+`useReducer` is the right choice when the next state depends on several kinds of input or when update logic is worth isolating for tests.
+
+```tsx
+import { useReducer } from 'react'
+
+type Action = { type: 'increment' } | { type: 'reset'; value: number }
+
+function reducer(count: number, action: Action) {
+  switch (action.type) {
+    case 'increment':
+      return count + 1
+    case 'reset':
+      return action.value
+  }
+}
+
+export function Counter() {
+  const [count, dispatch] = useReducer(reducer, 0)
+
+  return (
+    <div>
+      <output>{count}</output>
+      <button onClick={() => dispatch({ type: 'increment' })}>+1</button>
+      <button onClick={() => dispatch({ type: 'reset', value: 0 })}>Reset</button>
+    </div>
+  )
+}
+```
+
+`dispatch` has a stable identity for the life of the component, and a lazy initializer is supported as the third argument.
+
+## Where state lives
+
+State belongs to the component that declares it, and it is destroyed when that component is removed. A component inside a conditional branch loses its state when the branch is switched off; a row in a keyed list keeps its state as long as its key is present. This is the same rule as React, and [Ownership and identity](/docs/internals/ownership) describes the mechanics.
+
+To share state between components, lift it to a common parent and pass it down as props, or use [context](/docs/learn/context). For state that must outlive a component tree, for example across hot module replacement, use an external store with `useSyncExternalStore`.
+
+## State is local to the compiled component
+
+One restriction worth knowing: `useState` must be called directly inside a component or a custom hook in the same module. A helper in another file that calls `useState` and returns the pair cannot be compiled, because Vidact needs to see the call to allocate a slot for it. The compiler reports this as an unsupported call at the `useState` site.

@@ -30,6 +30,8 @@ export {
   keyed,
   mountCompiled,
   mountCompiledRef,
+  objectRest,
+  runWithCompiledContext,
   use,
   useCallback,
   useContext,
@@ -57,7 +59,6 @@ export type {
 } from './compiled/types.ts'
 export { compiledComponentSpread } from './component-spread.ts'
 export {
-  createElement,
   Fragment,
   h,
   type DirectChild,
@@ -66,15 +67,17 @@ export {
 } from './direct-dom.ts'
 export { nestedProp } from './nested-prop.ts'
 export { assertRuntimeProtocol, VIDACT_RUNTIME_PROTOCOL } from './protocol.ts'
-export { useRef, type MutableRef } from './ref.ts'
+export { createRef, useRef, type MutableRef } from './ref.ts'
 export {
   cloneRenderable,
   cloneRenderableComponent,
   createReactElement,
+  createReactElement as createElement,
   createRenderable,
   dynamicIntrinsicComponent,
   forwardedRef,
   isRenderable,
+  keyedFragmentComponent,
   renderableChildren,
   renderableMarker,
   renderableProps,

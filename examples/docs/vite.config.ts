@@ -1,17 +1,20 @@
-import mdx from '@mdx-js/rollup'
-import tailwindcss from '@tailwindcss/vite'
-import { vidact } from '@vidact/vite'
 import { playwright } from '@vitest/browser-playwright'
 import { defineConfig } from 'vitest/config'
 
+import { docsPlugins, docsResolve } from './vite.shared.ts'
+
 export default defineConfig({
-  plugins: [
-    { ...mdx({ jsx: true }), enforce: 'pre' },
-    vidact({ extensions: ['.tsx', '.mdx'] }),
-    tailwindcss(),
-  ],
+  plugins: docsPlugins(),
+  resolve: docsResolve,
+  server: {
+    host: '127.0.0.1',
+    port: Number(process.env.PORT ?? 5173),
+  },
+  ssr: {
+    noExternal: [],
+  },
   test: {
-    include: ['src/**/*.browser.test.ts'],
+    include: ['src/**/*.browser.test.{ts,tsx}'],
     browser: {
       enabled: true,
       headless: true,

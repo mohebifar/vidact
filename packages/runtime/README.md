@@ -26,7 +26,7 @@ Capabilities compose through separate imports. Hydrate builds import
 `@vidact/runtime/server` plus the framework protocol or streaming entry when
 needed. There are no feature cross-product or target-alias facades.
 
-The compiler and runtime validate the `vidact-runtime-v1` protocol. Server and
+The compiler and runtime validate the `vidact-runtime-v2` protocol. Server and
 hydration builds must use matching package versions.
 
 Framework client boundaries use the closed `vidact-framework-v1` value model.

@@ -14,6 +14,7 @@ const CLONE_RENDERABLE: &str = "__vidactCloneRenderable";
 const CLONE_RENDERABLE_COMPONENT: &str = "__vidactCloneRenderableComponent";
 const CREATE_RENDERABLE: &str = "__vidactCreateRenderable";
 const DYNAMIC_INTRINSIC_COMPONENT: &str = "__vidactDynamicIntrinsicComponent";
+const KEYED_FRAGMENT_COMPONENT: &str = "__vidactKeyedFragmentComponent";
 const FORWARDED_REF: &str = "__vidactForwardedRef";
 const IS_RENDERABLE: &str = "__vidactIsRenderable";
 const RENDERABLE_CHILDREN: &str = "__vidactRenderableChildren";
@@ -47,6 +48,7 @@ pub(crate) fn lower_server_renderables<'a>(
         ("cloneRenderableComponent", CLONE_RENDERABLE_COMPONENT),
         ("createRenderable", CREATE_RENDERABLE),
         ("dynamicIntrinsicComponent", DYNAMIC_INTRINSIC_COMPONENT),
+        ("keyedFragmentComponent", KEYED_FRAGMENT_COMPONENT),
         ("forwardedRef", FORWARDED_REF),
         ("isRenderable", IS_RENDERABLE),
         ("renderableChildren", RENDERABLE_CHILDREN),
@@ -177,11 +179,11 @@ impl<'a> VisitMut<'a> for ServerRenderableTransformer<'a, '_, '_> {
 
     fn visit_call_expression(&mut self, call: &mut CallExpression<'a>) {
         let replacement = if self.react.is_clone_element_call(call) {
-            if !(1..=2).contains(&call.arguments.len())
+            if !(1..=3).contains(&call.arguments.len())
                 || call.arguments.iter().any(Argument::is_spread)
             {
                 self.diagnostic = Some(unsupported_at(
-                    "cloneElement requires a renderable and optional props object",
+                    "cloneElement supports a renderable, optional props object, and one replacement child",
                     call.span,
                 ));
                 return;

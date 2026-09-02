@@ -1,4 +1,9 @@
-import { mountCompiledPropTransition, registerCompiledCleanup } from './compiled/core.ts'
+import {
+  binding as createBinding,
+  mountCompiledPropTransition,
+  mountCompiledRef,
+  registerCompiledCleanup,
+} from './compiled/core.ts'
 import type { CompiledBinding } from './compiled/types.ts'
 import { attachEventProp, isEventProp } from './dom/events.ts'
 import { INTERNAL_NAMESPACE_PROP } from './dom/intrinsic.ts'
@@ -30,11 +35,24 @@ function mountReactiveSpread(
   const cleanups = new Map<string, () => void>()
   let controlledCleanup: (() => void) | undefined
   let restoreAfterChildren = false
+  const active = (value: unknown): Record<string, unknown> => {
+    if (value === null || value === undefined) return {}
+    if (typeof value !== 'object' || Array.isArray(value)) {
+      throw new TypeError(DEV ? 'reactive JSX spread value must be an object or nullish' : 'V105')
+    }
+    return value as Record<string, unknown>
+  }
+  if (!overrides.has('ref')) {
+    mountCompiledRef(
+      element,
+      createBinding(binding[2], binding[3], () => active(binding[1]()).ref, binding[4], binding[5]),
+    )
+    overrides.add('ref')
+  }
   const apply = (name: string, value: unknown): (() => void) => {
     if (
       name === 'children' ||
       name === 'key' ||
-      name === 'ref' ||
       name === 'dangerouslySetInnerHTML' ||
       name === INTERNAL_NAMESPACE_PROP
     ) {
@@ -51,13 +69,6 @@ function mountReactiveSpread(
     if (isEventProp(name)) return attachEventProp(element, name, value)
     applyDomProp(element, name, value)
     return () => {}
-  }
-  const active = (value: unknown): Record<string, unknown> => {
-    if (value === null || value === undefined) return {}
-    if (typeof value !== 'object' || Array.isArray(value)) {
-      throw new TypeError(DEV ? 'reactive JSX spread value must be an object or nullish' : 'V105')
-    }
-    return value as Record<string, unknown>
   }
   const visibleEntries = (value: Record<string, unknown>): Array<[string, unknown]> =>
     Object.entries(value).filter(([name]) => !overrides.has(name))

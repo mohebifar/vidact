@@ -47,6 +47,7 @@
     "rolldown": "1.2.5"
   },
   "devDependencies": {
+    "@base-ui/react": "1.7.0",
     "@types/node": "^24.13.3",
     "typescript": "7.0.2",
     "vite": "8.2.2",

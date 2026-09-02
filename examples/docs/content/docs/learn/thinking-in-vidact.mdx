@@ -1,0 +1,86 @@
+---
+title: Thinking in Vidact
+description: Components run once. Everything else about writing Vidact code follows from that one idea.
+group: Learn
+---
+
+If you have written React, you already know how to write Vidact. The syntax is the same, the hooks are the same, and the way you break a UI into components is the same. What changes is what happens at runtime, and understanding that change up front will save you from a handful of surprises later.
+
+## React re-renders. Vidact does not.
+
+In React, a component is a function that runs every time its state or props change. React calls it, gets back a new tree of elements, and diffs that tree against the previous one to work out what to change in the DOM.
+
+In Vidact, a component is a function that runs **once**, when it mounts. The compiler reads the function ahead of time and works out which parts of the output depend on which values. It then emits two things: code that builds the DOM, and a list of small *updaters*, each tied to the values it reads. When you call a state setter, Vidact runs the updaters that depend on that value and nothing else.
+
+Take this component:
+
+```tsx
+import { useState } from 'react'
+
+export function Quantity() {
+  const [quantity, setQuantity] = useState(1)
+  const total = quantity * 24
+
+  return (
+    <div>
+      <button onClick={() => setQuantity(quantity + 1)}>Add one</button>
+      <p>{quantity} items, ${total}</p>
+    </div>
+  )
+}
+```
+
+React would re-run `Quantity` on every click, recompute `total`, rebuild the element tree, and diff it. Vidact compiles it to roughly this:
+
+- Create the `<div>`, `<button>`, and `<p>` elements and attach the click listener.
+- When `quantity` changes: recompute `total`, then update the two text nodes inside `<p>`.
+
+That is the whole program. There is no tree to diff and no work to skip because none was scheduled in the first place.
+
+## What stays the same
+
+Nearly everything you would write in a modern React function component:
+
+- `useState`, `useReducer`, `useRef`, `useMemo`, `useCallback`, `useId`
+- `useEffect`, `useLayoutEffect`, `useImperativeHandle`, `useEffectEvent`
+- `createContext`, `useContext`, `use(context)`, `useSyncExternalStore`
+- JSX with fragments, conditionals, `.map()` over arrays, `key`, spreads, and `ref`
+- Custom hooks that compose the hooks above
+- Controlled and uncontrolled forms, portals, error boundaries
+
+Derived values keep working too. In the example above, `total` is not state, but the compiler noticed that it depends on `quantity` and recomputes it when `quantity` changes. You do not need `useMemo` to make that happen, and you do not need it for performance either. Memoization hooks are still honored where identity is observable, for example when a value is passed to an effect's dependency list, but they are no longer a tool for avoiding re-renders because there are no re-renders.
+
+## What is different
+
+A few habits from React do not carry over. Each one is a direct consequence of "the function runs once."
+
+### The component body is not a place for side effects
+
+Anything you do directly in the body of a component happens exactly once. A `console.log` runs once. A fetch runs once. In React that code would run on every render, and some code accidentally depends on that. In Vidact, put work that should respond to changes into `useEffect`, and put reads of external mutable state into `useSyncExternalStore`.
+
+### Handlers always see current values
+
+In React, the closure a handler captured may hold an older value of state, which is why functional updates like `setCount(c => c + 1)` exist. In Vidact the compiler rewrites state reads so that a handler reads the value at the moment it runs. `setCount(count + 1)` and `setCount((c) => c + 1)` behave the same. Functional updates are still good style when several writes happen in one event.
+
+### Props and outer variables are read-only during construction
+
+Assigning to a prop, mutating a prop object, or writing to a module-level variable inside a component body is rejected by the compiler with a `DestructiveRenderMutation` diagnostic. These patterns only ever worked in React by accident. Move the write into an event handler or an effect, or copy the value into local state.
+
+### There is no "render count" to optimize
+
+`memo`, `useMemo`, and `useCallback` are accepted for compatibility, but they do not skip work the way they do in React. If you find yourself reaching for them to fix performance, stop. The compiler has already done that job.
+
+### Unsupported code fails at compile time
+
+Vidact never falls back to running React. If you use a class component, `React.Children`, or a feature you have not enabled, the build fails with an error pointing at the exact expression. This is deliberate: a silent fallback would mean two rendering models fighting over the same DOM. The [troubleshooting guide](/docs/guides/troubleshooting) explains how to read those errors.
+
+## A mental model
+
+When you write a Vidact component, picture it as a description of a piece of DOM plus the rules for keeping it current:
+
+1. **Structure.** The JSX describes elements that are created once.
+2. **Sources.** State, props, context, and store snapshots are the values that can change.
+3. **Bindings.** Every expression in the JSX that reads a source becomes a binding the compiler keeps up to date.
+4. **Effects.** Anything that must happen *because* a source changed, outside the DOM, lives in an effect.
+
+That is the whole picture. The rest of the Learn section fills in each part.

@@ -1,6 +1,4 @@
 /// <reference types="vite/client" />
-
-declare module '*.mdx' {
-  const Content: (props: { readonly components?: Record<string, unknown> }) => JSX.Element
-  export default Content
-}
+/// <reference types="@vgpu/wgsl/wgsl-types" />
+// oxlint-disable-next-line import/no-unassigned-import -- Register the generated route module.
+import '@vidact/start/virtual'

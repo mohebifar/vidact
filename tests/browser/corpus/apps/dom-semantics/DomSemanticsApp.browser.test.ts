@@ -136,6 +136,39 @@ describe('compiled DOM semantics app', () => {
     expect(clicks.textContent).toBe('21')
   })
 
+  it('applies multiple reactive spreads in source order without remounting', async () => {
+    const host = mountApp()
+    const target = host.querySelector<HTMLElement>('[data-multi-spread-target]')!
+    const toggle = host.querySelector<HTMLButtonElement>('[data-toggle-multi-spread]')!
+
+    expect(target.title).toBe('second')
+    expect(target.hidden).toBe(false)
+    expect(target.dataset.layer).toBe('second')
+    expect(target.dataset.final).toBe('one')
+    expect(target.getAttribute('role')).toBe('button')
+
+    const capture = await captureMutations(host, () => toggle.click())
+
+    expect(host.querySelector('[data-multi-spread-target]')).toBe(target)
+    expect(target.title).toBe('second updated')
+    expect(target.hidden).toBe(false)
+    expect(target.dataset.layer).toBe('first updated')
+    expect(target.dataset.final).toBe('two')
+    expect(target.getAttribute('role')).toBe('status')
+    expect(() =>
+      assertMutationEnvelope(
+        capture.records,
+        [
+          { type: 'attributes', target, attributeName: 'title' },
+          { type: 'attributes', target, attributeName: 'data-layer' },
+          { type: 'attributes', target, attributeName: 'data-final' },
+          { type: 'attributes', target, attributeName: 'role' },
+        ],
+        'ordered reactive spread update',
+      ),
+    ).not.toThrow()
+  })
+
   it('updates attributes and styles without retaining stale values or remounting', async () => {
     const host = mountApp()
     const semantics = host.querySelector<HTMLElement>('[data-boolean]')!
@@ -189,6 +222,7 @@ describe('compiled DOM semantics app', () => {
     const eventOrder = host.querySelector<HTMLOutputElement>('[data-event-order]')!
     const text = host.querySelector<HTMLInputElement>('[data-controlled-text]')!
     const textOutput = host.querySelector<HTMLOutputElement>('[data-controlled-output]')!
+    const uncontrolled = host.querySelector<HTMLInputElement>('[data-uncontrolled-default]')!
     const restore = host.querySelector<HTMLInputElement>('[data-controlled-restore]')!
     const stopped = host.querySelector<HTMLInputElement>('[data-controlled-stop]')!
     const stoppedImmediate = host.querySelector<HTMLInputElement>(
@@ -229,6 +263,14 @@ describe('compiled DOM semantics app', () => {
         'controlled onChange keyboard input',
       ),
     ).not.toThrow()
+
+    const uncontrolledUpdate = await captureMutations(host, async () => {
+      await userEvent.clear(uncontrolled)
+      await userEvent.type(uncontrolled, 'edited draft')
+    })
+    expect(host.querySelector('[data-uncontrolled-default]')).toBe(uncontrolled)
+    expect(uncontrolled.value).toBe('edited draft')
+    expect(uncontrolledUpdate.records).toHaveLength(0)
 
     restore.value = 'browser edit'
     const restoreMutations = startMutationCapture(host)

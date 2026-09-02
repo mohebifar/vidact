@@ -136,6 +136,35 @@ describe('compiled error boundaries', () => {
     passive.dispose()
   })
 
+  it('routes reactive event-handler read failures through the logical boundary', () => {
+    const handlerSource = source(0)
+    const failures: string[] = []
+    const host = document.createElement('div')
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const boundary = errorBoundary(
+        () =>
+          h('button', {
+            'data-event': true,
+            onClick: compiledEvent(
+              scope,
+              binding(scope, handlerSource, () => {
+                throw new Error('handler read failed')
+              }),
+            ),
+          }),
+        (error) => h('p', { 'data-fallback': true }, (error as Error).message),
+        (error) => failures.push((error as Error).message),
+      )
+      return compiledRoot(scope, () => boundary)
+    }, host)
+
+    expect(() => host.querySelector<HTMLButtonElement>('[data-event]')!.click()).not.toThrow()
+    expect(host.querySelector('[data-fallback]')?.textContent).toBe('handler read failed')
+    expect(failures).toEqual(['handler read failed'])
+    mounted.dispose()
+  })
+
   it('reports uncaught mount and update failures at the root', () => {
     const errors: unknown[] = []
     const host = document.createElement('div')

@@ -1,0 +1,133 @@
+---
+title: "@vidact/start"
+description: Route definitions, the client, the server handler, and the Vite plugin for Vidact Start.
+group: Reference
+---
+
+Vidact Start is split across four entry points: `@vidact/start` for route modules, `@vidact/start/client` for the browser, `@vidact/start/server` for the request handler, and `@vidact/start/vite` for the plugin.
+
+## @vidact/start
+
+### defineFileRoute(options)
+
+Creates the `Route` export of a route module.
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `component` | `(props: RouteComponentProps<Data>) => VidactNode` | The route's UI. Must be a named function |
+| `loader` | `(context: RouteLoaderContext) => Data \| Promise<Data>` | Runs on the server before rendering; its result becomes `loaderData` |
+| `server.handlers` | `Record<string, RouteServerHandler>` | HTTP method handlers, keyed by uppercase method name |
+
+### RouteComponentProps\<Data\>
+
+| Prop | Type | Description |
+| --- | --- | --- |
+| `loaderData` | `Data` | The loader's result |
+| `params` | `Record<string, string>` | Dynamic segments; the catch-all remainder is under `'*'` |
+| `requestUrl` | `string` | The current request URL |
+| `children` | `VidactNode` | The matched child route, in layouts |
+
+### RouteLoaderContext
+
+| Field | Type |
+| --- | --- |
+| `params` | `Record<string, string>` |
+| `request` | `Request` |
+| `parentData` | `Record<string, FrameworkValue>` keyed by ancestor route ID |
+
+### RouteServerContext
+
+`{ params, request }`. Handlers return a `Response` or a promise of one.
+
+### Link
+
+Renders an `<a>` that navigates client-side after hydration.
+
+| Prop | Description |
+| --- | --- |
+| `href` | Target URL, required |
+| `replace` | Replace the history entry instead of pushing |
+| `reloadDocument` | Let the browser perform a full navigation |
+
+All other props are passed to the anchor.
+
+### Router helpers
+
+`matchRoutes`, `createRouteManifest`, `runRouteLoaders`, and related functions are exported for advanced use and for tests. Their signatures follow the types above.
+
+## @vidact/start/client
+
+### hydrateStart(options)
+
+Hydrates the current page and installs navigation handling. Resolves to a `StartClient`.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `manifest` | required | The route manifest from `virtual:vidact-start/routes` |
+| `root` | `document` | Where to look for the root element |
+| `rootId` | `'vidact-start-root'` | ID of the element containing the app HTML |
+| `snapshotId` | `'vidact-start-snapshot'` | ID of the `<script type="application/json">` holding loader data |
+| `snapshot` | read from DOM | Override the snapshot text |
+| `fetch` | `globalThis.fetch` | Used for navigation requests |
+
+### StartClient
+
+| Member | Description |
+| --- | --- |
+| `navigate(to, options?)` | Navigate to a URL. Resolves `true` when applied, `false` when cancelled. Options: `replace`, `scroll` |
+| `replace(component)` | Replace the route root with an arbitrary compiled application |
+| `unmount()` | Remove listeners and dispose the root |
+
+## @vidact/start/server
+
+### createStartHandler(options)
+
+Returns `(request: Request) => Promise<Response>`.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `manifest` | required | The route manifest |
+| `clientEntry` | none | URL of the client script to include in the document |
+| `renderDocument(context)` | built-in template | Produce the full HTML document |
+| `notFound(request)` | 404 text response | Called when no route matches |
+| `rootId` | `'vidact-start-root'` | ID for the root element |
+| `snapshotId` | `'vidact-start-snapshot'` | ID for the snapshot script |
+
+The handler serves route components on `GET` and `HEAD`, dispatches other methods to `server.handlers`, and answers navigation requests (identified by a request header) with a snapshot instead of a document.
+
+### renderDocument context
+
+```ts
+{
+  applicationHtml: string   // the rendered route tree
+  clientEntry: string | undefined
+  rootId: string
+  snapshot: string          // JSON, already escaped for a <script> element
+  snapshotId: string
+}
+```
+
+Your template must place `applicationHtml` inside an element with `id={rootId}`, and `snapshot` inside `<script id={snapshotId} type="application/json">`, and load `clientEntry` as a module. Do not decode or transform the snapshot.
+
+## @vidact/start/vite
+
+### vidactStart(options)
+
+Returns the Vite plugins for a Start project.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `routesDirectory` | `'src/routes'` | Where to discover routes |
+| `serverEntry` | `'src/server.ts'` | Module whose default export is the request handler for `vite dev`; `false` disables the dev middleware |
+| `serverExport` | `'default'` | Export name of the handler in `serverEntry` |
+| `compiler` | `{}` | Options passed to `@vidact/vite`, except `target`, which Start controls |
+
+The `framework` feature is always enabled. Pass additional features through `compiler.features`.
+
+### virtual:vidact-start/routes
+
+A generated module exporting `routeManifest`, built from the routes directory. Import it in the client entry and the server handler.
+
+## Constants
+
+`VIDACT_START_NAVIGATION_HEADER` and `VIDACT_START_SNAPSHOT_MEDIA_TYPE` identify navigation requests and responses, for tests and proxies.
