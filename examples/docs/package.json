@@ -22,12 +22,14 @@
     "fumadocs-core": "16.15.4",
     "remark-gfm": "4.0.1",
     "shiki": "4.4.3",
-    "srvx": "^0.12.7"
+    "srvx": "^0.12.7",
+    "vgpu": "^0.3.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
+    "@vgpu/wgsl": "^0.3.1",
     "@vidact/react-types": "workspace:*",
     "@vidact/test-support": "workspace:*",
     "@vidact/vite": "workspace:*",

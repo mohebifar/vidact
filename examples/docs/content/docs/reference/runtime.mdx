@@ -1,33 +1,131 @@
 ---
-title: @vidact/runtime
-description: Root APIs and capability-specific runtime entry points.
+title: "@vidact/runtime"
+description: Roots, error boundaries, hydration, server rendering, and the per-feature entry points compiled code depends on.
 group: Reference
-kind: Reference
 ---
 
-## Root APIs
+`@vidact/runtime` is what compiled components call. Application code uses a small part of it directly: the functions that create roots, plus `errorBoundary`. Everything imported from `react` and `react-dom` resolves here too.
 
-| API | Behavior |
+## Mounting
+
+### mountCompiled(component, host, options?)
+
+Constructs `component` inside `host` and returns `{ dispose }`. Call `dispose()` to remove the DOM and run every cleanup.
+
+```ts
+import { mountCompiled } from '@vidact/runtime'
+
+const { dispose } = mountCompiled(App, document.querySelector('#app')!)
+```
+
+### createRoot(host, options?)
+
+Returns a root with `mount(component)`, `replace(component)`, and `unmount()`. `replace` constructs the new application first and disposes the previous one only after the new one has mounted, so the host is never empty. Use it when you swap applications at runtime.
+
+```ts
+import { createRoot } from '@vidact/runtime'
+
+const root = createRoot(host)
+root.mount(App)
+root.replace(OtherApp)
+root.unmount()
+```
+
+Unlike React, a root takes the component function rather than a JSX element, and it is not re-rendered with new props. Put changing data in state, context, or a store.
+
+### mountHotRoot(hot, host, component, options?)
+
+`createRoot` wired to Vite's HMR API. On first evaluation it mounts; on later evaluations of the same module it replaces. The entry module must also contain `import.meta.hot.accept()` literally, so Vite marks it as a boundary.
+
+```ts
+import { mountHotRoot } from '@vidact/runtime'
+
+if (import.meta.hot) {
+  mountHotRoot(import.meta.hot, host, App)
+  import.meta.hot.accept()
+} else {
+  mountCompiled(App, host)
+}
+```
+
+### Options
+
+All mounting functions accept:
+
+| Option | Description |
 | --- | --- |
-| `mountCompiled` | Mount one compiled application factory |
-| `createRoot` | Create a root with mount, replace, and unmount |
-| `mountHotRoot` | Replace an owned client root across HMR |
-| `hydrateRoot` | Claim matching server markup |
-| `hydrateHotRoot` | Hydrate once, then replace across HMR |
+| `identifierPrefix` | Prefix for `useId` values, to keep multiple roots on one page unique |
+| `onCaughtError(error)` | Called after an error boundary showed its fallback |
+| `onUncaughtError(error)` | Called for errors no boundary handled; without it the error is rethrown |
+| `onRecoverableError(error)` | Called for hydration mismatches that were repaired |
 
-> [!WARNING] Factories, not element descriptors
->
-> Root APIs consume compiler-generated factories. Repeated React-style `root.render(element)` is intentionally unsupported.
+## Error boundaries
+
+### errorBoundary(render, fallback, onError?)
+
+```ts
+import { errorBoundary } from '@vidact/runtime'
+
+errorBoundary(
+  () => <Content />,
+  (error, reset) => <Fallback error={error} retry={reset} />,
+  (error) => log(error),
+)
+```
+
+Described in [Error handling](/docs/learn/error-handling).
+
+## Hydration
+
+Import from `@vidact/runtime/hydrate` in a `hydrate`-target build.
+
+### hydrateRoot(host, component, options?)
+
+Attaches to the server-rendered DOM inside `host` and returns a root with `replace` and `unmount`. Mismatches are repaired and reported through `onRecoverableError`.
+
+### hydrateHotRoot(hot, host, component, options?)
+
+The HMR variant: hydrates on first evaluation and replaces afterwards.
+
+## Server rendering
+
+Import from `@vidact/runtime/server` in a `server`-target build, or from `react-dom/server`, which resolves to it.
+
+| Function | Description |
+| --- | --- |
+| `renderToString(component)` | Render to an HTML string with hydration markers |
+| `renderToStaticMarkup(component)` | Render without markers, for email or static output |
+| `renderToReadableStream(component, options?)` | Streaming render; requires the `framework` feature |
+| `renderToPipeableStream(component, options?)` | Node stream variant; requires `framework` |
+| `prerender`, `resume` | Static and continuation rendering; require `framework` |
+
+The server renderer has no browser globals. Components that touch `window` or `document` during construction fail on the server; guard them with an effect.
 
 ## Entry points
 
-| Entry | Capability |
+Compiled output imports only the entry points it needs, so unused capabilities are not bundled.
+
+| Entry | Contains |
 | --- | --- |
-| `@vidact/runtime` | Client roots and direct DOM support |
-| `@vidact/runtime/hydrate` | Hydration roots and JSX runtime |
-| `@vidact/runtime/server` | Deterministic server rendering |
-| `@vidact/runtime/async` | Resources, lazy, and Suspense |
-| `@vidact/runtime/concurrent` | Transitions and deferred work |
-| `@vidact/runtime/actions` | Actions, optimistic state, form status |
-| `@vidact/runtime/framework/*` | Streams and framework boundaries |
-| `@vidact/runtime/testing` | Deterministic task draining |
+| `@vidact/runtime` | Client roots, direct DOM construction, `errorBoundary`, `createPortal`, core hooks |
+| `@vidact/runtime/hydrate` | Hydration roots |
+| `@vidact/runtime/server` | String and static rendering |
+| `@vidact/runtime/async` | `Suspense`, `lazy`, `use(promise)` |
+| `@vidact/runtime/concurrent` | Transitions, deferred values, `flushSync` |
+| `@vidact/runtime/actions` | Form actions, `useActionState`, `useOptimistic`, `useFormStatus` |
+| `@vidact/runtime/retained-ui` | `Activity` |
+| `@vidact/runtime/profiling` | `Profiler`, owner stacks |
+| `@vidact/runtime/framework` | Document metadata and resource hints |
+| `@vidact/runtime/framework/server` | Streaming, continuations, client boundaries |
+| `@vidact/runtime/framework/hydrate` | Boundary hydration and event replay |
+| `@vidact/runtime/testing` | Scheduler draining used by `@vidact/test-support` |
+
+You do not normally import from the feature entries yourself; `import { Suspense } from 'react'` is rewritten to the right one by the Vite plugin.
+
+## Protocol version
+
+The runtime exports `VIDACT_RUNTIME_PROTOCOL` and checks it against compiled output at startup. Compiled code from one protocol version cannot run on a runtime from another; the fix is always to align package versions.
+
+## Compiled primitives
+
+The package also exports the functions compiled code calls, such as `createCompiledState`, `binding`, `keyed`, and `when`. They are part of the compiler-to-runtime contract, not the application API, and may change between minor versions.

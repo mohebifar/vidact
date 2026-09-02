@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url'
 
 import tailwindcss from '@tailwindcss/vite'
+import { wgslVitePlugin } from '@vgpu/wgsl/loader-vite'
 import { vidactStart, type VidactStartOptions } from '@vidact/start/vite'
 
 const compiler = {
@@ -15,5 +16,5 @@ export const docsResolve = {
 }
 
 export function docsPlugins(options: VidactStartOptions = {}) {
-  return [...vidactStart({ ...options, compiler }), tailwindcss()]
+  return [...vidactStart({ ...options, compiler }), tailwindcss(), wgslVitePlugin()]
 }

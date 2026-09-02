@@ -1,3 +1,4 @@
+import type { RenderableProtocol } from '../renderable-protocol.ts'
 import type { SourceMask } from '../source-mask.ts'
 
 export const BINDING = Symbol.for('vidact.v1.Binding')
@@ -81,6 +82,7 @@ export type CompiledRenderValue =
   | undefined
   | CompiledBinding<unknown>
   | StructuralBinding
+  | RenderableProtocol
   | readonly CompiledRenderValue[]
 
 export interface CompiledContext<T> {

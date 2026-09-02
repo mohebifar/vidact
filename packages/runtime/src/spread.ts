@@ -45,13 +45,7 @@ function mountReactiveSpread(
   if (!overrides.has('ref')) {
     mountCompiledRef(
       element,
-      createBinding(
-        binding[2],
-        binding[3],
-        () => active(binding[1]()).ref,
-        binding[4],
-        binding[5],
-      ),
+      createBinding(binding[2], binding[3], () => active(binding[1]()).ref, binding[4], binding[5]),
     )
     overrides.add('ref')
   }

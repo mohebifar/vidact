@@ -1,0 +1,105 @@
+---
+title: Migrating from React
+description: What to change, what to leave alone, and what to watch for when moving an existing React codebase to Vidact.
+group: Guides
+---
+
+Most modern React code compiles under Vidact without edits. This guide is about the parts that do not, and about the handful of runtime differences that can surprise you even when the code compiles.
+
+## Step 1: Swap the toolchain
+
+1. Remove `react` and `react-dom` from `dependencies`. Add `@vidact/runtime`.
+2. Remove `@vitejs/plugin-react`. Add `@vidact/vite` and put `vidact()` in `plugins`.
+3. Add `@vidact/react-types` and set `jsx: "preserve"` and `jsxImportSource: "@vidact/react-types"` in `tsconfig.json`.
+4. Replace `createRoot(host).render(<App />)` with `mountCompiled(App, host)`.
+
+Leave the `import { useState } from 'react'` lines alone. The plugin resolves them.
+
+Run the build. Every place Vidact cannot compile is reported with a file, line, and reason. Work through the list; the sections below cover the common ones.
+
+## Step 2: Replace class components
+
+Class components are not supported. Convert them to functions with hooks. The one class that has no direct hook equivalent, the error boundary, becomes a call to `errorBoundary`:
+
+```tsx
+import { errorBoundary } from '@vidact/runtime'
+
+export function Boundary({ children }: { children: VidactNode }) {
+  return errorBoundary(
+    () => children,
+    (error, reset) => <ErrorFallback error={error} onRetry={reset} />,
+  )
+}
+```
+
+See [Error handling](/docs/learn/error-handling).
+
+## Step 3: Remove element-tree manipulation
+
+There is no React element tree at runtime, so code that inspects or rewrites children has nothing to work with:
+
+| Pattern | Replace with |
+| --- | --- |
+| `React.Children.map(children, …)` | A render-prop, an array prop, or explicit slots |
+| `cloneElement(child, { extra })` | Pass `extra` through context or a prop on a known component |
+| `isValidElement(x) ? x : <Default />` | A `null` check on a prop, or a typed prop |
+| `createElement(typeVariable, props)` | A ternary or `switch` over known component types |
+
+`Children.toArray`, `cloneElement`, and `isValidElement` exist in a bounded form for compiled values, but a component that depends on walking arbitrary children needs a different API.
+
+## Step 4: Move side effects out of render
+
+React re-runs the component body, so some code relies on it: `document.title = title` in the body, `ref.current = value` assignments, mutating a module-level cache, or calling `setState` conditionally in render. In Vidact the body runs once and any mutation of props, outer variables, or previously rendered values in the body is a compile error (`DestructiveRenderMutation`).
+
+Move the code into `useEffect`, `useLayoutEffect`, or an event handler, or compute the value directly if it is derived.
+
+## Step 5: Handle native events
+
+Handlers receive native DOM events. For most code this changes nothing. Look for:
+
+- `event.nativeEvent` (drop the `.nativeEvent`)
+- `event.persist()` (delete)
+- Event handlers on a portal's DOM ancestors expecting to receive events from inside the portal (attach inside instead)
+- `event.currentTarget` casts, which are usually no longer needed because `event.target` is already typed
+
+## Step 6: Enable features you use
+
+Anything from this list is a compile error until the matching feature is on:
+
+| You use | Enable |
+| --- | --- |
+| `Suspense`, `lazy`, `use(promise)` | `async` |
+| `useTransition`, `startTransition`, `useDeferredValue`, `flushSync` | `concurrent` |
+| `useActionState`, `useOptimistic`, `useFormStatus`, `<form action={fn}>` | `actions` |
+| `Activity` | `retained-ui` |
+| `useInsertionEffect` | `css-insertion` |
+| `dangerouslySetInnerHTML` | `unsafe-html` |
+| `Profiler`, `useDebugValue` | `profiling` |
+
+The error message names the flag.
+
+## Step 7: Deal with dependencies
+
+Vidact compiles your application code. It also compiles packages that ship React-shaped **source**, such as many headless UI libraries, when their package metadata declares React and their code stays inside the supported subset. Precompiled packages that import React internals, or component libraries that depend on `React.Children` and `cloneElement`, will not work and are reported at build time.
+
+For a package that ships compatible source but lacks React metadata, add it with the `includeDependencies` option. See [@vidact/vite](/docs/reference/vite).
+
+## Differences that compile but behave differently
+
+These will not produce errors. Know about them before you ship.
+
+**No re-renders.** `memo`, `useMemo`, and `useCallback` are accepted but do nothing for performance. A component that relied on re-rendering to recompute something in its body will recompute only if the compiler sees the dependency in an expression. Effects and derived expressions are the reliable tools.
+
+**Synchronous updates by default.** Without `concurrent`, every update is applied synchronously and atomically at the end of the event. There is no time slicing.
+
+**No Strict Mode double-invocation.** Development mode does not run components and effects twice.
+
+**Portals bubble physically.** A click inside a portal does not reach a React-style ancestor handler.
+
+**HMR resets state.** Replacing a module disposes its components. Persist state in an external store if you want it to survive edits.
+
+**`useId` values differ from React's.** They are stable between server and client but not the same strings React would generate.
+
+## Verifying
+
+Run your existing test suite. Tests that render with React Testing Library need to be pointed at Vidact's mount and `act`; see [Testing](/docs/guides/testing). Snapshot tests of React element trees will not work, since there is no element tree; snapshot the DOM instead.

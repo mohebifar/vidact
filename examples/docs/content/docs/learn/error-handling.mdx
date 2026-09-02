@@ -1,0 +1,85 @@
+---
+title: Error handling
+description: Catch errors with a function error boundary, recover from them, and report the ones that escape.
+group: Learn
+---
+
+Things go wrong: a component throws during construction, a handler hits a bug, an effect rejects. Vidact gives you two layers for dealing with it, an error boundary for the part of the UI that failed, and root callbacks for anything that escapes.
+
+## Error boundaries
+
+React's error boundary is a class component. Vidact does not have class components, so it provides a function instead: `errorBoundary` from `@vidact/runtime`.
+
+```tsx
+import { errorBoundary } from '@vidact/runtime'
+
+export function ProfilePanel({ userId }: { userId: string }) {
+  return errorBoundary(
+    () => <Profile userId={userId} />,
+    (error, reset) => (
+      <div role="alert">
+        <p>Could not load the profile.</p>
+        <button onClick={reset}>Try again</button>
+      </div>
+    ),
+  )
+}
+```
+
+The first argument is a function that renders the protected content. The second renders a fallback and receives the error and a `reset` function. Calling `reset` throws the fallback away and tries the content again; if that fails too, you are back in the fallback.
+
+An optional third argument, `onError(error)`, is called after the fallback has been shown, which is a good place to log.
+
+### What a boundary catches
+
+Anything that throws under the boundary's content: construction of components, updates triggered by state writes, event handlers, ref callbacks, layout and passive effects, effect cleanups, and external-store subscriptions. It does **not** catch errors thrown while rendering its own fallback; those go to the next boundary up, or to the root.
+
+### What happens when something throws
+
+Before the fallback appears, Vidact rolls back the update that failed. Partially applied DOM writes, attached refs, and listeners from the abandoned content are undone and the content's components are disposed. Only then is the fallback constructed. You never see a mix of old, half-new, and fallback DOM.
+
+An error during a state update that is *not* inside a boundary leaves the last successfully committed DOM in place. The component stays alive and can accept a later, valid update.
+
+## Root callbacks
+
+`mountCompiled`, `createRoot`, and `hydrateRoot` accept callbacks that mirror React 19's:
+
+```ts
+import { mountCompiled } from '@vidact/runtime'
+
+mountCompiled(App, host, {
+  onCaughtError: (error) => report('caught', error),
+  onUncaughtError: (error) => report('uncaught', error),
+  onRecoverableError: (error) => report('recoverable', error),
+})
+```
+
+- `onCaughtError` fires for errors an error boundary handled.
+- `onUncaughtError` fires for errors no boundary handled. If you do not provide it, the error is rethrown.
+- `onRecoverableError` fires during hydration when the server markup and the client disagree and Vidact repaired the mismatch.
+
+With Vidact Start, these are wired for you; see [@vidact/start](/docs/reference/start).
+
+## Errors in event handlers
+
+A throw inside `onClick` or any other handler follows the same route: the in-progress batch is rolled back, the nearest boundary shows its fallback, and the root callback is notified. The rest of the page keeps working.
+
+## Async errors
+
+A rejected promise inside an effect is not an exception in the effect's call stack, so it is not caught automatically, exactly as in React. Catch it yourself and move the failure into state if the UI should react to it:
+
+```tsx
+useEffect(() => {
+  let cancelled = false
+  load(id)
+    .then((data) => { if (!cancelled) setData(data) })
+    .catch((error) => { if (!cancelled) setError(error) })
+  return () => { cancelled = true }
+}, [id])
+```
+
+If you enable the `async` feature and use `use(promise)` with `Suspense`, a rejected promise *is* routed to the nearest error boundary, which mirrors React's behaviour.
+
+## Development versus production
+
+In development, errors carry readable messages. In production builds, Vidact's own runtime errors are shortened to compact codes such as `V025` to keep the bundle small. The [troubleshooting guide](/docs/guides/troubleshooting) explains how to look them up.

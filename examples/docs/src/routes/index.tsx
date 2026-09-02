@@ -1,78 +1,561 @@
-import { defineFileRoute, Link } from '@vidact/start'
+import type { VidactNode } from '@vidact/react-types'
+import { defineFileRoute, Link, type RouteComponentProps } from '@vidact/start'
+import { useEffect, useRef, useState } from 'react'
 
 import { ArrowIcon } from '@/components/icons.tsx'
-import { Badge } from '@/components/ui/badge.tsx'
-import { ButtonLink } from '@/components/ui/button.tsx'
-import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card.tsx'
+import { Button, ButtonLink } from '@/components/ui/button.tsx'
+import type { DocCodeLine } from '@/lib/docs-types.ts'
+import { mountHeroLogo } from '@/lib/hero-logo-mount.ts'
+import { loadLandingData } from '@/lib/landing-loader.ts'
 
-export function HomeRoute() {
+const loader = () => loadLandingData()
+
+type LandingData = Awaited<ReturnType<typeof loader>>
+type LandingProps = RouteComponentProps<LandingData>
+
+export function HomeRoute({ loaderData }: LandingProps) {
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <header className="border-b">
-        <div className="mx-auto flex h-14 max-w-6xl items-center px-6">
-          <Link className="flex items-center gap-2 font-semibold" href="/">
-            <span className="grid size-7 place-items-center rounded-md bg-foreground text-xs font-bold text-background">
-              V
+      <SiteHeader />
+
+      <section className="relative overflow-hidden border-b bg-zinc-950 text-white">
+        <HeroLogo />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 bg-gradient-to-r from-zinc-950 via-zinc-950/45 via-30% to-transparent to-65%"
+        />
+        <div className="relative mx-auto max-w-6xl px-6 py-28 sm:py-36 lg:py-44">
+          <h1 className="font-display max-w-3xl text-5xl font-bold tracking-tight text-balance sm:text-7xl">
+            Write React. Ship{' '}
+            <span className="decoration-signal underline decoration-4 underline-offset-8">
+              the DOM
             </span>
-            Vidact
-          </Link>
-          <nav className="ml-auto flex items-center gap-5 text-sm text-muted-foreground">
-            <Link className="hover:text-foreground" href="/docs">
-              Docs
+            .
+          </h1>
+          <p className="mt-6 max-w-xl text-lg leading-8 text-zinc-400">
+            Vidact compiles your function components and hooks into direct DOM operations. No
+            Virtual DOM, no re-renders, no React in the bundle.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Link
+              className="inline-flex h-10 items-center gap-2 rounded-md bg-white px-5 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-200"
+              href="/docs/getting-started/quick-start"
+            >
+              Get started <ArrowIcon className="size-4" />
             </Link>
-            <a className="hover:text-foreground" href="https://github.com/mohebifar/vidact">
-              GitHub
-            </a>
-          </nav>
+            <Link
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-white/25 px-5 text-sm font-medium text-white transition-colors hover:bg-white/10"
+              href="/docs"
+            >
+              Read the docs
+            </Link>
+          </div>
         </div>
-      </header>
+      </section>
 
-      <section className="mx-auto max-w-6xl px-6 py-24 sm:py-32">
-        <Badge variant="secondary">Experimental · 0.2 beta</Badge>
-        <h1 className="mt-6 max-w-4xl text-5xl font-bold tracking-tight sm:text-7xl">
-          React-shaped source. Direct DOM output.
-        </h1>
-        <p className="mt-6 max-w-2xl text-lg leading-8 text-muted-foreground sm:text-xl">
-          Vidact compiles function components into stable DOM owners and static, surgical updates.
-          No Virtual DOM, runtime dependency tracking, or React fallback.
-        </p>
-        <div className="mt-9 flex flex-wrap gap-3">
-          <ButtonLink href="/docs/tutorials/first-application">
-            Start the tutorial <ArrowIcon className="size-4" />
-          </ButtonLink>
-          <ButtonLink href="/docs/reference/react-compatibility" variant="outline">
-            Check compatibility
+      <Examples data={loaderData} />
+
+      <section className="border-y bg-muted/30">
+        <div className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
+          <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">
+            How it works
+          </h2>
+          <div className="mt-10 grid gap-10 md:grid-cols-3">
+            <Step
+              number="1"
+              title="Compile"
+              body="The compiler maps every expression to the values it reads. Code it cannot compile stops the build at its exact line."
+            />
+            <Step
+              number="2"
+              title="Mount once"
+              body="The component runs a single time and builds its DOM. There is no render loop and no tree to diff."
+            />
+            <Step
+              number="3"
+              title="Update surgically"
+              body="A state write runs only the updaters that read it: a text node, an attribute, a list row."
+            />
+          </div>
+        </div>
+      </section>
+
+      <section className="mx-auto grid max-w-6xl items-center gap-12 px-6 py-20 sm:py-24 lg:grid-cols-2">
+        <div>
+          <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">
+            Full-stack, the same way
+          </h2>
+          <p className="mt-4 text-muted-foreground">
+            Vidact Start adds file routes, server loaders, SSR, hydration, and client navigation,
+            all generated by the same compiler, so server and browser output match by construction.
+          </p>
+          <Link
+            className="decoration-muted-foreground/60 mt-6 inline-flex items-center gap-2 font-medium underline underline-offset-4 hover:decoration-current"
+            href="/docs/start/getting-started"
+          >
+            Explore Vidact Start <ArrowIcon className="size-4" />
+          </Link>
+        </div>
+        <CodePane filename="src/routes/products/$productId.tsx" lines={loaderData.route} rounded />
+      </section>
+
+      <section className="border-t">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-6 px-6 py-12">
+          <p className="max-w-xl text-muted-foreground">
+            Vidact is in beta. What is supported is{' '}
+            <Link
+              className="text-foreground underline underline-offset-4"
+              href="/docs/reference/react-compatibility"
+            >
+              documented
+            </Link>
+            ; what is not fails at build time.
+          </p>
+          <ButtonLink href="/docs/getting-started/quick-start">
+            Get started <ArrowIcon className="size-4" />
           </ButtonLink>
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-6xl gap-4 px-6 pb-24 md:grid-cols-3">
-        <Feature
-          title="Construct once"
-          description="Function components create their owned DOM once for each mount."
-        />
-        <Feature
-          title="Update surgically"
-          description="State writes run compiler-selected text, prop, range, and effect work."
-        />
-        <Feature
-          title="Fail closed"
-          description="Unsupported React patterns receive diagnostics instead of a runtime fallback."
-        />
-      </section>
+      <footer className="border-t">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-8 text-sm text-muted-foreground">
+          <span className="font-semibold text-foreground">Vidact</span>
+          <Link className="hover:text-foreground" href="/docs">
+            Docs
+          </Link>
+          <Link className="hover:text-foreground" href="/docs/guides/migrating-from-react">
+            Migrate from React
+          </Link>
+          <a className="hover:text-foreground" href="https://github.com/mohebifar/vidact">
+            GitHub
+          </a>
+        </div>
+      </footer>
     </main>
   )
 }
 
-function Feature({ description, title }: { readonly description: string; readonly title: string }) {
+/**
+ * Lazily mounts the crystal logo once the hero is on screen, so the renderer
+ * never blocks the initial page load. Exported for the browser proof tests.
+ */
+export function HeroLogo() {
+  const hostRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (host === null) return
+    return mountHeroLogo(host)
+  }, [])
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
-    </Card>
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 opacity-60 lg:opacity-100"
+      data-testid="hero-logo"
+      ref={hostRef}
+    />
   )
 }
 
-export const Route = defineFileRoute({ component: HomeRoute })
+function SiteHeader() {
+  return (
+    <header className="border-b">
+      <div className="mx-auto flex h-14 max-w-6xl items-center px-6">
+        <Link className="flex items-center gap-2 font-semibold" href="/">
+          <span className="grid size-7 place-items-center rounded-md bg-foreground text-xs font-bold text-background">
+            V
+          </span>
+          Vidact
+        </Link>
+        <nav className="ml-auto flex items-center gap-5 text-sm text-muted-foreground">
+          <Link className="hover:text-foreground" href="/docs">
+            Docs
+          </Link>
+          <Link className="hover:text-foreground" href="/docs/learn/thinking-in-vidact">
+            Learn
+          </Link>
+          <a className="hover:text-foreground" href="https://github.com/mohebifar/vidact">
+            GitHub
+          </a>
+        </nav>
+      </div>
+    </header>
+  )
+}
+
+type ExampleKey = 'branches' | 'counter' | 'form' | 'list'
+
+const EXAMPLES: readonly { readonly key: ExampleKey; readonly label: string }[] = [
+  { key: 'counter', label: 'Counter' },
+  { key: 'form', label: 'Form' },
+  { key: 'list', label: 'Keyed list' },
+  { key: 'branches', label: 'Branches' },
+]
+
+function Examples({ data }: { readonly data: LandingData }) {
+  const [tab, setTab] = useState<ExampleKey>('counter')
+
+  return (
+    <section
+      aria-label="Live compiled examples"
+      className="mx-auto max-w-6xl px-6 pt-16 pb-20 sm:pt-20 sm:pb-24"
+    >
+      <p className="max-w-2xl text-muted-foreground">
+        Every example below is ordinary React, compiled by Vidact and running on this page.
+      </p>
+      <div className="mt-6 flex gap-1 border-b" role="tablist">
+        {EXAMPLES.map((example) => (
+          <TabButton
+            active={tab === example.key}
+            key={example.key}
+            label={example.label}
+            onSelect={() => setTab(example.key)}
+          />
+        ))}
+      </div>
+      <div className="mt-6">
+        <ExamplePanel data={data} tab={tab} />
+      </div>
+    </section>
+  )
+}
+
+function TabButton({
+  active,
+  label,
+  onSelect,
+}: {
+  readonly active: boolean
+  readonly label: string
+  readonly onSelect: () => void
+}) {
+  return (
+    <button
+      aria-selected={active}
+      className={
+        active
+          ? '-mb-px border-b-2 border-foreground px-3 py-2 text-sm font-medium'
+          : '-mb-px border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground'
+      }
+      onClick={onSelect}
+      role="tab"
+      type="button"
+    >
+      {label}
+    </button>
+  )
+}
+
+function ExamplePanel({ data, tab }: { readonly data: LandingData; readonly tab: ExampleKey }) {
+  switch (tab) {
+    case 'form':
+      return (
+        <ExampleWindow
+          caption="Handlers receive the native event, so event.target.value works with no cast."
+          filename="Greeting.tsx"
+          lines={data.form}
+        >
+          <GreetingDemo />
+        </ExampleWindow>
+      )
+    case 'list':
+      return (
+        <ExampleWindow
+          caption="Tick a song, then reverse. The row moves with its checkbox, and nothing is rebuilt."
+          filename="Playlist.tsx"
+          lines={data.list}
+        >
+          <PlaylistDemo />
+        </ExampleWindow>
+      )
+    case 'branches':
+      return (
+        <ExampleWindow
+          caption="Each branch owns its DOM. Switching disposes one and constructs the other."
+          filename="Loader.tsx"
+          lines={data.branch}
+        >
+          <BranchDemo />
+        </ExampleWindow>
+      )
+    default:
+      return (
+        <ExampleWindow
+          caption="Counted live by a MutationObserver watching this demo."
+          filename="Counter.tsx"
+          lines={data.counter}
+        >
+          <CounterDemo />
+        </ExampleWindow>
+      )
+  }
+}
+
+function ExampleWindow({
+  caption,
+  children,
+  filename,
+  lines,
+}: {
+  readonly caption: string
+  readonly children: VidactNode
+  readonly filename: string
+  readonly lines: readonly DocCodeLine[]
+}) {
+  return (
+    <div className="grid overflow-hidden rounded-xl border lg:grid-cols-2">
+      <div className="border-b lg:border-r lg:border-b-0">
+        <CodePane filename={filename} lines={lines} />
+      </div>
+      <div className="flex flex-col bg-background">
+        <div className="border-b px-5 py-2.5 font-mono text-xs text-muted-foreground">Result</div>
+        <div className="grow p-6 sm:p-8">{children}</div>
+        <p className="border-t px-5 py-3 text-xs text-muted-foreground">{caption}</p>
+      </div>
+    </div>
+  )
+}
+
+function CodePane({
+  filename,
+  lines,
+  rounded,
+}: {
+  readonly filename: string
+  readonly lines: readonly DocCodeLine[]
+  readonly rounded?: boolean
+}) {
+  return (
+    <div
+      className={
+        rounded
+          ? 'overflow-hidden rounded-xl border bg-zinc-950 text-zinc-50'
+          : 'h-full bg-zinc-950 text-zinc-50'
+      }
+    >
+      <div className="border-b border-white/10 px-5 py-2.5 font-mono text-xs text-zinc-400">
+        {filename}
+      </div>
+      <pre className="overflow-x-auto p-5 text-[13px] leading-6">
+        <code>
+          {lines.map((line) => (
+            <CodeLine key={line.key} line={line} />
+          ))}
+        </code>
+      </pre>
+    </div>
+  )
+}
+
+function CodeLine({ line }: { readonly line: DocCodeLine }) {
+  return (
+    <span className="block min-h-6">
+      {line.tokens.map((token) => (
+        <span key={token.key} style={{ color: token.color }}>
+          {token.content}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/** Exported for the browser proof tests. */
+export function CounterDemo() {
+  const [count, setCount] = useState(0)
+  const [mutations, setMutations] = useState(0)
+  const stageRef = useRef<HTMLDivElement | null>(null)
+  const outputRef = useRef<HTMLOutputElement | null>(null)
+
+  useEffect(() => {
+    const stage = stageRef.current
+    if (stage === null) return
+    let active = true
+    const observer = new MutationObserver((records) => {
+      // Disposal removes the stage before effect cleanups run, so a queued
+      // callback can arrive with `active` still true; skip it once detached.
+      if (active && stage.isConnected) setMutations((current) => current + records.length)
+    })
+    observer.observe(stage, {
+      attributes: true,
+      characterData: true,
+      childList: true,
+      subtree: true,
+    })
+    return () => {
+      active = false
+      observer.disconnect()
+    }
+  }, [])
+
+  useEffect(() => {
+    const output = outputRef.current
+    if (
+      count === 0 ||
+      output === null ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      return
+    }
+    output.animate(
+      [
+        { backgroundColor: 'color-mix(in oklab, var(--signal) 35%, transparent)' },
+        { backgroundColor: 'transparent' },
+      ],
+      { duration: 650, easing: 'ease-out' },
+    )
+  }, [count])
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-4" ref={stageRef}>
+        <Button onClick={() => setCount(count + 1)} variant="outline">
+          Increment
+        </Button>
+        <output className="rounded px-1 font-mono text-sm" ref={outputRef}>
+          Count: {count}
+        </output>
+      </div>
+      <dl className="mt-6 grid max-w-sm grid-cols-3 gap-4 border-t pt-4">
+        <Stat label="Component calls" live={false} value="1" />
+        <Stat label="DOM mutations" live={true} value={String(mutations)} />
+        <Stat label="Tree diffs" live={false} value="0" />
+      </dl>
+    </div>
+  )
+}
+
+function Stat({
+  label,
+  live,
+  value,
+}: {
+  readonly label: string
+  readonly live: boolean
+  readonly value: string
+}) {
+  return (
+    <div>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd
+        className={live ? 'text-signal mt-1 font-mono text-lg' : 'mt-1 font-mono text-lg'}
+        data-live={live ? '' : undefined}
+      >
+        {value}
+      </dd>
+    </div>
+  )
+}
+
+function GreetingDemo() {
+  const [name, setName] = useState('')
+
+  return (
+    <form className="flex max-w-sm flex-col gap-3" onSubmit={(event) => event.preventDefault()}>
+      <input
+        className="h-9 rounded-md border bg-background px-3 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        placeholder="Your name"
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+      />
+      <p className="text-sm">Hi, {name === '' ? 'stranger.' : `${name}!`}</p>
+    </form>
+  )
+}
+
+const SONGS = [
+  { id: 'golden', title: 'Golden hour' },
+  { id: 'night', title: 'Night drive' },
+  { id: 'blue', title: 'Blue in green' },
+]
+
+/** Exported for the browser proof tests. */
+export function PlaylistDemo() {
+  const [songs, setSongs] = useState(SONGS)
+
+  return (
+    <div className="max-w-sm">
+      <Button onClick={() => setSongs(songs.toReversed())} size="sm" variant="outline">
+        Reverse
+      </Button>
+      <ul className="mt-4 divide-y rounded-md border text-sm">
+        {songs.map((song) => (
+          <PlaylistRow key={song.id} song={song} />
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function PlaylistRow({ song }: { readonly song: (typeof SONGS)[number] }) {
+  return (
+    <li className="flex items-center gap-3 px-3 py-2" data-song={song.id}>
+      <input aria-label={`Mark ${song.title}`} className="accent-signal size-4" type="checkbox" />
+      {song.title}
+    </li>
+  )
+}
+
+function BranchDemo() {
+  const [state, setState] = useState<'idle' | 'loading' | 'ready'>('idle')
+  const timerRef = useRef<number | null>(null)
+
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current)
+    },
+    [],
+  )
+
+  const load = () => {
+    setState('loading')
+    timerRef.current = window.setTimeout(() => setState('ready'), 900)
+  }
+
+  if (state === 'loading') {
+    return (
+      <div className="flex items-center gap-3 text-sm text-muted-foreground">
+        <span className="size-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" />
+        Loading…
+      </div>
+    )
+  }
+  if (state === 'ready') {
+    return (
+      <div className="flex items-center gap-4 text-sm">
+        <p>Loaded.</p>
+        <Button onClick={() => setState('idle')} size="sm" variant="ghost">
+          Reset
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <Button onClick={load} variant="outline">
+      Load data
+    </Button>
+  )
+}
+
+function Step({
+  body,
+  number,
+  title,
+}: {
+  readonly body: string
+  readonly number: string
+  readonly title: string
+}) {
+  return (
+    <div className="border-t pt-5">
+      <div className="flex items-baseline gap-3">
+        <span className="font-mono text-sm text-muted-foreground">{number}</span>
+        <h3 className="font-display text-xl font-semibold">{title}</h3>
+      </div>
+      <p className="mt-3 text-sm leading-6 text-muted-foreground">{body}</p>
+    </div>
+  )
+}
+
+export const Route = defineFileRoute({ loader, component: HomeRoute })

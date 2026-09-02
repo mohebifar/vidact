@@ -1,19 +1,17 @@
 import { findNeighbour, flattenTree, type Item as PageTreeItem } from 'fumadocs-core/page-tree'
 import { loader, type MetaData, type PageData, type StaticSource } from 'fumadocs-core/source'
 
-import { loadDocumentationPages } from './mdx.server.ts'
 import type {
   DocSection,
-  DocumentKind,
   DocumentationGroup,
   LoadedDocPage,
   NavigationGroup,
   NavigationItem,
 } from './docs-types.ts'
+import { loadDocumentationPages } from './mdx.server.ts'
 
 type ContentPageData = PageData & {
   readonly group: DocumentationGroup
-  readonly kind: DocumentKind
   readonly sections: readonly DocSection[]
 }
 
@@ -31,36 +29,44 @@ const files: StaticSource<{ pageData: ContentPageData; metaData: MetaData }>['fi
     path: 'meta.json',
     data: {
       title: 'Vidact',
-      pages: ['index', 'tutorials', 'guides', 'reference', 'explanation'],
+      pages: ['index', 'getting-started', 'learn', 'start', 'guides', 'reference', 'internals'],
     },
   },
-  folderMeta('tutorials', 'Tutorials', ['first-application', 'vidact-start']),
-  folderMeta('guides', 'How-to guides', [
-    'state-and-effects',
-    'conditional-rendering',
-    'keyed-collections',
+  folderMeta('getting-started', 'Getting started', ['quick-start', 'installation']),
+  folderMeta('learn', 'Learn', [
+    'thinking-in-vidact',
+    'components-and-props',
+    'state',
+    'events',
     'forms',
-    'context-and-stores',
-    'routes-and-data',
-    'ssr-and-hydration',
-    'feature-flags',
-    'production',
-    'troubleshooting',
+    'conditional-rendering',
+    'lists-and-keys',
+    'effects',
+    'refs',
+    'context',
+    'error-handling',
+    'features',
   ]),
+  folderMeta('start', 'Vidact Start', [
+    'getting-started',
+    'routing',
+    'data-loading',
+    'navigation',
+    'deployment',
+  ]),
+  folderMeta('guides', 'Guides', ['migrating-from-react', 'testing', 'troubleshooting']),
   folderMeta('reference', 'Reference', [
-    'react-compatibility',
-    'vite-plugin',
+    'vite',
+    'runtime',
     'start',
     'compiler',
-    'runtime',
-  ]),
-  folderMeta('explanation', 'Explanation', [
-    'how-compilation-works',
-    'ownership-and-identity',
-    'static-reactivity',
-    'server-and-hydration',
     'react-compatibility',
-    'vidact-start-boundary',
+  ]),
+  folderMeta('internals', 'Under the hood', [
+    'compilation',
+    'reactivity',
+    'ownership',
+    'server-rendering',
   ]),
 ]
 
@@ -87,7 +93,7 @@ export async function loadDocPage(slugs: readonly string[]): Promise<LoadedDocPa
   const neighbours = findNeighbour(pageTree, page.url, { separateRoot: false })
   return {
     description: page.data.description ?? '',
-    kind: page.data.kind,
+    group: page.data.group,
     next: navigationByUrl.get(neighbours.next?.url ?? '') ?? null,
     previous: navigationByUrl.get(neighbours.previous?.url ?? '') ?? null,
     sections: page.data.sections,
@@ -108,11 +114,12 @@ function navigationItem(item: PageTreeItem): NavigationItem {
 
 function groupNavigation(items: readonly NavigationItem[]): readonly NavigationGroup[] {
   const order: readonly DocumentationGroup[] = [
-    'Overview',
-    'Tutorials',
-    'How-to guides',
+    'Getting started',
+    'Learn',
+    'Vidact Start',
+    'Guides',
     'Reference',
-    'Explanation',
+    'Under the hood',
   ]
   return order.flatMap((title) => {
     const groupItems = items.filter((item) => item.group === title)

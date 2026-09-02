@@ -38,9 +38,15 @@ importers:
       remark-gfm:
         specifier: 4.0.1
         version: 4.0.1
+      shiki:
+        specifier: 4.4.3
+        version: 4.4.3
       srvx:
         specifier: ^0.12.7
         version: 0.12.7
+      vgpu:
+        specifier: ^0.3.1
+        version: 0.3.1
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.3
@@ -51,6 +57,9 @@ importers:
       '@types/react':
         specifier: ^19.2.18
         version: 19.2.18
+      '@vgpu/wgsl':
+        specifier: ^0.3.1
+        version: 0.3.1(@vgpu/adapter-node@0.3.1)
       '@vidact/react-types':
         specifier: workspace:*
         version: link:../../packages/react-types
@@ -1046,6 +1055,10 @@ packages:
   '@mdx-js/mdx@3.1.1':
     resolution: {integrity: sha512-f6ZO2ifpwAQIpzGWaBQT2TXxPv6z3RBzQKpVftEWN78Vl/YweF1uwussDx8ECAXVtr3Rs89fKyG9YlzUs9DyGQ==}
 
+  '@modelcontextprotocol/core@2.0.0':
+    resolution: {integrity: sha512-pJCEwGG7Lfr/+PQp9ZTwKXNeO5wzbfKL7H3MYpCorM4oFBoQrdjnBgEoqG+RjhsvS1FKrDbKux+M1HhlnGWqcA==}
+    engines: {node: '>=20'}
+
   '@modelcontextprotocol/sdk@1.30.0':
     resolution: {integrity: sha512-xKd8OIzlqNzcqcNumGAa6g+PW2kjD5vrpcKOnfldAUPP3j7lnqMPwlTXQm8gF+UwH72z0lqaRbjr9hqGz0eITA==}
     engines: {node: '>=18'}
@@ -1055,6 +1068,10 @@ packages:
     peerDependenciesMeta:
       '@cfworker/json-schema':
         optional: true
+
+  '@modelcontextprotocol/server@2.0.0':
+    resolution: {integrity: sha512-YhHWdHfpFMQfd0prsEnxKeS3Qz3ytIGmsS0sth4KDjnacIT7hxk6hXHkJ9KysxlkvTM+WZAtQbbcUhdoP4Hvtw==}
+    engines: {node: '>=20'}
 
   '@napi-rs/cli@3.8.2':
     resolution: {integrity: sha512-iFmp3Lo/ipXoJI1I/6V/xU4hQV42bXS3A7j8C+Wt3LOtYY7HFCilkhyUkN1igLJFXWMICq95kNxhNcwzNRd+Kw==}
@@ -2103,6 +2120,26 @@ packages:
   '@ungap/structured-clone@1.4.0':
     resolution: {integrity: sha512-1mEZtMKPM09vDmQt5y7YvmN2+DFTP7Tg0EWXdic8/C6VRnpb33e4ghisCIE3WZjsE2N8mf+QV1Zqh7ZFYLWInQ==}
 
+  '@vgpu/adapter-mock@0.3.1':
+    resolution: {integrity: sha512-uZxTFPHLYd1nOxGxluvni50tsjnUTQ2eOhjJ/YwWynO7k906AD0byJxN0V6BbYb1MK/xM/EF+/cA8tKCrvY0yA==}
+
+  '@vgpu/adapter-node@0.3.1':
+    resolution: {integrity: sha512-DtGxI8q3bAh3aN1JdT2EJhUEEbiuVC3U5nd3JLCbn+8zQlxmzs/+lsLo3TzD0gXr7fWHHdOiYYv0xIvAC/1UnQ==}
+
+  '@vgpu/core@0.3.1':
+    resolution: {integrity: sha512-HO0J2LplV+UiJNv1gp8k3Vog6hD/E84HEi5xHj0GxxJ8ZQT7a3kGlyMxGTrNuALXKNPziZzzZl8XHdiX1YNp8w==}
+
+  '@vgpu/wgsl-std@0.3.1':
+    resolution: {integrity: sha512-9MuJ9/YfJLkCjusjPU81sHfnHZs2k4Yv66TKJEqYNXma5Z+GDPEq8GNksMeKxb9WiXfTjp1TjOR/8GhyEOeuFA==}
+
+  '@vgpu/wgsl@0.3.1':
+    resolution: {integrity: sha512-/D3l/+0Kw/Hnr79AvxsLUjp21/ZeTcbBmvltXkftyHBXqs0YZf+0AVOeMpMyWjV24lGPrPgIqDsGpmKS38y7Ow==}
+    peerDependencies:
+      '@vgpu/adapter-node': '>=0.1.6 <1.0.0'
+    peerDependenciesMeta:
+      '@vgpu/adapter-node':
+        optional: true
+
   '@vitest/browser-playwright@4.1.11':
     resolution: {integrity: sha512-riLBxPqwnJ0lWs2DN2WeUfYeKLoAjbP2Xx8cLQdSddzMi20sksIa6K2mPz79DyMZKKVKH2ksOC2yJvtNcZg8cg==}
     peerDependencies:
@@ -2142,6 +2179,9 @@ packages:
 
   '@vitest/utils@4.1.11':
     resolution: {integrity: sha512-zTCVGpyFsGWBhllOyKlTw/vnr6D9qxsfSDyfbyZmTyjHw5N/VuvzHpHoQjm2ZJzn4RJgx5w4r7V0er69CmLgPQ==}
+
+  '@webgpu/types@0.1.72':
+    resolution: {integrity: sha512-0cF7RFM2edNoiIS1ODJp0/Gzv4/xSXhwoR0YCza+OWpJWtn4wmo9DvK91aLlH9+uUnwIriP7ZiC3WitmyhuzBw==}
 
   accepts@2.0.0:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
@@ -3575,6 +3615,10 @@ packages:
     resolution: {integrity: sha512-RvwwcruNjI1ncT5xRakeyS9Lf8lcItv34KD+aif+VH9kduAyfYBipGh12274xtenIPZ119/R9BdTBa8gAwSh0A==}
     engines: {node: '>=12'}
 
+  pixelmatch@7.2.0:
+    resolution: {integrity: sha512-xhcb4yHu9sM/G7foGzoLtXYcC0zHEaOXXjRKhGup0fw78Nf2Tkiapv4EQyMzrbcmQPsllAI7DbFY2UT7PlI9Pg==}
+    hasBin: true
+
   pkce-challenge@5.0.1:
     resolution: {integrity: sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ==}
     engines: {node: '>=16.20.0'}
@@ -4062,6 +4106,10 @@ packages:
   vfile@6.0.3:
     resolution: {integrity: sha512-KzIbH/9tXat2u30jf+smMwFCsno4wHVdNmzFyL+T/L3UGqqk6JKfVqOFOZEpZSHADH1k40ab6NUIXZq422ov3Q==}
 
+  vgpu@0.3.1:
+    resolution: {integrity: sha512-NeEETis2aCr0I9/8dy42lueNGNs3GZxL+0OmjLI82wlgPD/4WpW/XNX4xduc+ChxFqOJtjEYsz297VS9GmIuyA==}
+    hasBin: true
+
   vite@8.2.2:
     resolution: {integrity: sha512-cFKLV/PRgAUlIRm5WjMjJ86jrftzpqcgH+Us+DS8mI3CDNiH30Whrz8uHL3+MOLPAgqbMBAqWdAHAphOAM+z/Q==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -4145,6 +4193,12 @@ packages:
         optional: true
       jsdom:
         optional: true
+
+  webgpu@0.4.0:
+    resolution: {integrity: sha512-F5pimn3Aoi0zWjuRdiVs5TnrUwSzD2lESBohsIUsqyitWkGRQlXU2fhV6ycXlQTa1bvAf3sjqiUpBEpmSQ5ptA==}
+
+  wgpu-matrix@3.4.2:
+    resolution: {integrity: sha512-IfZFbG7olEYBD76VCZy2TzqM57GKy3LT++AZh37tMHPPByO6R2h61zXGBZFNPi2IzxNivNi8y5dvze5PjaczjA==}
 
   which@2.0.2:
     resolution: {integrity: sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==}
@@ -4932,6 +4986,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@modelcontextprotocol/core@2.0.0':
+    dependencies:
+      zod: 4.5.2
+
   '@modelcontextprotocol/sdk@1.30.0(zod@3.25.76)':
     dependencies:
       '@hono/node-server': 2.1.1(hono@4.13.4)
@@ -4953,6 +5011,11 @@ snapshots:
       zod-to-json-schema: 3.25.2(zod@3.25.76)
     transitivePeerDependencies:
       - supports-color
+
+  '@modelcontextprotocol/server@2.0.0':
+    dependencies:
+      '@modelcontextprotocol/core': 2.0.0
+      zod: 4.5.2
 
   '@napi-rs/cli@3.8.2(@emnapi/runtime@2.0.0-alpha.3)(@types/node@24.13.3)':
     dependencies:
@@ -5696,6 +5759,33 @@ snapshots:
 
   '@ungap/structured-clone@1.4.0': {}
 
+  '@vgpu/adapter-mock@0.3.1(@vgpu/adapter-node@0.3.1)':
+    dependencies:
+      '@vgpu/core': 0.3.1(@vgpu/adapter-node@0.3.1)
+    transitivePeerDependencies:
+      - '@vgpu/adapter-node'
+
+  '@vgpu/adapter-node@0.3.1':
+    dependencies:
+      '@vgpu/core': 0.3.1(@vgpu/adapter-node@0.3.1)
+      webgpu: 0.4.0
+    transitivePeerDependencies:
+      - supports-color
+
+  '@vgpu/core@0.3.1(@vgpu/adapter-node@0.3.1)':
+    dependencies:
+      '@vgpu/wgsl': 0.3.1(@vgpu/adapter-node@0.3.1)
+    transitivePeerDependencies:
+      - '@vgpu/adapter-node'
+
+  '@vgpu/wgsl-std@0.3.1': {}
+
+  '@vgpu/wgsl@0.3.1(@vgpu/adapter-node@0.3.1)':
+    dependencies:
+      '@vgpu/wgsl-std': 0.3.1
+    optionalDependencies:
+      '@vgpu/adapter-node': 0.3.1
+
   '@vitest/browser-playwright@4.1.11(playwright@1.62.1)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0))(vitest@4.1.11)':
     dependencies:
       '@vitest/browser': 4.1.11(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0))(vitest@4.1.11)
@@ -5766,6 +5856,8 @@ snapshots:
       '@vitest/pretty-format': 4.1.11
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.1
+
+  '@webgpu/types@0.1.72': {}
 
   accepts@2.0.0:
     dependencies:
@@ -7363,6 +7455,10 @@ snapshots:
 
   picomatch@4.0.5: {}
 
+  pixelmatch@7.2.0:
+    dependencies:
+      pngjs: 7.0.0
+
   pkce-challenge@5.0.1: {}
 
   pkg-up@3.1.0:
@@ -7965,6 +8061,22 @@ snapshots:
       '@types/unist': 3.0.3
       vfile-message: 4.0.3
 
+  vgpu@0.3.1:
+    dependencies:
+      '@modelcontextprotocol/server': 2.0.0
+      '@vgpu/adapter-mock': 0.3.1(@vgpu/adapter-node@0.3.1)
+      '@vgpu/adapter-node': 0.3.1
+      '@vgpu/core': 0.3.1(@vgpu/adapter-node@0.3.1)
+      '@vgpu/wgsl': 0.3.1(@vgpu/adapter-node@0.3.1)
+      '@vgpu/wgsl-std': 0.3.1
+      '@webgpu/types': 0.1.72
+      pixelmatch: 7.2.0
+      pngjs: 7.0.0
+      wgpu-matrix: 3.4.2
+      zod: 4.5.2
+    transitivePeerDependencies:
+      - supports-color
+
   vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0):
     dependencies:
       lightningcss: 1.33.0
@@ -8008,6 +8120,15 @@ snapshots:
     transitivePeerDependencies:
       - msw
 
+  webgpu@0.4.0:
+    dependencies:
+      '@webgpu/types': 0.1.72
+      debug: 4.4.3
+    transitivePeerDependencies:
+      - supports-color
+
+  wgpu-matrix@3.4.2: {}
+
   which@2.0.2:
     dependencies:
       isexe: 2.0.0
@@ -8048,7 +8169,6 @@ snapshots:
 
   zod@3.25.76: {}
 
-  zod@4.5.2:
-    optional: true
+  zod@4.5.2: {}
 
   zwitch@2.0.4: {}

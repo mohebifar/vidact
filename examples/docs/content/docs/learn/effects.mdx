@@ -1,0 +1,122 @@
+---
+title: Effects
+description: Synchronize a component with something outside the DOM it owns, using useEffect and useLayoutEffect.
+group: Learn
+---
+
+An effect is code that runs *because* a component mounted or one of its values changed, and that touches something Vidact does not manage: a network connection, a timer, a browser API, a third-party widget. The API is React's `useEffect`, and the rules are the same.
+
+```tsx
+import { useEffect, useState } from 'react'
+
+export function ChatRoom({ roomId }: { roomId: string }) {
+  const [messages, setMessages] = useState<string[]>([])
+
+  useEffect(() => {
+    const connection = connect(roomId)
+    connection.on('message', (text) => setMessages((current) => [...current, text]))
+    return () => connection.disconnect()
+  }, [roomId])
+
+  return (
+    <ul>
+      {messages.map((message) => (
+        <li key={message}>{message}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+The effect runs after the component's DOM is in the document. When `roomId` changes, the cleanup from the previous run disconnects the old room, then the effect runs again for the new one. When the component is removed, the cleanup runs one last time.
+
+## Dependencies
+
+The dependency array tells Vidact which values the effect reads. The compiler uses the same reactive tracking it uses for JSX, so a dependency on a prop or state value re-runs the effect exactly when that value changes, not when some unrelated value changes.
+
+- `[]` runs the effect once after mount and cleans up on unmount.
+- `[a, b]` re-runs when `a` or `b` changes.
+
+Always pass a dependency array. In React, omitting it means "after every render"; there are no renders in Vidact, so there is nothing sensible for that form to mean.
+
+Values that never change, such as the setter from `useState` or the `dispatch` from `useReducer`, can be listed or left out; either is fine.
+
+## Why not just do it in the body?
+
+In React, code in the component body runs on every render, so people sometimes use it as a poor substitute for effects. In Vidact the body runs once. Code that should respond to changes *must* be in an effect, and code that only needs to run once can be in either place, but the body is the wrong place for anything with a cleanup or anything asynchronous.
+
+```tsx
+export function Title({ text }: { text: string }) {
+  document.title = text
+
+  return <h1>{text}</h1>
+}
+```
+
+Here `document.title` is set once and never updated. Wrap it in `useEffect(() => { document.title = text }, [text])` and it tracks the prop.
+
+## Layout effects
+
+`useLayoutEffect` runs after the DOM has been created or updated but before the browser paints. Use it when you need to measure the DOM and adjust something synchronously, so the user never sees an intermediate frame.
+
+```tsx
+import { useLayoutEffect, useRef, useState } from 'react'
+
+export function Tooltip({ children }: { children: VidactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const [height, setHeight] = useState(0)
+
+  useLayoutEffect(() => {
+    setHeight(ref.current?.getBoundingClientRect().height ?? 0)
+  }, [])
+
+  return <div ref={ref} style={{ marginTop: -height }}>{children}</div>
+}
+```
+
+The order of work after a change is: DOM updates, then ref callbacks and `useImperativeHandle`, then layout effects, then paint, then passive `useEffect` callbacks.
+
+## Insertion effects
+
+`useInsertionEffect` exists for CSS-in-JS libraries that must inject styles before layout effects read them. It requires the `css-insertion` feature and is rarely needed in application code.
+
+## Stable callbacks with useEffectEvent
+
+Sometimes an effect needs to call a function that reads the latest props or state, without re-running the effect when those values change. `useEffectEvent` returns a function that always sees current values and is never a dependency.
+
+```tsx
+import { useEffect, useEffectEvent } from 'react'
+
+export function Analytics({ page, user }: { page: string; user: User }) {
+  const logVisit = useEffectEvent(() => {
+    track('visit', { page, user: user.id })
+  })
+
+  useEffect(() => {
+    logVisit()
+  }, [page])
+
+  return null
+}
+```
+
+The effect re-runs when `page` changes and logs the current `user`, but a change to `user` alone does not trigger a new visit.
+
+## Effects and errors
+
+An exception thrown by an effect or its cleanup is routed to the nearest [error boundary](/docs/learn/error-handling) and root error callbacks, the same as an exception in an event handler.
+
+## Effects are not for derived state
+
+If a value can be computed from props and state, compute it directly and let the compiler keep it fresh. An effect that only calls a setter with a derived value is unnecessary and adds a delay.
+
+```tsx
+const [firstName, setFirstName] = useState('')
+const [lastName, setLastName] = useState('')
+
+const fullName = `${firstName} ${lastName}`
+```
+
+## Subscribing to external data
+
+For values that live outside your components and change on their own, such as a store, `localStorage`, or `navigator.onLine`, reach for `useSyncExternalStore` rather than an effect that copies the value into state. It is covered in [Context and external stores](/docs/learn/context).

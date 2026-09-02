@@ -1061,10 +1061,7 @@ function topologicalUpdaterOrder(
     if (writes === undefined) continue
     const readers: number[] = []
     for (const readerIndex of activeIndexes) {
-      if (
-        writerIndex !== readerIndex &&
-        operations[1](writes, updaters[readerIndex]![0])
-      ) {
+      if (writerIndex !== readerIndex && operations[1](writes, updaters[readerIndex]![0])) {
         readers.push(readerIndex)
       }
     }
@@ -1146,9 +1143,7 @@ function topologicalUpdaterOrder(
       componentIndegrees[readerComponent] = componentIndegrees[readerComponent]! - 1
       if (componentIndegrees[readerComponent] === 0) {
         ready.push(readerComponent)
-        ready.sort(
-          (left, right) => componentFirstIndexes[left]! - componentFirstIndexes[right]!,
-        )
+        ready.sort((left, right) => componentFirstIndexes[left]! - componentFirstIndexes[right]!)
       }
     }
   }
@@ -1256,13 +1251,7 @@ export function createCompiledExternalStore<T>(
   sourceMask: SourceMask,
   storeSubscribe:
     | ((onStoreChange: () => void) => () => void)
-    | CompiledBinding<
-        readonly [
-          (onStoreChange: () => void) => () => void,
-          () => T,
-          (() => T)?,
-        ]
-      >,
+    | CompiledBinding<readonly [(onStoreChange: () => void) => () => void, () => T, (() => T)?]>,
   getSnapshot?: () => T,
   _getServerSnapshot?: () => T,
 ): StateSlot<T> {
@@ -1284,12 +1273,7 @@ export function createCompiledExternalStore<T>(
     }
   }
   readStore()
-  const slot = createStateSlot(
-    scope[1],
-    sourceMask,
-    currentGetSnapshot(),
-    stateWriteGuard(scope),
-  )
+  const slot = createStateSlot(scope[1], sourceMask, currentGetSnapshot(), stateWriteGuard(scope))
   let active = false
   let unsubscribe = noop
   const checkSnapshot = (): void => {

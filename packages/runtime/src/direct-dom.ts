@@ -10,7 +10,12 @@ import {
   queueElementRef,
   registerCompiledCleanup,
 } from './compiled/core.ts'
-import type { CompiledBinding, CompiledRenderValue, StructuralBinding } from './compiled/types.ts'
+import type {
+  CompiledBinding,
+  CompiledContext,
+  CompiledRenderValue,
+  StructuralBinding,
+} from './compiled/types.ts'
 import { hasInvalidChild } from './compiled/validation.ts'
 import { attachEventProp, isEventProp } from './dom/events.ts'
 import {
@@ -40,7 +45,11 @@ import {
   isHydrating,
 } from './hydration-bridge.ts'
 import { mountRawHtmlProp } from './raw-html.ts'
-import { isRenderableProtocol, materializeRenderable } from './renderable-protocol.ts'
+import {
+  isRenderableProtocol,
+  materializeRenderable,
+  type RenderableProtocol,
+} from './renderable-protocol.ts'
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
 const UNSAFE_HTML = typeof __VIDACT_UNSAFE_HTML__ === 'undefined' || __VIDACT_UNSAFE_HTML__
@@ -56,6 +65,7 @@ export type DirectChild =
   | readonly DirectChild[]
   | CompiledBinding<unknown>
   | StructuralBinding
+  | RenderableProtocol
 export type DirectProps = Record<string, unknown> | null
 export type DirectComponent = (props: Record<string, unknown>) => CompiledRenderValue
 
@@ -89,13 +99,18 @@ export function h(
   props: DirectProps,
   ...children: DirectChild[]
 ): DirectChild
-export function h(
-  type: string | typeof Fragment | DirectComponent,
+export function h<T>(
+  type: CompiledContext<T>,
   props: DirectProps,
   ...children: DirectChild[]
 ): DirectChild
 export function h(
-  type: string | typeof Fragment | DirectComponent,
+  type: string | typeof Fragment | DirectComponent | CompiledContext<unknown>,
+  props: DirectProps,
+  ...children: DirectChild[]
+): DirectChild
+export function h(
+  type: string | typeof Fragment | DirectComponent | CompiledContext<unknown>,
   props: DirectProps,
   ...children: DirectChild[]
 ): DirectChild {
@@ -107,8 +122,10 @@ export function h(
   }
   if (typeof type === 'function') {
     const namespace = readIntrinsicNamespace(props)
+    const component = type as DirectComponent
     const root = constructCompiledComponent(
-      () => withIntrinsicNamespace(namespace, () => type(createComponentProps(props, children))),
+      () =>
+        withIntrinsicNamespace(namespace, () => component(createComponentProps(props, children))),
       type,
     )
     adoptCompiledRoot(root)

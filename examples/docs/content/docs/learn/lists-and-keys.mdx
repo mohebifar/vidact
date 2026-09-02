@@ -1,0 +1,107 @@
+---
+title: Lists and keys
+description: Render arrays with map, give each item a stable key, and understand how Vidact reorders the DOM without rebuilding it.
+group: Learn
+---
+
+Render a list by mapping an array to JSX, the same way you would in React.
+
+```tsx
+export function ShoppingList({ items }: { items: Item[] }) {
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+<Preview variant="list" />
+
+## Keys
+
+Give every item a `key` that identifies it: an ID from your data, a slug, anything that stays the same for that item across updates. Vidact uses the key to match each item to the DOM it already created.
+
+When the array changes, Vidact walks the new array, finds the rows whose keys already exist, and moves them into position. Rows with new keys are constructed; rows whose keys disappeared are disposed. Everything else, including the state and focus of components inside the rows, is left alone.
+
+```tsx
+setItems((current) => current.filter((item) => item.id !== removed.id))
+```
+
+This removes exactly one `<li>` from the DOM.
+
+### Keys must be unique and primitive
+
+Two items with the same key is an error, and Vidact reports it *before* touching the DOM, so a duplicate never leaves the list half-updated. Keys should be strings or numbers. Using the array index is allowed, but you lose the benefits above whenever items are inserted or reordered, because the index no longer identifies the item.
+
+The key must be a plain value. An expression like `` key={`${item.id}:row`} `` is rejected at compile time, because the compiler needs to associate the key with the item identity directly; use `key={item.id}` instead.
+
+The `map` callback should return one element. If each item needs to pick between several shapes, return a component and branch inside it:
+
+```tsx
+{nodes.map((node) => (
+  <Node key={node.id} node={node} />
+))}
+
+function Node({ node }: { node: NodeData }) {
+  if (node.kind === 'text') return <span>{node.text}</span>
+  return <a href={node.href}>{node.label}</a>
+}
+```
+
+## Building arrays with loops
+
+`map` is the most common form, but Vidact also compiles arrays that you build up with a loop, as long as the elements are keyed:
+
+```tsx
+export function Calendar({ days }: { days: Day[] }) {
+  const cells = []
+  for (const day of days) {
+    cells.push(<td key={day.date}>{day.label}</td>)
+  }
+  return <tr>{cells}</tr>
+}
+```
+
+Filtering, sorting, and slicing before you map are all fine, because they produce a new array that Vidact then reconciles by key.
+
+```tsx
+{todos
+  .filter((todo) => !todo.done)
+  .map((todo) => <TodoRow key={todo.id} todo={todo} />)}
+```
+
+## Multiple nodes per item
+
+An item may render a fragment or a component that returns several siblings. Vidact tracks the whole range and keeps it contiguous when rows move.
+
+```tsx
+{sections.map((section) => (
+  <Fragment key={section.id}>
+    <dt>{section.term}</dt>
+    <dd>{section.definition}</dd>
+  </Fragment>
+))}
+```
+
+## Unkeyed arrays
+
+If you omit `key`, Vidact falls back to matching by position. This is fine for static lists, and for lists that only ever append or truncate. For anything that reorders or removes from the middle, add keys.
+
+## Lists of components with state
+
+Because rows are matched by key, a component in a row keeps its state when the list is re-sorted. This is the behaviour you want for editable rows:
+
+```tsx
+{contacts.map((contact) => (
+  <EditableContact key={contact.id} contact={contact} />
+))}
+```
+
+Reversing `contacts` moves the DOM rows and leaves each `EditableContact`'s draft text intact.
+
+## Performance
+
+You do not need to virtualize or memoize small and medium lists. A list update costs roughly one operation per row that actually moved, was added, or was removed, plus the updates for any bound values inside rows that changed. For very large lists, the usual windowing strategies apply and are unrelated to the compiler.

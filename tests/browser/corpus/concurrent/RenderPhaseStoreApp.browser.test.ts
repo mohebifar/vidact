@@ -1,10 +1,10 @@
-import { mountCompiled, type CompiledComponentResult } from '@vidact/runtime'
+import { mountCompiled } from '@vidact/runtime'
 import { assertMutationEnvelope, captureMutations } from '@vidact/test-support'
 import { afterEach, expect, it } from 'vitest'
 
 import { RenderPhaseStoreApp } from './RenderPhaseStoreApp.tsx'
 
-let mounted: CompiledComponentResult | undefined
+let mounted: { dispose: () => void } | undefined
 
 afterEach(() => {
   mounted?.dispose()

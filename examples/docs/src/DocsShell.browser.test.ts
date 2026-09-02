@@ -1,8 +1,16 @@
 import { mountCompiled, type CompiledComponentResult } from '@vidact/runtime'
 import { assertMutationEnvelope, captureMutations } from '@vidact/test-support'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ButtonProof, DocsLayoutProof, DocsPageProof, SwitchProof } from './DocsShellProof.tsx'
+import {
+  ButtonProof,
+  DocsLayoutProof,
+  DocsPageProof,
+  LandingCounterProof,
+  LandingHeroLogoProof,
+  LandingPlaylistProof,
+  SwitchProof,
+} from './DocsShellProof.tsx'
 
 let dispose: (() => void) | undefined
 
@@ -54,6 +62,76 @@ describe('Vidact-native documentation controls', () => {
     expect(output.textContent).toContain('Count: 1')
     expect(host.querySelector('[data-testid="docs-counter"]')).toBe(output)
     expect(capture.records.some((record) => record.type === 'characterData')).toBe(true)
+  })
+
+  it('renders every documentation block type on the client', async () => {
+    const host = await mount(DocsPageProof)
+
+    expect(host.querySelector('p code')!.textContent).toBe('mountCompiled')
+    expect(host.querySelector('p a')!.getAttribute('href')).toBe('/docs/reference/runtime')
+    expect(host.querySelector('p strong')!.textContent).toBe(' once')
+    expect(host.querySelector('h3#steps')!.textContent).toBe('Steps')
+    expect([...host.querySelectorAll('ol li')].map((li) => li.textContent)).toEqual([
+      'Compile',
+      'Mount',
+    ])
+    expect(host.querySelector('ul li code')!.textContent).toBe('useState')
+    expect(host.querySelector('[data-tone="tip"]')!.textContent).toContain('Callout body')
+    expect(host.querySelector('td code')!.textContent).toBe('useRef')
+    expect(host.querySelector('[aria-label="Table of contents"]')!.textContent).toBe(
+      'Interactive proof',
+    )
+  })
+
+  it('counts real DOM mutations in the landing counter demo', async () => {
+    const host = await mount(LandingCounterProof)
+    const button = host.querySelector<HTMLButtonElement>('button')!
+    const output = host.querySelector<HTMLOutputElement>('output')!
+
+    await captureMutations(host, () => button.click())
+    await captureMutations(host, () => button.click())
+
+    expect(output.textContent).toBe('Count: 2')
+    expect(host.querySelector('output')).toBe(output)
+    expect(Number(host.querySelector('[data-live]')!.textContent)).toBeGreaterThanOrEqual(2)
+  })
+
+  it('moves playlist rows with their checkbox state when reversed', async () => {
+    const host = await mount(LandingPlaylistProof)
+    const golden = host.querySelector<HTMLLIElement>('[data-song="golden"]')!
+    const checkbox = golden.querySelector<HTMLInputElement>('input')!
+
+    checkbox.click()
+    const reverse = [...host.querySelectorAll('button')].find(
+      (candidate) => candidate.textContent === 'Reverse',
+    )!
+    await captureMutations(host, () => reverse.click())
+
+    const rows = [...host.querySelectorAll('li')]
+    expect(rows.at(-1)).toBe(golden)
+    expect(golden.querySelector('input')!.checked).toBe(true)
+  })
+
+  it('mounts the crystal hero logo canvas lazily', async () => {
+    if (!('gpu' in navigator)) return
+    const adapter = await navigator.gpu.requestAdapter().catch(() => null)
+    if (adapter === null) return
+
+    const host = await mount(LandingHeroLogoProof)
+    const stage = host.querySelector<HTMLElement>('[data-testid="hero-logo"]')!
+    stage.style.width = '200px'
+    stage.style.height = '200px'
+
+    const canvas = await vi.waitFor(
+      () => {
+        const found = stage.querySelector('canvas')
+        if (found === null) throw new Error('hero canvas is not mounted yet')
+        return found
+      },
+      { interval: 100, timeout: 10_000 },
+    )
+
+    expect(canvas.isConnected).toBe(true)
   })
 
   it('opens mobile navigation and changes theme without replacing the docs shell', async () => {

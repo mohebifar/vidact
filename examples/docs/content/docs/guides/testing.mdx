@@ -1,0 +1,125 @@
+---
+title: Testing
+description: Test compiled components in a real browser with Vitest, and use act to wait for Vidact's scheduler.
+group: Guides
+---
+
+Vidact components are ordinary compiled modules that build real DOM, so the most reliable way to test them is in a real browser. The setup below uses Vitest's browser mode with Playwright; it is the same setup the Vidact repository uses for its own tests.
+
+## Setup
+
+```shell
+pnpm add -D vitest @vitest/browser-playwright playwright @vidact/test-support
+```
+
+```ts title="vite.config.ts"
+import { vidact } from '@vidact/vite'
+import { playwright } from '@vitest/browser-playwright'
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  plugins: [vidact()],
+  test: {
+    include: ['src/**/*.browser.test.{ts,tsx}'],
+    browser: {
+      enabled: true,
+      headless: true,
+      provider: playwright(),
+      instances: [{ browser: 'chromium' }],
+    },
+  },
+})
+```
+
+Because the test files go through the same Vite pipeline, components imported by a test are compiled by Vidact, just as they are in the application.
+
+## Mounting a component
+
+Use `mountCompiled` from `@vidact/runtime` to mount into a host element, and dispose it after each test.
+
+```ts title="src/Counter.browser.test.ts"
+import { mountCompiled } from '@vidact/runtime'
+import { act } from '@vidact/test-support'
+import { afterEach, expect, it } from 'vitest'
+
+import { Counter } from './Counter.tsx'
+
+let dispose: (() => void) | undefined
+
+afterEach(() => {
+  dispose?.()
+  document.body.replaceChildren()
+})
+
+it('increments when clicked', async () => {
+  const host = document.createElement('div')
+  document.body.append(host)
+  dispose = mountCompiled(Counter, host).dispose
+
+  const button = host.querySelector('button')!
+  await act(() => button.click())
+
+  expect(host.querySelector('h1')!.textContent).toBe('Count: 1')
+})
+```
+
+## act
+
+State writes inside a click handler are applied synchronously, but effects and some updates are scheduled on a microtask. `act` from `@vidact/test-support` runs a function and then drains Vidact's scheduler until nothing is pending, so assertions after `await act(...)` see the settled DOM. It throws if the work never stabilizes, which catches update loops.
+
+```ts
+await act(async () => {
+  input.value = 'hello'
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+})
+```
+
+## Asserting on DOM mutations
+
+Vidact's promise is that updates are surgical. `@vidact/test-support` includes helpers to prove it in tests. `captureMutations` runs an action under a `MutationObserver` and returns the records; `assertMutationEnvelope` checks that only the expected kinds of mutation touched the expected nodes.
+
+```ts
+import { assertMutationEnvelope, captureMutations } from '@vidact/test-support'
+
+const capture = await captureMutations(host, () => button.click())
+
+assertMutationEnvelope(capture.records, [{ type: 'characterData', target: output.firstChild! }], 'counter update')
+```
+
+This is useful for components where accidental re-creation of DOM would break focus, animations, or third-party widgets.
+
+## Testing with props
+
+To test a component that takes props, wrap it in a small proof component in the test file. The wrapper is compiled like any other component.
+
+```tsx title="src/Greeting.browser.test.tsx"
+function GreetingProof() {
+  return <Greeting name="Ada" />
+}
+
+dispose = mountCompiled(GreetingProof, host).dispose
+```
+
+## Testing server rendering
+
+Server output is plain HTML, so test it in Node. With Vidact Start, call the handler with a `Request`:
+
+```ts title="test/server.test.ts"
+import handler from '../src/server.ts'
+
+it('renders the home page', async () => {
+  const response = await handler(new Request('https://example.test/'))
+  expect(response.status).toBe(200)
+  expect(await response.text()).toContain('<h1>Hello')
+})
+```
+
+Run these with a second Vitest config that uses `environment: 'node'` and the same plugins.
+
+## Cross-browser
+
+Add `{ browser: 'firefox' }` and `{ browser: 'webkit' }` to `instances` to run every test in all three engines. Vidact's own test corpus runs in all three.
+
+## What not to test
+
+There is no element tree, so snapshot tests of React elements have no equivalent. Snapshot the host's `innerHTML` if you want a snapshot. Likewise, there is no render count to assert on; assert on DOM mutations instead.

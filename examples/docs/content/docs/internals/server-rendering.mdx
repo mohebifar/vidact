@@ -1,0 +1,50 @@
+---
+title: Server rendering and hydration
+description: How the server target produces HTML, how the hydrate target attaches to it, and what has to match between them.
+group: Under the hood
+---
+
+Server rendering in Vidact is not a separate renderer running the same components in a DOM shim. It is a third output of the same compiler, driven by the same ownership model, which is why it stays in step with the client automatically.
+
+## The server target
+
+Compiling with `target: 'server'` produces code that walks the component's structure once and writes HTML. Text and attribute values are escaped. Where the client will need to find a dynamic region, a conditional branch, a list, a component's range, the server writes comment markers around it.
+
+Server code has no browser globals. A component that touches `window` or `document` during construction throws on the server; move that access into an effect, which does not run on the server.
+
+Effects do not run. Refs are not attached. `useLayoutEffect` is a no-op. `useId` produces deterministic IDs from the root's prefix so the client can produce the same ones. `useSyncExternalStore` uses `getServerSnapshot`.
+
+Portals are rejected on the server, since there is no target node to render into.
+
+## The hydrate target
+
+Compiling with `target: 'hydrate'` produces code that expects the server's HTML to already be in the document. Instead of creating elements, it walks the existing nodes in the same order the server wrote them, claims each one, and attaches bindings and listeners. Comment markers tell it where each range begins and ends.
+
+When it finds something unexpected, a missing node, extra text, an attribute that differs, it repairs the DOM to match what the client would have rendered and reports the mismatch through `onRecoverableError`. Repair is best-effort; the report is what you should act on.
+
+After hydration completes, the component is indistinguishable from one mounted on the client: same owners, same updaters, same disposal.
+
+## What has to match
+
+Hydration is a conversation between two programs that were compiled separately. They must agree on:
+
+- **Compiler version.** The marker format is part of the compile-to-runtime protocol. Server and client builds from different versions refuse to hydrate.
+- **Feature flags.** A feature changes what the compiler emits for the affected code. Use the same `features` list for both builds.
+- **Initial data.** Every value the component reads during construction must be the same on both sides. Vidact Start guarantees this for loader data by serializing it into the page.
+- **Determinism.** No `Math.random()`, no `Date.now()`, no reads of browser state during construction.
+
+## Data transfer in Vidact Start
+
+Start runs loaders on the server, renders with their results, and embeds a JSON snapshot of the results in a `<script type="application/json">`. In the browser, `hydrateStart` reads that script, decodes the snapshot, matches the same routes, and constructs the route components with the same `loaderData`. Construction is therefore deterministic by design: both sides saw the same inputs.
+
+The snapshot is a closed value model: plain data only, checked on both ends. Its checksum detects corruption and version skew. It is not a security boundary; loaders must not put secrets in it, because it is sent to the browser verbatim.
+
+## Streaming and continuations
+
+With the `framework` feature, the server target also supports `renderToReadableStream` and `renderToPipeableStream`. Suspense boundaries emit their fallback immediately and their content later as a continuation that the client splices in. `prerender` and `resume` split rendering into a static prelude and a postponed remainder. Vidact Start uses the streaming renderer internally, buffering the result into a single document in the current release.
+
+These APIs share names with React's, and their observable behaviour is designed to match, but the wire format is Vidact's own. They do not consume or produce React Flight payloads.
+
+## Why one compiler, three targets?
+
+Frameworks that render on the server by executing client code in a simulated DOM must keep the simulation faithful and pay its cost on every request. Frameworks with a separate server renderer must keep two implementations in agreement. Vidact generates all three targets from one IR, so an ownership rule or an escaping rule is implemented once, and a component that compiles for the client compiles for the server by construction.

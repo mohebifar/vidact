@@ -186,7 +186,10 @@ export function SynchronousFlowApp(): JSX.Element {
       <button data-toggle-render-phase onClick={() => setPhaseOpen(!phaseOpen)}>
         toggle render phase
       </button>
-      <button data-replace-transition-store onClick={() => setTransitionStore(new TransitionStore())}>
+      <button
+        data-replace-transition-store
+        onClick={() => setTransitionStore(new TransitionStore())}
+      >
         replace transition store
       </button>
     </section>

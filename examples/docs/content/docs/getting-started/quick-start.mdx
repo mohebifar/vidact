@@ -1,0 +1,130 @@
+---
+title: Quick start
+description: Create a Vidact project, write your first component, and build it for production in a few minutes.
+group: Getting started
+---
+
+This page walks you through a minimal client-side Vidact application with Vite. By the end you will have a working counter, a development server with hot reloading, and a production build you can deploy to any static host.
+
+You need [Node.js](https://nodejs.org) 24 or newer and a package manager. The examples use pnpm, but npm and yarn work the same way.
+
+## 1. Create a project
+
+Create a folder, initialize a package, and install Vidact alongside Vite and TypeScript.
+
+```shell
+mkdir hello-vidact
+cd hello-vidact
+pnpm init
+pnpm add @vidact/runtime
+pnpm add -D @vidact/vite @vidact/react-types @types/react typescript vite
+```
+
+Notice what is *not* on that list: `react` and `react-dom`. Your source code imports from `react`, but the Vidact Vite plugin resolves those imports to the compiled runtime. React itself is never installed or shipped.
+
+## 2. Configure Vite and TypeScript
+
+Add the Vidact plugin to a Vite config. The plugin compiles every `.tsx` file in your project.
+
+```ts title="vite.config.ts"
+import { vidact } from '@vidact/vite'
+import { defineConfig } from 'vite'
+
+export default defineConfig({
+  plugins: [vidact()],
+})
+```
+
+Then tell TypeScript to leave JSX alone (the compiler handles it) and to type JSX with Vidact's React-shaped types.
+
+```json title="tsconfig.json"
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "jsx": "preserve",
+    "jsxImportSource": "@vidact/react-types",
+    "types": ["@vidact/react-types", "vite/client"]
+  },
+  "include": ["src", "vite.config.ts"]
+}
+```
+
+## 3. Write a component
+
+Create `src/Counter.tsx`. This is ordinary React code.
+
+```tsx title="src/Counter.tsx"
+import { useState } from 'react'
+
+export function Counter() {
+  const [count, setCount] = useState(0)
+
+  return (
+    <main>
+      <h1>Count: {count}</h1>
+      <button onClick={() => setCount((value) => value + 1)}>Increment</button>
+    </main>
+  )
+}
+```
+
+When Vidact compiles this file, it creates the `<main>`, `<h1>`, and `<button>` elements once, and emits a single updater that rewrites the heading's text node whenever `count` changes. Clicking the button never calls `Counter` again.
+
+## 4. Mount it
+
+Create an HTML page with a host element and a module entry that mounts the component.
+
+```html title="index.html"
+<!doctype html>
+<html lang="en">
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
+```
+
+```ts title="src/main.ts"
+import { mountCompiled } from '@vidact/runtime'
+
+import { Counter } from './Counter.tsx'
+
+const host = document.querySelector('#app')
+if (host === null) throw new Error('Missing #app')
+
+mountCompiled(Counter, host)
+```
+
+`mountCompiled` is the Vidact equivalent of `createRoot(host).render(<Counter />)`. It takes the component itself, not a JSX element, because a compiled component is a factory that builds its own DOM.
+
+## 5. Run it
+
+Start the development server and open the printed URL.
+
+```shell
+pnpm vite
+```
+
+Edit `Counter.tsx` and the page updates. When you are ready to deploy:
+
+```shell
+pnpm vite build
+pnpm vite preview
+```
+
+The `dist` folder contains static files you can serve from anywhere.
+
+> [!TIP] Add hot module replacement
+>
+> Vite's default HMR reloads the page when a module changes. For in-place replacement that keeps the rest of the page alive, mount with `mountHotRoot(import.meta.hot, host, Counter)` instead and add a lexical `import.meta.hot.accept()` call to the entry. See [@vidact/runtime](/docs/reference/runtime).
+
+## Next steps
+
+You now have a working Vidact project. From here:
+
+- Read [Thinking in Vidact](/docs/learn/thinking-in-vidact) to understand what "components run once" means for the code you write.
+- Work through the [Learn](/docs/learn/components-and-props) section for state, events, lists, effects, and context.
+- If you want server rendering and routing, continue to [Vidact Start](/docs/start/getting-started).

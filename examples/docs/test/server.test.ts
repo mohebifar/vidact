@@ -10,10 +10,10 @@ describe('Vidact documentation site', () => {
     const html = await response.text()
 
     expect(response.status).toBe(200)
-    expect(html).toContain('What is Vidact?')
-    expect(html).toContain('Experimental software')
+    expect(html).toContain('Why Vidact?')
+    expect(html).toContain('Vidact is in beta')
     expect(html).toContain('vidact-start-snapshot')
-    expect(html).toContain('Build your first Vidact application')
+    expect(html).toContain('Quick start')
   })
 
   it('server-renders nested tutorial and reference documents', async () => {
@@ -23,9 +23,9 @@ describe('Vidact documentation site', () => {
     const html = await response.text()
 
     expect(response.status).toBe(200)
-    expect(html).toContain('Status terms')
-    expect(html).toContain('Function components and supported custom hooks')
-    expect(html).toContain('React compatibility without React interop')
+    expect(html).toContain('How to read the tables')
+    expect(html).toContain('Third-party packages')
+    expect(html).toContain('useSyncExternalStore')
   })
 
   it('uses the Fumadocs page tree for grouped navigation order', async () => {
@@ -33,43 +33,52 @@ describe('Vidact documentation site', () => {
     const navigation = layout.navigation.flatMap((group) => group.items)
 
     expect(layout.navigation.map((group) => group.title)).toEqual([
-      'Overview',
-      'Tutorials',
-      'How-to guides',
+      'Getting started',
+      'Learn',
+      'Vidact Start',
+      'Guides',
       'Reference',
-      'Explanation',
+      'Under the hood',
     ])
     expect(navigation.map((item) => item.url)).toEqual([
       '/docs',
-      '/docs/tutorials/first-application',
-      '/docs/tutorials/vidact-start',
-      '/docs/guides/state-and-effects',
-      '/docs/guides/conditional-rendering',
-      '/docs/guides/keyed-collections',
-      '/docs/guides/forms',
-      '/docs/guides/context-and-stores',
-      '/docs/guides/routes-and-data',
-      '/docs/guides/ssr-and-hydration',
-      '/docs/guides/feature-flags',
-      '/docs/guides/production',
+      '/docs/getting-started/quick-start',
+      '/docs/getting-started/installation',
+      '/docs/learn/thinking-in-vidact',
+      '/docs/learn/components-and-props',
+      '/docs/learn/state',
+      '/docs/learn/events',
+      '/docs/learn/forms',
+      '/docs/learn/conditional-rendering',
+      '/docs/learn/lists-and-keys',
+      '/docs/learn/effects',
+      '/docs/learn/refs',
+      '/docs/learn/context',
+      '/docs/learn/error-handling',
+      '/docs/learn/features',
+      '/docs/start/getting-started',
+      '/docs/start/routing',
+      '/docs/start/data-loading',
+      '/docs/start/navigation',
+      '/docs/start/deployment',
+      '/docs/guides/migrating-from-react',
+      '/docs/guides/testing',
       '/docs/guides/troubleshooting',
-      '/docs/reference/react-compatibility',
-      '/docs/reference/vite-plugin',
+      '/docs/reference/vite',
+      '/docs/reference/runtime',
       '/docs/reference/start',
       '/docs/reference/compiler',
-      '/docs/reference/runtime',
-      '/docs/explanation/how-compilation-works',
-      '/docs/explanation/ownership-and-identity',
-      '/docs/explanation/static-reactivity',
-      '/docs/explanation/server-and-hydration',
-      '/docs/explanation/react-compatibility',
-      '/docs/explanation/vidact-start-boundary',
+      '/docs/reference/react-compatibility',
+      '/docs/internals/compilation',
+      '/docs/internals/reactivity',
+      '/docs/internals/ownership',
+      '/docs/internals/server-rendering',
     ])
   })
 
   it('returns a Start navigation snapshot without the document shell', async () => {
     const response = await handler(
-      new Request('https://example.test/docs/tutorials/first-application', {
+      new Request('https://example.test/docs/getting-started/quick-start', {
         headers: { [VIDACT_START_NAVIGATION_HEADER]: '1' },
       }),
     )
@@ -77,7 +86,7 @@ describe('Vidact documentation site', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toContain(VIDACT_START_SNAPSHOT_MEDIA_TYPE)
-    expect(body).toContain('Write the component')
+    expect(body).toContain('Write a component')
     expect(body).toContain('\\"language\\",\\"tsx\\"')
     expect(body).toContain('#85E89D')
     expect(body).not.toContain('<!doctype html>')

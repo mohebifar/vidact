@@ -1,34 +1,54 @@
 ---
-title: Vidact documentation
-description: Build direct-DOM applications with React-shaped components, static reactivity, and no React runtime.
-group: Overview
-kind: Overview
+title: Introduction
+description: Vidact compiles the React components you already know how to write into direct DOM code, with no Virtual DOM and no React runtime.
+group: Getting started
 ---
 
-## What is Vidact?
+Vidact is a compiler for React-shaped components. You write function components, JSX, and hooks exactly the way you would in a React application. Instead of shipping React, Vidact compiles each component into plain DOM operations: create these elements once, and when this piece of state changes, update this text node.
 
-Vidact is an experimental compiler for React-shaped TypeScript and JSX. It turns supported function components into direct DOM construction and compiler-selected updates. Components construct once when mounted; state changes update only the DOM, child props, ranges, and effects that read the changed value.
+The result is an application that runs without a Virtual DOM, without a reconciler, and without a runtime that tracks dependencies. Your component functions run **once** when they mount. After that, only the DOM that depends on changed data is touched.
 
-> [!WARNING] Experimental software
->
-> Vidact is currently published as a beta. Test production applications against the exact compiler and runtime versions you ship.
+Here is a counter compiled by Vidact. Click the button and the number updates in place. The `Counter` function is never called again.
+
+```tsx
+import { useState } from 'react'
+
+export function Counter() {
+  const [count, setCount] = useState(0)
+
+  return (
+    <div>
+      <button onClick={() => setCount((value) => value + 1)}>Increment</button>
+      <output>Count: {count}</output>
+    </div>
+  )
+}
+```
 
 <Preview variant="counter" />
 
-## Choose a path
+## Why Vidact?
 
-- New to Vidact: complete **Build your first Vidact application**.
-- Building a full-stack site: follow **Build with Vidact Start**.
-- Solving one problem: open a task-focused how-to guide.
-- Checking an API or limitation: use the reference section.
-- Learning the model: read the explanations on compilation, ownership, and reactivity.
+React's programming model is excellent: components are functions, UI is a pure description of state, and hooks compose. Its runtime model is a trade-off: every state change re-runs component functions and diffs the result to find out what actually changed.
 
-## The core contract
+Vidact keeps the programming model and replaces the runtime model. Because the compiler can see your whole component, it knows ahead of time which expressions depend on which values. It emits exactly the DOM updates that are needed, in a fixed order, and nothing else.
 
-| Property | Vidact behavior |
-| --- | --- |
-| Rendering | Direct DOM construction without a Virtual DOM |
-| Updates | Static compiler-selected operations |
-| Components | Supported functions construct once per mount |
-| React | Source compatibility for a documented subset; no runtime fallback |
-| Failure mode | Unsupported patterns are diagnosed during compilation |
+- **Small bundles.** A compiled counter is a few kilobytes including the runtime. There is no reconciler to download.
+- **Predictable updates.** A state write runs a known list of updaters. There are no surprise re-renders, no stale closures, and no need for `memo` to keep things fast.
+- **Familiar code.** `useState`, `useEffect`, `useContext`, `useRef`, and the rest work as you expect. Most React components compile without changes.
+- **Honest errors.** When you write something Vidact cannot compile, you get a compile-time error at the exact source location, never a silent fallback to a slower path.
+
+## What Vidact is not
+
+Vidact is not a React renderer and it does not run React. There is no element tree to inspect, no Fiber, and no React DevTools. Class components, `React.Children`, and libraries that reach into React internals are not supported. If your application depends on those, read [React compatibility](/docs/reference/react-compatibility) before you start.
+
+> [!WARNING] Vidact is in beta
+>
+> APIs are stabilizing and the supported subset of React is growing. Pin the compiler and runtime to matching versions and run your test suite against the versions you ship.
+
+## Where to go next
+
+- **Try it in five minutes.** The [quick start](/docs/getting-started/quick-start) creates a project, writes a component, and builds it.
+- **Learn the model.** [Thinking in Vidact](/docs/learn/thinking-in-vidact) explains the one idea that makes everything else click: components run once.
+- **Build a full-stack app.** [Vidact Start](/docs/start/getting-started) adds file-based routing, server rendering, data loaders, and client navigation.
+- **Coming from React?** The [migration guide](/docs/guides/migrating-from-react) lists what changes and what does not.

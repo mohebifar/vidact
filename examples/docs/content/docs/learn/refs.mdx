@@ -1,0 +1,132 @@
+---
+title: Refs and the DOM
+description: Hold values that are not state, reach DOM elements directly, and expose imperative handles from components.
+group: Learn
+---
+
+A ref is a box that holds a value without participating in rendering. Change `ref.current` and nothing updates; read it whenever you need it. Refs are the tool for things that are not UI state: a timer ID, a DOM element, a previous value.
+
+```tsx
+import { useRef } from 'react'
+
+export function Stopwatch() {
+  const intervalRef = useRef<number | null>(null)
+
+  const start = () => {
+    intervalRef.current = window.setInterval(tick, 1000)
+  }
+  const stop = () => {
+    if (intervalRef.current !== null) window.clearInterval(intervalRef.current)
+  }
+
+  return (
+    <div>
+      <button onClick={start}>Start</button>
+      <button onClick={stop}>Stop</button>
+    </div>
+  )
+}
+```
+
+`useRef` returns the same object for the life of the component. Because there are no re-renders, there is no danger of losing the box; it lives exactly as long as the component does.
+
+## Reaching DOM elements
+
+Pass a ref to an element's `ref` prop and Vidact sets `ref.current` to the element once it is created. The element is available in effects, layout effects, and event handlers.
+
+```tsx
+import { useRef } from 'react'
+
+export function SearchBox() {
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  return (
+    <form>
+      <input ref={inputRef} />
+      <button type="button" onClick={() => inputRef.current?.focus()}>
+        Focus the input
+      </button>
+    </form>
+  )
+}
+```
+
+A callback ref works too, and may return a cleanup function that runs when the element is removed:
+
+```tsx
+<div
+  ref={(element) => {
+    observer.observe(element)
+    return () => observer.unobserve(element)
+  }}
+/>
+```
+
+Refs attached to elements inside a conditional or a list are set when the element is created and cleared when it is disposed, so `ref.current` is `null` exactly when the element is not in the document.
+
+## Refs to components
+
+In Vidact, as in React 19, `ref` is an ordinary prop on function components. There is no `forwardRef` step; just accept `ref` and put it where it belongs.
+
+```tsx
+type TextFieldProps = {
+  label: string
+  ref?: Ref<HTMLInputElement>
+}
+
+export function TextField({ label, ref }: TextFieldProps) {
+  return (
+    <label>
+      {label}
+      <input ref={ref} />
+    </label>
+  )
+}
+```
+
+`forwardRef` is accepted for the simple case of an inline function with `(props, ref)` parameters, to ease migration. New code should use ref-as-prop.
+
+## Imperative handles
+
+When a component wants to expose a small API rather than a raw element, use `useImperativeHandle`:
+
+```tsx
+import { useImperativeHandle, useRef, type Ref } from 'react'
+
+export type DialogHandle = { open: () => void; close: () => void }
+
+export function Dialog({ ref, children }: { ref?: Ref<DialogHandle>; children: VidactNode }) {
+  const dialogRef = useRef<HTMLDialogElement | null>(null)
+
+  useImperativeHandle(ref, () => ({
+    open: () => dialogRef.current?.showModal(),
+    close: () => dialogRef.current?.close(),
+  }))
+
+  return <dialog ref={dialogRef}>{children}</dialog>
+}
+```
+
+The handle is installed during the same commit phase as element refs, before layout effects run.
+
+## Reading the DOM at the right time
+
+Because Vidact updates the DOM synchronously at the end of an event handler, you can usually read layout right after a state write inside the *next* handler or effect. To measure immediately after a change, use `useLayoutEffect`, which runs after DOM updates and before paint.
+
+## Refs are not reactive
+
+Writing to `ref.current` does not update anything on screen. If a value needs to be displayed, it should be state. A common pattern is to keep both: state for display, a ref for the latest value in a long-running callback.
+
+## Portals
+
+`createPortal` renders children into a different DOM node while keeping them logically inside the component that created them. Context, error boundaries, and cleanup follow the component; only the DOM position changes.
+
+```tsx
+import { createPortal } from 'react-dom'
+
+export function Modal({ children }: { children: VidactNode }) {
+  return createPortal(<div className="modal">{children}</div>, document.body)
+}
+```
+
+Because events bubble through the real DOM, a click inside the portal does not reach handlers on the component's *DOM* ancestors. Attach handlers inside the portal content instead. Portals are a client-only feature; the server renderer rejects them.

@@ -1,0 +1,123 @@
+---
+title: Context and external stores
+description: Share values across a subtree with context, and subscribe to data that lives outside your components.
+group: Learn
+---
+
+Props are the default way to pass data down. When a value is needed by many components at many depths, such as the current theme, the signed-in user, or a router, context lets you provide it once and read it anywhere below.
+
+## Creating and providing context
+
+```tsx
+import { createContext } from 'react'
+
+export type Theme = 'light' | 'dark'
+
+export const ThemeContext = createContext<Theme>('light')
+```
+
+Wrap a subtree in the context to provide a value. Vidact supports both the React 19 form, where the context object itself is the provider, and the classic `Context.Provider` form.
+
+```tsx
+export function App() {
+  const [theme, setTheme] = useState<Theme>('light')
+
+  return (
+    <ThemeContext value={theme}>
+      <Toolbar onToggle={() => setTheme(theme === 'light' ? 'dark' : 'light')} />
+    </ThemeContext>
+  )
+}
+```
+
+## Reading context
+
+Read the value with `useContext` or `use`. Both work during component construction.
+
+```tsx
+import { useContext } from 'react'
+
+export function Button({ children }: { children: VidactNode }) {
+  const theme = useContext(ThemeContext)
+  return <button className={`button button-${theme}`}>{children}</button>
+}
+```
+
+When the provided value changes, every consumer's bindings that read `theme` are updated. Consumers are not re-run; the class name on each `<button>` is rewritten in place.
+
+## Where context flows
+
+Context follows the *logical* component tree, which is what you would expect: a consumer inside a conditional branch, a list row, a portal, or a nested component sees the nearest provider above it in the JSX. This holds during server rendering and hydration as well.
+
+## Patterns
+
+### Provide state and setters together
+
+A common shape is a context whose value is an object holding both data and the functions that change it. Build it in the provider component so the consumers stay simple.
+
+```tsx
+type CartValue = {
+  items: CartItem[]
+  add: (item: CartItem) => void
+  remove: (id: string) => void
+}
+
+export const CartContext = createContext<CartValue | null>(null)
+
+export function CartProvider({ children }: { children: VidactNode }) {
+  const [items, setItems] = useState<CartItem[]>([])
+
+  const value: CartValue = {
+    items,
+    add: (item) => setItems((current) => [...current, item]),
+    remove: (id) => setItems((current) => current.filter((item) => item.id !== id)),
+  }
+
+  return <CartContext value={value}>{children}</CartContext>
+}
+
+export function useCart() {
+  const cart = useContext(CartContext)
+  if (cart === null) throw new Error('useCart must be used inside CartProvider')
+  return cart
+}
+```
+
+You do not need `useMemo` around `value` to prevent consumers from re-rendering, because nothing re-renders. The compiler tracks that `value.items` depends on `items` and updates only the bindings that read it.
+
+### Keep contexts small
+
+Prefer several focused contexts over one large one. It keeps consumers honest about what they depend on and makes the provider easy to test.
+
+## External stores
+
+Some data lives outside your component tree entirely: a state-management library, `localStorage`, a WebSocket, or a browser API like `matchMedia`. Subscribe to it with `useSyncExternalStore`.
+
+```tsx
+import { useSyncExternalStore } from 'react'
+
+function subscribe(callback: () => void) {
+  window.addEventListener('online', callback)
+  window.addEventListener('offline', callback)
+  return () => {
+    window.removeEventListener('online', callback)
+    window.removeEventListener('offline', callback)
+  }
+}
+
+export function ConnectionStatus() {
+  const online = useSyncExternalStore(
+    subscribe,
+    () => navigator.onLine,
+    () => true,
+  )
+
+  return <p>{online ? 'Online' : 'Offline'}</p>
+}
+```
+
+The three arguments are the same as React's: a `subscribe` function that returns an unsubscribe function, a `getSnapshot` that returns the current value, and an optional `getServerSnapshot` used during server rendering and hydration. Return the *same* snapshot when nothing has changed; a new object on every call would trigger updates forever.
+
+### Stores as the boundary for long-lived state
+
+Component state is destroyed when its component is disposed. That includes the whole tree during hot module replacement and during a Vidact Start navigation. If you have state that should survive those events, keep it in a module-level store and read it with `useSyncExternalStore`. This is Vidact's intended boundary for persistent client state.

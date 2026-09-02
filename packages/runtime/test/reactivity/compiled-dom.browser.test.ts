@@ -159,7 +159,7 @@ describe('compiled DOM corpus', () => {
 
   it('runs ancestor insertion effects before callback refs in deferred descendants', () => {
     const host = document.createElement('div')
-    let callback = (): never => {
+    let callback: () => void = () => {
       throw new Error('callback ref ran before its ancestor insertion effect')
     }
     let attached = false
@@ -1289,9 +1289,7 @@ describe('compiled DOM corpus', () => {
       })
       const render = createRenderable(
         {
-          ...compiledSpread(binding(scope, propsSource, props.get), [
-            'suppressHydrationWarning',
-          ]),
+          ...compiledSpread(binding(scope, propsSource, props.get), ['suppressHydrationWarning']),
           suppressHydrationWarning: true,
         },
         (input) =>

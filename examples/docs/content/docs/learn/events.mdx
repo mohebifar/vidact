@@ -1,0 +1,120 @@
+---
+title: Responding to events
+description: Attach handlers with onClick, onInput, and friends, and work with the native DOM events they receive.
+group: Learn
+---
+
+Event handlers look exactly like React's: pass a function to a prop named `on` plus the capitalized event name.
+
+```tsx
+export function Alert() {
+  const handleClick = () => {
+    window.alert('You clicked me!')
+  }
+
+  return <button onClick={handleClick}>Click me</button>
+}
+```
+
+Vidact attaches a real `click` listener to the real `<button>`. There is no synthetic event system and no delegation to the document root.
+
+## Native events
+
+The biggest difference from React is what your handler receives: the **native DOM event**, not a `SyntheticEvent`. In practice this is simpler, because `event.target`, `event.key`, `event.preventDefault()`, and everything else are exactly what the browser gives you.
+
+```tsx
+export function Search() {
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      submit(event.target.value)
+    }
+  }
+
+  return <input onKeyDown={onKeyDown} />
+}
+```
+
+The type annotation is optional. `@vidact/react-types` infers the correct event type for each handler prop, and types `event.target` as the element the handler is on, so `event.target.value` compiles without a cast.
+
+A few things that were true in React's synthetic layer no longer apply:
+
+- Events bubble through the physical DOM. A handler on a portal's parent component does not receive events from inside the portal, because the portal's nodes live somewhere else in the document.
+- `event.persist()` does not exist and is not needed.
+- `onChange` on a text input fires on the native `input` event, which matches React's behaviour. See [Forms](/docs/learn/forms) for the full mapping.
+
+## Which events are supported
+
+All standard DOM events are available under their React names: `onClick`, `onInput`, `onChange`, `onSubmit`, `onKeyDown`, `onPointerMove`, `onFocus`, `onBlur`, `onScroll`, and so on. Capture-phase variants end in `Capture`, as in `onClickCapture`.
+
+A prop that looks like an event handler but does not correspond to a known event, such as `onDefinitelyNotAnEvent`, is a compile-time error. This catches typos that React would have silently ignored.
+
+## Reading state in handlers
+
+Handlers read state at the moment they run. You do not need to worry about stale closures.
+
+```tsx
+export function Stepper() {
+  const [value, setValue] = useState(0)
+
+  return (
+    <div>
+      <button onClick={() => setValue(value - 1)}>-</button>
+      <output>{value}</output>
+      <button onClick={() => setValue(value + 1)}>+</button>
+    </div>
+  )
+}
+```
+
+State writes inside a handler are batched: the DOM updates once when the handler returns.
+
+## Passing handlers to children
+
+Handlers are ordinary function props. Define them in the parent and pass them down.
+
+```tsx
+function Toolbar({ onSave, onCancel }: { onSave: () => void; onCancel: () => void }) {
+  return (
+    <div>
+      <button onClick={onSave}>Save</button>
+      <button onClick={onCancel}>Cancel</button>
+    </div>
+  )
+}
+
+export function Editor() {
+  const [draft, setDraft] = useState('')
+  return <Toolbar onSave={() => persist(draft)} onCancel={() => setDraft('')} />
+}
+```
+
+You do not need `useCallback` to keep the handler's identity stable for performance. `Toolbar` is constructed once and its listeners are attached once; a changed handler prop updates the listener without rebuilding anything.
+
+## Handlers and effects
+
+If a handler needs to read a value that an effect closes over, or vice versa, `useEffectEvent` gives you a stable function that always sees the latest values without becoming a dependency:
+
+```tsx
+import { useEffect, useEffectEvent, useState } from 'react'
+
+export function Chat({ roomId }: { roomId: string }) {
+  const [theme, setTheme] = useState('light')
+
+  const onConnected = useEffectEvent(() => {
+    showNotification('Connected', theme)
+  })
+
+  useEffect(() => {
+    const connection = connect(roomId)
+    connection.on('connected', onConnected)
+    return () => connection.disconnect()
+  }, [roomId])
+
+  return /* ... */
+}
+```
+
+## Errors in handlers
+
+An exception thrown inside a handler is routed to the nearest [error boundary](/docs/learn/error-handling) and then to the root's `onCaughtError` or `onUncaughtError` callback. It does not crash the page or leave half-applied DOM updates behind, because the batch that was in progress is rolled back first.

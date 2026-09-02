@@ -1,0 +1,121 @@
+---
+title: Routing
+description: How files in src/routes become URLs, and how layouts, parameters, and catch-all routes fit together.
+group: Vidact Start
+---
+
+Vidact Start derives your routes from the file system. There is no route configuration file to maintain: add a file, get a URL.
+
+## File naming
+
+| File | URL |
+| --- | --- |
+| `src/routes/__root.tsx` | Wraps every page |
+| `src/routes/index.tsx` | `/` |
+| `src/routes/about.tsx` | `/about` |
+| `src/routes/blog/index.tsx` | `/blog` |
+| `src/routes/blog/$slug.tsx` | `/blog/:slug` |
+| `src/routes/blog.tsx` | Layout for everything under `/blog` |
+| `src/routes/docs/$.tsx` | `/docs/*` (catch-all) |
+| `src/routes/api/time.ts` | `/api/time` (endpoint only) |
+
+A `$` prefix makes a dynamic segment; a bare `$.tsx` matches the rest of the path. Files ending in `.test.tsx` or `.spec.tsx` are ignored, so you can keep tests next to routes.
+
+## Layouts
+
+A route file at `blog.tsx` sitting beside a `blog/` directory becomes the layout for everything in that directory. Render `children` where the child route should appear.
+
+```tsx title="src/routes/blog.tsx"
+import { defineFileRoute, Link, type RouteComponentProps } from '@vidact/start'
+
+export function BlogLayout({ children }: RouteComponentProps<undefined>) {
+  return (
+    <div className="blog">
+      <nav>
+        <Link href="/blog">All posts</Link>
+      </nav>
+      <main>{children}</main>
+    </div>
+  )
+}
+
+export const Route = defineFileRoute({ component: BlogLayout })
+```
+
+Layouts nest: `__root.tsx` wraps `blog.tsx`, which wraps `blog/$slug.tsx`. Each layout may also have a loader; see [Data loading](/docs/start/data-loading).
+
+`__root.tsx` is the outermost layout and is the right place for a site header, footer, and any providers.
+
+```tsx title="src/routes/__root.tsx"
+import { defineFileRoute, type RouteComponentProps } from '@vidact/start'
+
+export function RootLayout({ children }: RouteComponentProps<undefined>) {
+  return (
+    <>
+      <SiteHeader />
+      {children}
+      <SiteFooter />
+    </>
+  )
+}
+
+export const Route = defineFileRoute({ component: RootLayout })
+```
+
+The root layout renders inside the document's root element. The `<html>`, `<head>`, and `<body>` are produced by your `renderDocument` function on the server; see [@vidact/start](/docs/reference/start).
+
+## Parameters
+
+Dynamic segments arrive in `params`, both in the loader and in the component.
+
+```tsx title="src/routes/blog/$slug.tsx"
+import { defineFileRoute, type RouteComponentProps, type RouteLoaderContext } from '@vidact/start'
+
+const loader = async ({ params }: RouteLoaderContext) => ({
+  post: await loadPost(params.slug),
+})
+
+export function PostRoute({ loaderData, params }: RouteComponentProps<Awaited<ReturnType<typeof loader>>>) {
+  return (
+    <article>
+      <h1>{loaderData.post.title}</h1>
+      <p>Slug: {params.slug}</p>
+    </article>
+  )
+}
+
+export const Route = defineFileRoute({ loader, component: PostRoute })
+```
+
+A catch-all route receives the remaining path under the key `'*'`, for example `params['*']` is `'guides/testing'` for `/docs/guides/testing`.
+
+## Component props
+
+Every route component receives the same props:
+
+| Prop | Meaning |
+| --- | --- |
+| `loaderData` | What this route's loader returned, or `undefined` when there is no loader |
+| `params` | Dynamic segment values as strings |
+| `requestUrl` | The full URL of the current request, useful for marking the active link |
+| `children` | The matched child route, for layouts |
+
+## Not found
+
+A URL that matches no route returns a 404 response from the server. Customize it with the `notFound` option of `createStartHandler`. A loader can also throw a `Response` to short-circuit rendering with a specific status.
+
+```ts
+const loader = async ({ params }: RouteLoaderContext) => {
+  const post = await findPost(params.slug)
+  if (post === null) throw new Response('Not found', { status: 404 })
+  return { post }
+}
+```
+
+## Current limitations
+
+Start's router is deliberately small in its first release:
+
+- Navigating between routes replaces the whole route tree, including layouts. State in a layout component resets on navigation. Keep persistent client state in an [external store](/docs/learn/context).
+- There is no route preloading, middleware, or route-level code splitting configuration yet.
+- Only pathname matching is supported; search parameters are available through `requestUrl`.

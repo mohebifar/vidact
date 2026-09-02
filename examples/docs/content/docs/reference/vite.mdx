@@ -1,0 +1,75 @@
+---
+title: "@vidact/vite"
+description: The Vite plugin that compiles your components and resolves React imports.
+group: Reference
+---
+
+```ts
+import { vidact } from '@vidact/vite'
+
+export default defineConfig({
+  plugins: [vidact(options)],
+})
+```
+
+The plugin compiles every matching module with the Vidact compiler and rewrites `react`, `react-dom`, `react/jsx-runtime`, and `react-dom/server` imports to the matching `@vidact/runtime` entry points for the selected target.
+
+## Options
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `target` | `'client' \| 'hydrate' \| 'server'` | `'client'` | Which kind of code to generate. `client` builds a fresh DOM. `hydrate` attaches to server-rendered markup. `server` renders to HTML with no browser globals. |
+| `features` | `VidactFeature[]` | `[]` | Opt-in capability families. See [Opt-in features](/docs/learn/features). |
+| `extensions` | `` `.${string}`[] `` | `['.tsx']` | File extensions to compile. Add `.mdx` or `.jsx` if earlier plugins emit JSX in those files. |
+| `includeDependencies` | `FilterPattern` | none | Extra dependency modules to compile even though their package does not declare React. |
+| `exclude` | `FilterPattern` | none | Modules to leave untouched. Exclusion wins over every other rule. |
+
+`FilterPattern` is Vite's usual shape: a string, a `RegExp`, or an array of either.
+
+```ts
+vidact({
+  target: 'hydrate',
+  features: ['async', 'actions'],
+  extensions: ['.tsx', '.mdx'],
+  includeDependencies: /node_modules\/@acme\/headless-ui\//,
+  exclude: [/\.generated\.tsx$/],
+})
+```
+
+## Which files are compiled
+
+- Every file in your project whose extension is in `extensions`.
+- Modules reached from your imports whose owning package declares React in its `package.json` (a `react` dependency or peer dependency), when they contain JSX or React hook imports. This is what lets Vidact compile source-published component libraries.
+- Anything matched by `includeDependencies`.
+
+Minus anything matched by `exclude`.
+
+Dependency modules are compiled per target with their published source maps preserved, and the result is cached by content, target, features, and compiler version.
+
+> [!WARNING] Compiled is not the same as compatible
+>
+> A dependency that Vidact decides to compile must still be inside the supported React subset. If it uses `React.Children`, class components, or React internals, compilation fails with a diagnostic pointing into that package. There is no fallback to running React for that module.
+
+## Targets and entry points
+
+The three targets are meant to be used from separate Vite configs, one per build:
+
+| Target | Runtime entry | Typical entry file |
+| --- | --- | --- |
+| `client` | `@vidact/runtime` | Browser entry calling `mountCompiled` |
+| `hydrate` | `@vidact/runtime/hydrate` | Browser entry calling `hydrateRoot` |
+| `server` | `@vidact/runtime/server` | Server handler calling `renderToString` |
+
+Vidact Start's plugin sets these for you; if you use `@vidact/start/vite` you do not add `vidact()` separately.
+
+## Hot module replacement
+
+The plugin supports Vite's HMR. In a plain client application, mount with `mountHotRoot(import.meta.hot, host, App)` and keep a lexical `import.meta.hot.accept()` in the entry so Vite treats it as an HMR boundary. Component state resets when a module is replaced; see [@vidact/runtime](/docs/reference/runtime).
+
+## Cache keys
+
+The compiler output is cached by source content, filename, target, features, and the compiler's protocol version. Changing a feature flag invalidates the cache for every module, which is expected.
+
+## Other bundlers
+
+The plugin is Vite-specific. For custom pipelines, `@vidact/compiler` exposes the same compilation as a function; see [@vidact/compiler](/docs/reference/compiler).
