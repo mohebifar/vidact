@@ -1,7 +1,12 @@
 import { binding, isCompiledBinding } from './compiled/core.ts'
 import type { CompiledBinding, CompiledRenderValue, CompiledScope } from './compiled/types.ts'
 import { Fragment, h, type DirectComponent } from './direct-dom.ts'
-import { isRenderableProtocol, RENDERABLE } from './renderable-protocol.ts'
+import {
+  installRenderableClone,
+  isRenderableProtocol,
+  RENDERABLE,
+  type RenderableClone,
+} from './renderable-protocol.ts'
 import type { SourceMask } from './source-mask.ts'
 import { unionSources } from './source-mask.ts'
 import { compiledSpread } from './spread.ts'
@@ -30,6 +35,7 @@ export function createRenderable(
   identity: unknown = construct,
   reconcile = false,
 ): CompiledRenderable {
+  installRenderableClone(cloneRenderable as RenderableClone)
   readPropsInput(input)
   const capability = {
     props: propsView(input),

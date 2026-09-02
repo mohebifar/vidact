@@ -9,6 +9,27 @@ export interface RenderableProtocol {
   }
 }
 
+/**
+ * Cloning a renderable pulls in the element-construction module, which most
+ * compiled apps never touch. The renderable module registers its clone the
+ * first time an element capability is created, so `jsx` can reach it without
+ * importing it, and bundles that never build elements leave it out.
+ */
+export type RenderableClone = (
+  value: RenderableProtocol,
+  overrides: Record<string, unknown>,
+) => unknown
+
+let renderableClone: RenderableClone | undefined
+
+export function installRenderableClone(clone: RenderableClone): void {
+  renderableClone = clone
+}
+
+export function renderableCloneHandler(): RenderableClone | undefined {
+  return renderableClone
+}
+
 export function isRenderableProtocol(value: unknown): value is RenderableProtocol {
   return (
     typeof value === 'object' &&
