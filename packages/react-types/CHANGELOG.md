@@ -1,5 +1,12 @@
 # @vidact/react-types
 
+## 0.2.0-beta.1
+
+### Patch Changes
+
+- Updated dependencies [7765e99]
+  - @vidact/runtime@0.2.0-beta.1
+
 ## 0.2.0-beta.0
 
 ### Patch Changes

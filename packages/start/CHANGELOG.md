@@ -1,5 +1,13 @@
 # @vidact/start
 
+## 0.2.0-beta.1
+
+### Patch Changes
+
+- Updated dependencies [7765e99]
+  - @vidact/runtime@0.2.0-beta.1
+  - @vidact/vite@0.2.0-beta.1
+
 ## 0.2.0-beta.0
 
 ### Minor Changes
