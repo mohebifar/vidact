@@ -11,8 +11,10 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from '../../runtime/src/server.ts'
 import { vidact } from '../src/index.ts'
 
-const docsRequire = createRequire(join(import.meta.dirname, '../../../examples/docs/package.json'))
-const baseUiRoot = dirname(docsRequire.resolve('@base-ui/react/package.json'))
+// Base UI is a devDependency of this package, so the suite resolves it itself
+// rather than through whatever an example app happens to install.
+const testRequire = createRequire(import.meta.url)
+const baseUiRoot = dirname(testRequire.resolve('@base-ui/react/package.json'))
 const temporaryDirectories: string[] = []
 
 afterEach(async () => {
@@ -197,16 +199,12 @@ describe('Base UI dependency compilation', () => {
     expect(JSON.stringify(direct?.map)).not.toContain('rolldown/runtime.js')
 
     const server = await createServer({
-      root: join(import.meta.dirname, '../../../examples/docs'),
+      root: import.meta.dirname,
       configFile: false,
       logLevel: 'silent',
       plugins: [vidact({ features: ['concurrent', 'css-insertion', 'profiling'] })],
       resolve: {
         alias: [
-          {
-            find: '@',
-            replacement: join(import.meta.dirname, '../../../examples/docs/src'),
-          },
           {
             find: /^@vidact\/runtime\/(.+)$/,
             replacement: `${join(import.meta.dirname, '../../runtime/src')}/$1.ts`,
@@ -227,16 +225,13 @@ describe('Base UI dependency compilation', () => {
       expect(result?.code).not.toContain('\\0rolldown/runtime.js')
 
       const sourceLinked = await server.transformRequest(
-        join(import.meta.dirname, '../../../examples/docs/src/components/ui/avatar.tsx'),
+        join(import.meta.dirname, 'fixtures/avatar.tsx'),
       )
       expect(sourceLinked?.code).toContain('__vidactCreateState')
       expect(sourceLinked?.code).not.toContain('react/jsx-runtime')
       expect(sourceLinked?.code).not.toContain('\\0rolldown/runtime.js')
 
-      const sourceEntry = join(
-        import.meta.dirname,
-        '../../../examples/docs/src/components/ui/avatar.tsx',
-      )
+      const sourceEntry = join(import.meta.dirname, 'fixtures/avatar.tsx')
       const runtime = await server.pluginContainer.resolveId(
         'vidact:rolldown/runtime.js',
         sourceEntry,
