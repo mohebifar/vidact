@@ -1,8 +1,9 @@
 # Release policy
 
 Vidact packages use semantic versioning as one coordinated release train:
-`@vidact/compiler`, `@vidact/runtime`, `@vidact/vite`,
-`@vidact/react-types`, and `@vidact/test-support` publish the same version.
+`@vidact/compiler`, `@vidact/runtime`, `@vidact/vite`, `@vidact/start`,
+`@vidact/react-types`, `@vidact/test-support`, and the `vidact` generator publish
+the same version.
 Changesets declares these packages as one fixed group, so a release bump cannot
 change only part of the public package set. Package versions remain at the last
 released value until the automated Version Packages pull request consumes the
@@ -28,10 +29,13 @@ from the workspace lockfile.
 
 Before publishing, maintainers run `pnpm check`, which includes the runtime-size,
 compiler cold/incremental performance, runtime throughput/allocation/retention,
-and clean tarball consumer gates. The package build emits ESM, declarations,
-declaration maps, and source maps; the smoke test installs the exact tarballs
+and clean tarball consumer gates. Every package builds with `tsdown` in unbundle
+mode, so `dist` mirrors `src` file for file and emits ESM, declarations,
+declaration maps, and source maps. Packages publish `src` alongside `dist` so
+those maps resolve in a consumer's `node_modules`; the smoke test installs the exact tarballs
 outside the workspace and verifies a real native compilation, the `vidactc`
-wrapper, runtime, server, test, Vite, and TSX type entry points without Cargo.
+wrapper, the `vidact` generator, runtime, server, test, Vite, and TSX type entry
+points without Cargo.
 
 The supported native matrix is macOS arm64/x64, Windows x64, and Linux
 arm64/x64 for both glibc and musl. A release is not publishable unless all seven

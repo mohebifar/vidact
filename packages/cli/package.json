@@ -1,0 +1,60 @@
+{
+  "name": "vidact",
+  "version": "0.2.0-beta.0",
+  "description": "Project generator for Vidact applications",
+  "keywords": [
+    "cli",
+    "generator",
+    "react",
+    "scaffold",
+    "vidact"
+  ],
+  "homepage": "https://github.com/mohebifar/vidact#readme",
+  "bugs": "https://github.com/mohebifar/vidact/issues",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mohebifar/vidact.git",
+    "directory": "packages/cli"
+  },
+  "bin": {
+    "vidact": "./dist/cli.js"
+  },
+  "files": [
+    "CHANGELOG.md",
+    "dist",
+    "LICENSE",
+    "README.md",
+    "templates",
+    "src"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@clack/prompts": "1.7.0",
+    "nypm": "0.6.9"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsdown": "0.22.14",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

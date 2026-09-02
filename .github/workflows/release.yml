@@ -136,6 +136,7 @@ jobs:
           pnpm --filter @vidact/test-support build
           pnpm --filter @vidact/vite build
           pnpm --filter @vidact/start build
+          pnpm --filter vidact build
       - name: Pack release
         shell: bash
         run: |
@@ -149,6 +150,7 @@ jobs:
           pnpm --filter @vidact/react-types pack --pack-destination release-tarballs
           pnpm --filter @vidact/vite pack --pack-destination release-tarballs
           pnpm --filter @vidact/start pack --pack-destination release-tarballs
+          pnpm --filter vidact pack --pack-destination release-tarballs
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-tarballs

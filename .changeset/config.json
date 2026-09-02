@@ -9,7 +9,8 @@
       "@vidact/test-support",
       "@vidact/vite",
       "@vidact/start",
-      "@vidact/react-types"
+      "@vidact/react-types",
+      "vidact"
     ]
   ],
   "linked": [],

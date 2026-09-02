@@ -21,7 +21,8 @@
     "CHANGELOG.md",
     "dist",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "src"
   ],
   "type": "module",
   "sideEffects": [
@@ -129,7 +130,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "node ../../scripts/clean-typescript-package.mjs dist && tsc -p tsconfig.build.json && node ../../scripts/finalize-typescript-package.mjs dist src/env.d.ts",
+    "build": "tsdown",
     "test": "vitest run && vitest run --config vitest.retained-ui.config.ts && vitest run --config vitest.server.config.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
@@ -138,6 +139,7 @@
     "@vidact/react-types": "workspace:*",
     "@vidact/test-support": "workspace:*",
     "@vitest/browser-playwright": "4.1.11",
+    "tsdown": "0.22.14",
     "typescript": "7.0.2",
     "vitest": "4.1.11"
   },

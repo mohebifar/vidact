@@ -5,4 +5,5 @@ export const publicPackages = [
   { name: '@vidact/vite', manifestPath: 'packages/vite-plugin/package.json' },
   { name: '@vidact/start', manifestPath: 'packages/start/package.json' },
   { name: '@vidact/react-types', manifestPath: 'packages/react-types/package.json' },
+  { name: 'vidact', manifestPath: 'packages/cli/package.json' },
 ]

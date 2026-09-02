@@ -2,6 +2,8 @@
 
 These documents record accepted compiler/runtime contracts and their rationale. Plans describe intended work; architecture decisions describe boundaries the implementation must preserve.
 
+- [Docs deployment through Nitro](docs-nitro-deployment.md) — the docs example keeps Vidact's routing and rendering while Nitro packages the client and SSR environments for Vercel.
+
 - [React analysis boundary](react-analysis-boundary.md) — React Compiler supplies an owned typed CFG plus def-use facts while Vidact classifies supported syntax through OXC AST and semantic identities before lowering to its stable IR.
 - [React Compiler SSA join snapshot](react-compiler-ssa-join-snapshot.md) — optimized predecessor and phi facts cross the patched Oxc seam as owned values and immediately lower into Vidact's validated reactive-flow graph.
 - [Phi-derived static updaters](phi-derived-static-updaters.md) — React Compiler-proven joins lower from side-effect-free assignment regions into ordered source-mask updaters, including objects, arrays, and dispatched component types.

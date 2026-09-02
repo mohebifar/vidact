@@ -29,7 +29,8 @@
     "dist/index.js",
     "dist/index.js.map",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "src"
   ],
   "type": "module",
   "sideEffects": false,
@@ -43,8 +44,8 @@
     "access": "public"
   },
   "scripts": {
-    "build": "node ../../scripts/clean-typescript-package.mjs dist && pnpm build:native && pnpm build:js",
-    "build:js": "tsc -p tsconfig.build.json && node ../../scripts/finalize-typescript-package.mjs dist",
+    "build": "pnpm build:native && pnpm build:js",
+    "build:js": "tsdown",
     "build:native": "napi build --manifest-path ../../crates/vidact-node/Cargo.toml --output-dir dist --platform --esm --js binding.js --dts binding.d.ts",
     "build:native:release": "pnpm build:native --release --strip",
     "test": "vitest run",
@@ -53,6 +54,7 @@
   "devDependencies": {
     "@emnapi/runtime": "2.0.0-alpha.3",
     "@napi-rs/cli": "3.8.2",
+    "tsdown": "0.22.14",
     "typescript": "7.0.2",
     "vitest": "4.1.11"
   },

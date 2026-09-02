@@ -1,0 +1,24 @@
+{
+  "name": "{{projectName}}",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build --config vite.client.config.ts && vite build --config vite.server.config.ts",
+    "dev": "vite",
+    "start": "node dist/server/start.js",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@vidact/runtime": "^{{vidactVersion}}",
+    "@vidact/start": "^{{vidactVersion}}",
+    "srvx": "^0.12.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@vidact/react-types": "^{{vidactVersion}}",
+    "typescript": "7.0.2",
+    "vite": "^8.2.2"
+  }
+}

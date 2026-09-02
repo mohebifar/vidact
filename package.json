@@ -5,7 +5,7 @@
   "scripts": {
     "benchmark": "pnpm build:packages && node --expose-gc scripts/benchmark.mjs",
     "build:examples": "pnpm --filter @vidact/example-todomvc build && pnpm --filter @vidact/example-shop build && pnpm --filter @vidact/example-docs build && pnpm --filter @vidact/example-start build",
-    "build:packages": "pnpm --filter @vidact/compiler build && pnpm --filter @vidact/runtime build && pnpm --filter @vidact/test-support build && pnpm --filter @vidact/vite build && pnpm --filter @vidact/start build",
+    "build:packages": "pnpm --filter @vidact/compiler build && pnpm --filter @vidact/runtime build && pnpm --filter @vidact/test-support build && pnpm --filter @vidact/vite build && pnpm --filter @vidact/start build && pnpm --filter vidact build",
     "changeset": "changeset",
     "changeset:check": "node scripts/verify-release-intent.mjs",
     "changeset:status": "changeset status --since=origin/main",
@@ -26,7 +26,7 @@
     "test:packages": "node scripts/verify-packages.mjs",
     "test:runtime": "pnpm --filter @vidact/runtime test",
     "test:rust": "cargo test --workspace",
-    "test:tools": "node --test scripts/verify-release-intent.test.mjs && pnpm --filter @vidact/vite test && pnpm --filter @vidact/start test",
+    "test:tools": "node --test scripts/verify-release-intent.test.mjs && pnpm --filter @vidact/vite test && pnpm --filter @vidact/start test && pnpm --filter vidact test",
     "typecheck": "pnpm build:packages && pnpm --recursive typecheck",
     "version-packages": "changeset version"
   },

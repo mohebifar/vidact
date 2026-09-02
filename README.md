@@ -42,6 +42,7 @@ the rationale and integration constraints.
 - `packages/compiler`: stable JavaScript API, TypeScript declarations, and CLI
 - `packages/runtime`: tree-shakeable scheduler, state slots, and keyed arrays
 - `packages/vite-plugin`: native compilation and OXC JSX-lowering Vite adapter
+- `packages/cli`: the `vidact` project generator and its templates
 - `tests/browser`: compiled Vitest Browser corpora running in Chromium, Firefox, and WebKit
 - `examples/todomvc`: runnable array-state TodoMVC without a Virtual DOM
 - `docs/architecture`: durable architecture decisions and upstream constraints

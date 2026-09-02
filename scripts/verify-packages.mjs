@@ -7,6 +7,11 @@ import { fileURLToPath } from 'node:url'
 
 import { publicPackages } from './public-packages.mjs'
 
+/** npm names a scoped tarball `scope-name`, and an unscoped one by its plain name. */
+function tarballPrefix(name) {
+  return name.startsWith('@') ? name.slice(1).replace('/', '-') : name
+}
+
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'vidact-packages-'))
 const tarballDirectory = path.join(temporaryRoot, 'tarballs')
@@ -23,6 +28,7 @@ function run(command, arguments_, cwd = repository) {
 try {
   await mkdir(tarballDirectory)
   await mkdir(consumerDirectory)
+  await mkdir(path.join(temporaryRoot, 'generated'))
   const tarballs = new Map()
   const compilerDirectory = path.join(repository, 'packages/compiler')
   nativePackageRoot = await mkdtemp(path.join(compilerDirectory, '.verify-npm-'))
@@ -53,7 +59,7 @@ try {
     ]),
   )
   for (const [name, manifest] of manifests) {
-    const filename = `${name.slice(1).replace('/', '-')}-${manifest.version}.tgz`
+    const filename = `${tarballPrefix(name)}-${manifest.version}.tgz`
     run(pnpm, ['--filter', name, 'pack', '--pack-destination', tarballDirectory])
     tarballs.set(name, filename)
   }
@@ -73,6 +79,7 @@ try {
           '@vidact/start': dependency('@vidact/start'),
           '@vidact/test-support': dependency('@vidact/test-support'),
           '@vidact/vite': dependency('@vidact/vite'),
+          vidact: dependency('vidact'),
           '@types/node': '24.13.3',
           '@types/react': '19.2.18',
           typescript: '7.0.2',
@@ -216,6 +223,21 @@ if (vidactStart({ serverEntry: false }).length !== 3) throw new Error('Start Vit
   if (JSON.parse(cliOutput).protocol !== 'vidact-analysis-v1') {
     throw new Error('compiler CLI entry failed')
   }
+  const generator = path.join(
+    consumerDirectory,
+    'node_modules',
+    '.bin',
+    `vidact${process.platform === 'win32' ? '.cmd' : ''}`,
+  )
+  const generatedDirectory = path.join(temporaryRoot, 'generated')
+  run(generator, ['app', '--template', 'start', '--no-install', '--no-git'], generatedDirectory)
+  const generatedManifest = JSON.parse(
+    await readFile(path.join(generatedDirectory, 'app', 'package.json'), 'utf8'),
+  )
+  if (generatedManifest.dependencies['@vidact/start'] === undefined) {
+    throw new Error('generator entry failed')
+  }
+
   const tsc = path.join(
     consumerDirectory,
     'node_modules',

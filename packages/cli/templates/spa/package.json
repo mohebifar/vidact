@@ -1,0 +1,23 @@
+{
+  "name": "{{projectName}}",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@vidact/runtime": "^{{vidactVersion}}"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@vidact/react-types": "^{{vidactVersion}}",
+    "@vidact/vite": "^{{vidactVersion}}",
+    "typescript": "7.0.2",
+    "vite": "^8.2.2"
+  }
+}

@@ -21,7 +21,8 @@
     "CHANGELOG.md",
     "dist",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "src"
   ],
   "type": "module",
   "sideEffects": false,
@@ -35,7 +36,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "node ../../scripts/clean-typescript-package.mjs dist && tsc -p tsconfig.build.json && node ../../scripts/finalize-typescript-package.mjs dist",
+    "build": "tsdown",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"
   },
@@ -49,6 +50,7 @@
   "devDependencies": {
     "@base-ui/react": "1.7.0",
     "@types/node": "^24.13.3",
+    "tsdown": "0.22.14",
     "typescript": "7.0.2",
     "vite": "8.2.2",
     "vitest": "4.1.11"

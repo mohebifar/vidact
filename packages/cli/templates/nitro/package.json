@@ -1,0 +1,26 @@
+{
+  "name": "{{projectName}}",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build --config vite.client.config.ts && vite build --config vite.server.config.ts && nitro build",
+    "dev": "vite",
+    "prepare": "nitro prepare",
+    "start": "node .output/server/index.mjs",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@vidact/runtime": "^{{vidactVersion}}",
+    "@vidact/start": "^{{vidactVersion}}"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@vidact/react-types": "^{{vidactVersion}}",
+    "h3": "^1.15.11",
+    "nitropack": "^2.13.4",
+    "typescript": "7.0.2",
+    "vite": "^8.2.2"
+  }
+}
