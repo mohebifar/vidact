@@ -1706,9 +1706,12 @@ fn rejects_destructured_custom_hook_rest_parameters() {
     }));
 }
 
+/// A rest argument that carries side effects is bound once and shared by the
+/// spread and the dependency list, so expanding the hook cannot evaluate it
+/// twice.
 #[test]
-fn rejects_effectful_rest_arguments_in_callback_factory_dependencies() {
-    let diagnostics = compile_surgical_module_with_options(
+fn binds_effectful_rest_arguments_once_for_callback_factory_dependencies() {
+    let output = compile_surgical_module_with_options(
         ModuleInput {
             filename: "EffectfulComposedRefsHook.tsx",
             source: r#"
@@ -1734,12 +1737,16 @@ fn rejects_effectful_rest_arguments_in_callback_factory_dependencies() {
         },
         &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
     )
-    .expect_err("dependency reconstruction must not evaluate a rest argument more than once");
+    .expect("an effectful rest argument should expand into one shared binding");
 
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == DiagnosticCode::AnalysisFailed
-            && diagnostic.message.contains("dependency list")
-    }));
+    assert!(!output.contains("useComposedRefs("), "{output}");
+    // The effectful argument is evaluated in exactly one place, and both the
+    // spread and the dependency list read that binding.
+    assert_eq!(output.matches("[createRef()]").count(), 1, "{output}");
+    assert!(
+        output.contains("composeRefs(...__vidactHook0Rest), __vidactHook0Rest)"),
+        "{output}"
+    );
 }
 
 #[test]
