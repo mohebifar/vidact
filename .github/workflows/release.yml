@@ -2,13 +2,61 @@ name: Release
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
 jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Decide whether this commit is a release
+        id: plan
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "releasing $GITHUB_REF_NAME"
+            echo 'release=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          pending_changesets="$(find .changeset -maxdepth 1 -name '*.md' ! -name README.md | wc -l | tr -d ' ')"
+          version="$(node --print "JSON.parse(require('node:fs').readFileSync('packages/compiler/package.json', 'utf8')).version")"
+          tag="v$version"
+          if [ "$pending_changesets" != 0 ]; then
+            echo "$pending_changesets pending changeset(s): a version pull request is needed before $tag can be released"
+            echo 'release=false' >> "$GITHUB_OUTPUT"
+          elif [ -n "$(git ls-remote --tags origin "refs/tags/$tag")" ]; then
+            if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+              echo "$tag already exists: re-running the release for it"
+              echo 'release=true' >> "$GITHUB_OUTPUT"
+            else
+              echo "$tag already exists: nothing to release"
+              echo 'release=false' >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "no pending changesets and $tag does not exist yet: tagging and releasing"
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" --field ref="refs/tags/$tag" --field sha="$GITHUB_SHA"
+            echo 'release=true' >> "$GITHUB_OUTPUT"
+          fi
+
   native:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -60,6 +108,8 @@ jobs:
           if-no-files-found: error
 
   native-musl:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
     strategy:
       fail-fast: false
       matrix:
