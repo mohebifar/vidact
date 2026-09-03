@@ -1,5 +1,13 @@
 # @vidact/react-types
 
+## 0.2.0-beta.3
+
+### Patch Changes
+
+- 917f0be: Release vidact CLI
+- Updated dependencies [917f0be]
+  - @vidact/runtime@0.2.0-beta.3
+
 ## 0.2.0-beta.2
 
 ### Patch Changes
