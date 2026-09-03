@@ -1,5 +1,11 @@
 # @vidact/compiler
 
+## 0.2.0-beta.4
+
+### Patch Changes
+
+- 917f0be: Re-release CLI
+
 ## 0.2.0-beta.3
 
 ### Patch Changes

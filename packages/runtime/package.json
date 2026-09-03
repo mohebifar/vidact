@@ -1,6 +1,6 @@
 {
   "name": "@vidact/runtime",
-  "version": "0.2.0-beta.3",
+  "version": "0.2.0-beta.4",
   "description": "Fine-grained direct-DOM runtime for compiled Vidact applications",
   "keywords": [
     "compiler",
