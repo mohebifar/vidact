@@ -15,10 +15,10 @@
     "srvx": "^0.12.7"
   },
   "devDependencies": {
-    "@types/node": "^24.13.3",
+    "@types/node": "catalog:",
     "@types/react": "^19.2.18",
     "@vidact/react-types": "^{{vidactVersion}}",
-    "typescript": "7.0.2",
+    "typescript": "catalog:",
     "vite": "^8.2.2"
   }
 }

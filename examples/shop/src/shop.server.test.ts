@@ -11,7 +11,7 @@ describe('shop server', () => {
     expect(html).toContain('<!doctype html>')
     expect(html).toContain('Ridge Bottle')
     expect(html).toContain('Weekender Tote')
-    expect(html).toContain('vidact:v1')
+    expect(html).toContain('<!--v2:r-->')
     expect(html).toContain('data-server-component="shop-page"')
     expect(html).toContain('data-vidact-client-boundary="true"')
     expect(html).toContain('data-vidact-client-payload=')

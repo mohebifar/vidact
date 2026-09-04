@@ -25,9 +25,17 @@ for the browser-free `@vidact/runtime/server` entry point. Client-only effect
 work is removed; initial state, server snapshots, context, and IDs execute in a
 lazy synchronous server-render request.
 
-`renderToString` emits a versioned `vidact:v1` comment protocol. A root range
-contains nested component ranges. Every child position has an owned slot;
-intrinsic nodes, scalar text, and array collections carry nested typed ranges.
+`renderToString` emits a versioned comment protocol (`<!--v2:b-->` …
+`<!--/v2:b-->`). A root range contains nested component ranges. Every child
+position has an owned slot; array collections carry a nested typed range.
+Intrinsic elements and scalar text are not marked: inside a slot an element
+node can only be the intrinsic child and a text node the scalar (components,
+raw HTML and collections are all wrapped), so the hydrator infers them and
+splits a text node that several adjacent scalars parsed into. A scalar binding
+creates its own anchor comments while claiming, since it may later swap into
+an element. Raw-text elements (`<textarea>`, `<style>`, …) carry no markers at
+all because the parser would show them as content. Protocol `v1` marked every
+element and text; a `v1` render is rejected by a `v2` client and re-rendered.
 Unsafe raw HTML carries an opaque range: its descendants are compared as user
 content but excluded from Vidact element claiming. Hydratable raw HTML rejects
 text that could forge a Vidact marker; static markup remains marker-free.

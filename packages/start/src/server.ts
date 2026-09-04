@@ -19,6 +19,16 @@ import {
   VIDACT_START_SNAPSHOT_MEDIA_TYPE,
 } from './snapshot.ts'
 
+/**
+ * The client mounts the route tree under a compiled root of its own, and every compiled
+ * root claims a component marker range while hydrating. Rendering the tree inside a
+ * matching root component on the server keeps the two sides' component ranges aligned;
+ * without it each client component would claim the range of the *next* server one.
+ */
+function StartApplication({ children }: { readonly children?: ServerChild }): ServerChild {
+  return children
+}
+
 const DEFAULT_ROOT_ID = 'vidact-start-root'
 const DEFAULT_SNAPSHOT_ID = 'vidact-start-snapshot'
 
@@ -100,9 +110,10 @@ export function createStartHandler(
         createElement(component as unknown as ServerComponent, props) as ServerChild,
       request.url,
     ) as ServerChild
-    const stream = await renderToReadableStream(() => application, {
-      identifierPrefix: 'start-',
-    })
+    const stream = await renderToReadableStream(
+      () => createElement(StartApplication, { children: application }) as ServerChild,
+      { identifierPrefix: 'start-' },
+    )
     const applicationHtml = await new Response(stream).text()
     const documentContext = {
       applicationHtml,

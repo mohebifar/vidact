@@ -302,7 +302,7 @@ describe('compiled client roots', () => {
   it('reports a marker mismatch and recovers at the whole-root boundary', () => {
     const host = document.createElement('div')
     host.innerHTML =
-      '<!--vidact:v1:r--><!--vidact:v1:b--><!--vidact:v1:c--><!--vidact:v1:b--><!--vidact:v1:s--><button><!--vidact:v1:b--><!--vidact:v1:t-->wrong<!--/vidact:v1:t--><!--/vidact:v1:b--></button><!--/vidact:v1:s--><!--/vidact:v1:b--><!--/vidact:v1:c--><!--/vidact:v1:b--><!--/vidact:v1:r-->'
+      '<!--v2:r--><!--v2:b--><!--v2:c--><!--v2:b--><button><!--v2:b-->wrong<!--/v2:b--></button><!--/v2:b--><!--/v2:c--><!--/v2:b--><!--/v2:r-->'
     document.body.append(host)
     const serverButton = host.querySelector('button')!
     const recoveries: unknown[] = []
@@ -325,7 +325,7 @@ describe('compiled client roots', () => {
 
   it('recovers from an unsupported hydration protocol version', () => {
     const host = document.createElement('div')
-    host.innerHTML = '<!--vidact:v2:r--><p>stale</p><!--/vidact:v2:r-->'
+    host.innerHTML = '<!--vidact:v1:r--><p>stale</p><!--/vidact:v1:r-->'
     document.body.append(host)
     const recoveries: unknown[] = []
 
@@ -339,7 +339,7 @@ describe('compiled client roots', () => {
     )
 
     expect(recoveries).toHaveLength(1)
-    expect(String(recoveries[0])).toContain('vidact:v1')
+    expect(String(recoveries[0])).toContain('v2 root marker')
     expect(host.textContent).toBe('current')
     root.unmount()
   })
@@ -587,17 +587,17 @@ describe('compiled client roots', () => {
     expect(() =>
       renderToString(() =>
         serverJsx('section', {
-          dangerouslySetInnerHTML: { __html: '<!--vidact:v1:c-->forged' },
+          dangerouslySetInnerHTML: { __html: '<!--v2:c-->forged' },
         }),
       ),
     ).toThrow('raw HTML cannot contain Vidact hydration marker syntax')
     expect(
       renderToStaticMarkup(() =>
         serverJsx('section', {
-          dangerouslySetInnerHTML: { __html: '<!--vidact:v1:c-->static' },
+          dangerouslySetInnerHTML: { __html: '<!--v2:c-->static' },
         }),
       ),
-    ).toBe('<section><!--vidact:v1:c-->static</section>')
+    ).toBe('<section><!--v2:c-->static</section>')
     hydration.result.unmount()
     expect(commits).toEqual(['ref:true', 'layout:true', 'ref:false'])
   })

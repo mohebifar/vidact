@@ -241,7 +241,7 @@ describe('framework server runtime', () => {
     expect(html).toContain('data-vidact-client-payload=')
     expect(html).toContain('data-vidact-identifier-prefix="rsc-b0-"')
     expect(html).toContain('shop/Counter')
-    expect(html.match(/vidact:v1:r/g)).toHaveLength(4)
+    expect(html.match(/v2:r/g)).toHaveLength(4)
   })
 
   it('bounds framework payload depth and node count for untrusted transport values', () => {

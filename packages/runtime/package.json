@@ -139,8 +139,8 @@
     "@vidact/react-types": "workspace:*",
     "@vidact/test-support": "workspace:*",
     "@vitest/browser-playwright": "4.1.11",
-    "tsdown": "0.22.14",
-    "typescript": "7.0.2",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
     "vitest": "4.1.11"
   },
   "peerDependencies": {

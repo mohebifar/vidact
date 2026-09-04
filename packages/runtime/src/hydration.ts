@@ -1,10 +1,9 @@
 import {
+  HYDRATION_PREFIX,
   HydrationMismatch,
   installHydrationOperations,
   type HydrationRange,
 } from './hydration-bridge.ts'
-
-const HYDRATION_PREFIX = 'vidact:v1'
 
 interface HydrationState {
   readonly host: ParentNode
@@ -32,7 +31,7 @@ export function beginHydration(host: ParentNode): () => void {
   const ranges = scanRanges(host)
   const root = ranges.roots[0]
   if (root === undefined || ranges.roots.length !== 1) {
-    throw mismatch('expected exactly one vidact:v1 root marker range')
+    throw mismatch(`expected exactly one ${HYDRATION_PREFIX} root marker range`)
   }
   activeHydration = {
     host,
@@ -129,10 +128,17 @@ export function claimHydrationElement(
   if (state.pendingStructuralParents > 0) state.pendingStructuralParents = 0
   state.claimedElements.add(element)
   state.claimedElementCount += 1
-  state.cursors.set(element, element.firstChild)
+  state.cursors.set(element, initialCursor(element))
   return element
 }
 
+/**
+ * Called by a compiled list right before its container element is claimed. Lists are the
+ * only structural bindings whose server markup carries an `a` marker, so they are the
+ * only ones that may prefer a candidate containing one — for a conditional, Suspense or
+ * any other structural child that bias would pick an unrelated element that happens to
+ * hold a list (see `claimHydrationElement`).
+ */
 export function noteHydrationStructuralParent(): void {
   if (activeHydration !== undefined) activeHydration.pendingStructuralParents += 1
 }
@@ -188,14 +194,6 @@ export function claimHydrationNode(parent: Node, node: Node): boolean {
   if (state === undefined) return false
   enterHydrationSlot(state, parent)
   const next = cursor(state, parent)
-  if (isMarker(next, `${HYDRATION_PREFIX}:s`)) {
-    const end = findClosingSibling(next, `${HYDRATION_PREFIX}:s`)
-    if (next.nextSibling !== node || node.nextSibling !== end) {
-      throw mismatch(`server node range does not contain exactly the expected ${node.nodeName}`)
-    }
-    setHydrationCursor(state, parent, end.nextSibling)
-    return true
-  }
   if (next !== node) {
     throw mismatch(`expected existing ${node.nodeName} at the current hydration position`)
   }
@@ -220,9 +218,19 @@ export function claimHydrationComponentMount(parent: Node, start: Comment, end: 
 }
 
 export function claimHydrationText(parent: Node, expected: string): Text | null | undefined {
-  return claimHydrationTextRange(parent, expected)?.[2]
+  const state = activeHydration
+  if (state === undefined) return undefined
+  enterHydrationSlot(state, parent)
+  return claimTextPrefix(state, parent, expected)
 }
 
+/**
+ * Claims the text for a scalar binding together with a range it can later swap an
+ * element or collection into. The server emits no markers around text, so the binding
+ * borrows the enclosing child-slot markers when the slot holds exactly this text — the
+ * common case, and no DOM is touched. A text node shared with adjacent scalars (one
+ * parsed node for several array items) gets fresh anchor comments instead.
+ */
 export function claimHydrationTextRange(
   parent: Node,
   expected: string,
@@ -230,26 +238,54 @@ export function claimHydrationTextRange(
   const state = activeHydration
   if (state === undefined) return undefined
   enterHydrationSlot(state, parent)
-  const start = cursor(state, parent)
-  if (!isMarker(start, `${HYDRATION_PREFIX}:t`)) {
-    throw mismatch('expected a vidact:v1 text marker')
+  const at = cursor(state, parent)
+  const slotStart = at === null ? parent.lastChild : at.previousSibling
+  const text = claimTextPrefix(state, parent, expected)
+  const slotEnd = text === null ? at : text.nextSibling
+  if (
+    isMarker(slotStart, `${HYDRATION_PREFIX}:b`) &&
+    isMarker(slotEnd, `/${HYDRATION_PREFIX}:b`) &&
+    findClosingSibling(slotStart, `${HYDRATION_PREFIX}:b`) === slotEnd
+  ) {
+    return [slotStart, slotEnd, text]
   }
-  const end = findClosingSibling(start, `${HYDRATION_PREFIX}:t`)
-  const nodes: Node[] = []
-  for (let node = start.nextSibling; node !== null && node !== end; node = node.nextSibling) {
-    nodes.push(node)
+  const start = document.createComment('')
+  const end = document.createComment('')
+  const reference = text ?? at
+  parent.insertBefore(start, reference)
+  parent.insertBefore(end, text === null ? reference : text.nextSibling)
+  return [start, end, text]
+}
+
+/**
+ * The server renders a scalar as bare text, and nothing at all for an empty one. Adjacent
+ * scalars in one collection parse into a single text node, so a claim takes only its own
+ * prefix and splits the rest off for the next claim.
+ */
+function claimTextPrefix(state: HydrationState, parent: Node, expected: string): Text | null {
+  const node = cursor(state, parent)
+  if (expected === '') {
+    if (node instanceof Text && node.data === '') {
+      setHydrationCursor(state, parent, node.nextSibling)
+      return node
+    }
+    // Nothing to consume, but closing slot markers at the cursor still need passing.
+    setHydrationCursor(state, parent, node)
+    return null
   }
-  if (nodes.length > 1 || (nodes.length === 1 && !(nodes[0] instanceof Text))) {
-    throw mismatch('server text marker must contain at most one text node')
-  }
-  const text = (nodes[0] as Text | undefined) ?? null
-  if ((text?.data ?? '') !== expected) {
+  if (!(node instanceof Text)) {
     throw mismatch(
-      `server text ${JSON.stringify(text?.data ?? '')} does not match ${JSON.stringify(expected)}`,
+      `expected server text ${JSON.stringify(expected)} in ${describeNode(parent)}; found ${describeNode(node)}`,
     )
   }
-  setHydrationCursor(state, parent, end.nextSibling)
-  return [start, end, text]
+  if (!node.data.startsWith(expected)) {
+    throw mismatch(
+      `server text ${JSON.stringify(node.data)} does not match ${JSON.stringify(expected)}`,
+    )
+  }
+  if (node.data.length > expected.length) node.splitText(expected.length)
+  setHydrationCursor(state, parent, node.nextSibling)
+  return node
 }
 
 export function claimHydrationArrayRange(parent: Node): HydrationRange | undefined {
@@ -259,7 +295,7 @@ export function claimHydrationArrayRange(parent: Node): HydrationRange | undefin
   const start = cursor(state, parent)
   if (!isMarker(start, `${HYDRATION_PREFIX}:a`)) {
     throw mismatch(
-      `expected a vidact:v1 array marker in ${parent.nodeName}; found ${JSON.stringify(markerValue(start as Node) ?? start?.nodeName ?? null)}`,
+      `expected a ${HYDRATION_PREFIX} array marker in ${describeNode(parent)}; found ${JSON.stringify(markerValue(start as Node) ?? start?.nodeName ?? null)}`,
     )
   }
   const end = findClosingSibling(start, `${HYDRATION_PREFIX}:a`)
@@ -281,7 +317,7 @@ export function claimHydrationSlotRange(parent: Node): HydrationRange | undefine
   const start = cursor(state, parent)
   if (!isMarker(start, `${HYDRATION_PREFIX}:b`)) {
     throw mismatch(
-      `expected a vidact:v1 child-slot marker in ${parent.nodeName}; found ${JSON.stringify(markerValue(start as Node) ?? start?.nodeName ?? null)} after ${JSON.stringify(markerValue(start?.previousSibling as Node) ?? start?.previousSibling?.nodeName ?? null)}; insertion=${JSON.stringify(markerValue(activeInsertionPoint?.[1] as Node) ?? activeInsertionPoint?.[1]?.nodeName ?? null)}`,
+      `expected a ${HYDRATION_PREFIX} child-slot marker in ${describeNode(parent)}; found ${JSON.stringify(markerValue(start as Node) ?? start?.nodeName ?? null)} after ${JSON.stringify(markerValue(start?.previousSibling as Node) ?? start?.previousSibling?.nodeName ?? null)}; insertion=${JSON.stringify(markerValue(activeInsertionPoint?.[1] as Node) ?? activeInsertionPoint?.[1]?.nodeName ?? null)}`,
     )
   }
   const end = findClosingSibling(start, `${HYDRATION_PREFIX}:b`)
@@ -310,6 +346,37 @@ export function borrowHydrationSlotRange(
     return [start, activeInsertionPoint[1]]
   }
   return [start, findClosingSibling(start, `${HYDRATION_PREFIX}:b`)]
+}
+
+/**
+ * Claims everything between two markers as-is, without hydrating into it. A Suspense
+ * boundary uses this when the server rendered its content but the client cannot
+ * produce it yet (a lazy chunk still loading): the server DOM stays on screen as a
+ * dehydrated boundary and the client render replaces it once the resource resolves.
+ * The elements and component ranges inside are marked claimed so `finishHydration`'s
+ * accounting still balances.
+ */
+export function skipHydrationRange(start: Comment, end: Comment): void {
+  const state = requireHydration()
+  const parent = start.parentNode
+  if (parent === null || end.parentNode !== parent) throw mismatch('detached server marker range')
+  for (const element of collectPostorderElements([start, end])) {
+    if (state.claimedElements.has(element)) continue
+    state.claimedElements.add(element)
+    state.claimedElementCount += 1
+  }
+  // Component ranges are sorted by document position and every earlier one is already
+  // claimed, so the ones inside this range sit contiguously at the current index.
+  while (state.componentIndex < state.components.length) {
+    const componentStart = state.components[state.componentIndex]![0]
+    const inside =
+      (start.compareDocumentPosition(componentStart) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0 &&
+      (componentStart.compareDocumentPosition(end) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+    if (!inside) break
+    state.componentIndex += 1
+  }
+  state.pendingStructuralParents = 0
+  setHydrationCursor(state, parent, end)
 }
 
 export function claimHydrationSuspenseFallback(parent: Node): Comment | undefined {
@@ -368,8 +435,12 @@ function requireHydration(): HydrationState {
 }
 
 function cursor(state: HydrationState, parent: Node): Node | null {
-  if (!state.cursors.has(parent)) state.cursors.set(parent, parent.firstChild)
+  if (!state.cursors.has(parent)) state.cursors.set(parent, initialCursor(parent))
   return state.cursors.get(parent) ?? null
+}
+
+function initialCursor(parent: Node): Node | null {
+  return parent.firstChild
 }
 
 function enterHydrationSlot(state: HydrationState, parent: Node): void {
@@ -401,6 +472,17 @@ function mismatch(message: string): HydrationMismatch {
   return new HydrationMismatch(message)
 }
 
+/** `DIV.class-a[data-x]` — enough of an element to find it in the server markup. */
+function describeNode(node: Node | null | undefined): string {
+  if (!(node instanceof Element)) return node?.nodeName ?? 'null'
+  const classes = node.classList.length === 0 ? '' : `.${[...node.classList].join('.')}`
+  const data = [...node.attributes]
+    .filter((attribute) => attribute.name.startsWith('data-') || attribute.name === 'id')
+    .map((attribute) => `[${attribute.name}]`)
+    .join('')
+  return `${node.nodeName}${classes}${data}`
+}
+
 function markerValue(node: Node): string | undefined {
   return node instanceof Comment ? node.data : undefined
 }
@@ -423,6 +505,9 @@ function findClosingSibling(start: Comment, kind: string): Comment {
   throw mismatch(`missing closing ${kind} marker`)
 }
 
+/** Paired markers; `p` (pending fallback) is a lone marker and stays out of the stacks. */
+const RANGE_MARKER = new RegExp(`^\\/?${HYDRATION_PREFIX}:([abchr])$`)
+
 function scanRanges(host: ParentNode): {
   roots: HydrationRange[]
   components: HydrationRange[]
@@ -433,9 +518,9 @@ function scanRanges(host: ParentNode): {
   const walker = document.createTreeWalker(host, NodeFilter.SHOW_COMMENT)
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
     const comment = node as Comment
-    const match = comment.data.match(/^\/?vidact:v1:([abchrst])$/)
+    const match = RANGE_MARKER.exec(comment.data)
     if (match === null) continue
-    const kind = match[1] as 'a' | 'b' | 'c' | 'h' | 'r' | 's' | 't'
+    const kind = match[1] as 'a' | 'b' | 'c' | 'h' | 'r'
     if (!comment.data.startsWith('/')) {
       const stack = stacks.get(kind) ?? []
       stack.push(comment)
@@ -443,12 +528,12 @@ function scanRanges(host: ParentNode): {
       continue
     }
     const start = stacks.get(kind)?.pop()
-    if (start === undefined) throw mismatch(`orphan closing vidact:v1:${kind} marker`)
+    if (start === undefined) throw mismatch(`orphan closing ${HYDRATION_PREFIX}:${kind} marker`)
     if (kind === 'r') roots.push([start, comment])
     if (kind === 'c') components.push([start, comment])
   }
   if ([...stacks.values()].some((stack) => stack.length !== 0)) {
-    throw mismatch('unclosed vidact:v1 hydration marker')
+    throw mismatch(`unclosed ${HYDRATION_PREFIX} hydration marker`)
   }
   components.sort(([left], [right]) => {
     const position = left.compareDocumentPosition(right)
@@ -478,7 +563,7 @@ function collectPostorderElements(root: HydrationRange): Element[] {
       }
       if (opaqueDepth === 0 && child instanceof Element) visit(child)
     }
-    if (opaqueDepth !== 0) throw mismatch('unbalanced vidact:v1 raw HTML marker range')
+    if (opaqueDepth !== 0) throw mismatch(`unbalanced ${HYDRATION_PREFIX} raw HTML marker range`)
   }
   let opaqueDepth = 0
   for (let node = root[0].nextSibling; node !== null && node !== root[1]; node = node.nextSibling) {
@@ -492,7 +577,7 @@ function collectPostorderElements(root: HydrationRange): Element[] {
     }
     if (opaqueDepth === 0 && node instanceof Element) visit(node)
   }
-  if (opaqueDepth !== 0) throw mismatch('unbalanced vidact:v1 raw HTML marker range')
+  if (opaqueDepth !== 0) throw mismatch(`unbalanced ${HYDRATION_PREFIX} raw HTML marker range`)
   return elements
 }
 
@@ -547,6 +632,7 @@ export function installHydration(): void {
     claimSlotRange: claimHydrationSlotRange,
     borrowSlotRange: borrowHydrationSlotRange,
     claimSuspenseFallback: claimHydrationSuspenseFallback,
+    skipRange: skipHydrationRange,
     withoutHydration,
     withInsertion: withHydrationInsertion,
     insertionPoint: hydrationInsertionPoint,

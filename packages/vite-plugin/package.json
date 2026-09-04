@@ -49,10 +49,10 @@
   },
   "devDependencies": {
     "@base-ui/react": "1.7.0",
-    "@types/node": "^24.13.3",
-    "tsdown": "0.22.14",
-    "typescript": "7.0.2",
-    "vite": "8.2.2",
+    "@types/node": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
     "vitest": "4.1.11"
   },
   "peerDependencies": {

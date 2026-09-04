@@ -28,6 +28,7 @@ export interface HydrationOperations {
   readonly claimSlotRange: (parent: Node) => HydrationRange | undefined
   readonly borrowSlotRange: (parent: Node, current: boolean) => HydrationRange | undefined
   readonly claimSuspenseFallback: (parent: Node) => Comment | undefined
+  readonly skipRange: (start: Comment, end: Comment) => void
   readonly withoutHydration: <Result>(operation: () => Result) => Result
   readonly withInsertion: <Result>(parent: Node, before: Node, operation: () => Result) => Result
   readonly insertionPoint: () => readonly [parent: Node, before: Node] | undefined
@@ -38,6 +39,14 @@ export interface HydrationOperations {
 export interface HydrationMismatchInfo {
   readonly message: string
 }
+
+/**
+ * Marker comment prefix of the server ↔ hydrate protocol (`<!--v2:b-->` … `<!--/v2:b-->`).
+ * Bumped whenever the set of markers or their meaning changes, so a stale server render
+ * fails hydration loudly instead of being claimed wrongly. `v2` dropped the per-element
+ * and per-text markers of `vidact:v1`; the hydrator infers those from the DOM.
+ */
+export const HYDRATION_PREFIX = 'v2'
 
 export class HydrationMismatch extends Error {
   constructor(message: string) {
@@ -148,6 +157,10 @@ export function borrowHydrationSlotRange(
 
 export function claimHydrationSuspenseFallback(parent: Node): Comment | undefined {
   return hydration?.claimSuspenseFallback(parent)
+}
+
+export function skipHydrationRange(start: Comment, end: Comment): void {
+  hydration?.skipRange(start, end)
 }
 
 export function withoutHydration<Result>(operation: () => Result): Result {

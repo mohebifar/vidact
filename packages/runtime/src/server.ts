@@ -228,7 +228,8 @@ const VOID_ELEMENTS = new Set([
   'wbr',
 ])
 
-const HYDRATION_PREFIX = 'vidact:v1'
+// Mirrors HYDRATION_PREFIX in hydration-bridge.ts; the server entry stays free of client modules.
+const HYDRATION_PREFIX = 'v2'
 const UNSAFE_HTML = typeof __VIDACT_UNSAFE_HTML__ !== 'undefined' && __VIDACT_UNSAFE_HTML__
 
 let activeRender: RenderContext | undefined
@@ -411,7 +412,7 @@ function createServerElement(
       (context) =>
         Object.hasOwn(props ?? {}, 'children')
           ? multipleChildren
-            ? serializeChildren(props?.children as ServerChild, context, true)
+            ? serializeChildren(props?.children as ServerChild, context)
             : serializeSlot(props?.children as ServerChild, context)
           : '',
       'transparent',
@@ -487,9 +488,12 @@ function serializeIntrinsicContents(
     const children =
       rawHtml === undefined
         ? hasChildren
-          ? multipleChildren
-            ? serializeChildren(props?.children as ServerChild, context, !isRawTextElement(type))
-            : serializeSlot(props?.children as ServerChild, context, !isRawTextElement(type))
+          ? serializeElementChildren(
+              type,
+              props?.children as ServerChild,
+              multipleChildren,
+              context,
+            )
           : ''
         : context.hydrationMarkers
           ? hydrationRange('h', assertSafeHydrationRawHtml(rawHtml))
@@ -830,19 +834,14 @@ function isServerSuspension(value: unknown): value is ServerSuspension {
   return typeof value === 'object' && value !== null && SERVER_SUSPENSION in value
 }
 
-function serializeChild(value: ServerChild, context: RenderContext, markScalar = true): string {
-  if (value === null || value === undefined || typeof value === 'boolean') {
-    return context.hydrationMarkers && markScalar ? hydrationRange('t', '') : ''
-  }
-  if (isServerNode(value)) {
-    const content = value[SERVER_NODE](context)
-    return context.hydrationMarkers && value[SERVER_NODE_KIND] === 'intrinsic'
-      ? hydrationRange('s', content)
-      : content
-  }
-  if (isRenderable(value)) return serializeChild(cloneRenderable(value), context, markScalar)
+function serializeChild(value: ServerChild, context: RenderContext): string {
+  // Empty scalars render nothing and intrinsic elements and text render bare: the
+  // hydrator infers both from the DOM inside the enclosing child slot.
+  if (value === null || value === undefined || typeof value === 'boolean') return ''
+  if (isServerNode(value)) return value[SERVER_NODE](context)
+  if (isRenderable(value)) return serializeChild(cloneRenderable(value), context)
   if (Array.isArray(value)) {
-    const content = value.map((child) => serializeChild(child, context, markScalar)).join('')
+    const content = value.map((child) => serializeChild(child, context)).join('')
     return context.hydrationMarkers ? hydrationRange('a', content) : content
   }
   if (typeof value === 'object' || typeof value === 'function' || typeof value === 'symbol') {
@@ -852,7 +851,7 @@ function serializeChild(value: ServerChild, context: RenderContext, markScalar =
   if (context.activityHidden && content !== '') {
     throw new TypeError('initially hidden Activity server children require a host element root')
   }
-  return context.hydrationMarkers && markScalar ? hydrationRange('t', content) : content
+  return content
 }
 
 function hasRenderableChild(value: ServerChild): boolean {
@@ -1108,27 +1107,45 @@ function escapeAttribute(value: string): string {
   return escapeText(value).replaceAll('"', '&quot;').replaceAll("'", '&#x27;')
 }
 
-function serializeChildren(
+function serializeElementChildren(
+  type: string,
   value: ServerChild,
+  multipleChildren: boolean,
   context: RenderContext,
-  markScalar: boolean,
 ): string {
-  return Array.isArray(value)
-    ? value.map((child) => serializeSlot(child, context, markScalar)).join('')
-    : serializeSlot(value, context, markScalar)
+  if (!isRawTextElement(type)) {
+    return multipleChildren ? serializeChildren(value, context) : serializeSlot(value, context)
+  }
+  // The HTML parser treats the contents of <script>, <style>, <textarea> and <title> as
+  // text, so a hydration marker here would surface as literal content — a visible
+  // "<!--v2:b-->" inside the textarea until hydration replaced it. The client claims the
+  // parsed text node directly instead.
+  const hydrationMarkers = context.hydrationMarkers
+  context.hydrationMarkers = false
+  try {
+    return multipleChildren ? serializeChildren(value, context) : serializeSlot(value, context)
+  } finally {
+    context.hydrationMarkers = hydrationMarkers
+  }
 }
 
-function serializeSlot(value: ServerChild, context: RenderContext, markScalar = true): string {
-  const content = serializeChild(value, context, markScalar)
+function serializeChildren(value: ServerChild, context: RenderContext): string {
+  return Array.isArray(value)
+    ? value.map((child) => serializeSlot(child, context)).join('')
+    : serializeSlot(value, context)
+}
+
+function serializeSlot(value: ServerChild, context: RenderContext): string {
+  const content = serializeChild(value, context)
   return context.hydrationMarkers ? hydrationRange('b', content) : content
 }
 
-function hydrationRange(kind: 'a' | 'b' | 'c' | 'h' | 'r' | 's' | 't', content: string): string {
+function hydrationRange(kind: 'a' | 'b' | 'c' | 'h' | 'r', content: string): string {
   return `<!--${HYDRATION_PREFIX}:${kind}-->${content}<!--/${HYDRATION_PREFIX}:${kind}-->`
 }
 
 function assertSafeHydrationRawHtml(value: string): string {
-  if (/<!--\/?vidact:v\d+:/i.test(value)) {
+  if (/<!--\/?(?:vidact:)?v\d+:[a-z]-->/i.test(value)) {
     throw new Error('raw HTML cannot contain Vidact hydration marker syntax')
   }
   return value

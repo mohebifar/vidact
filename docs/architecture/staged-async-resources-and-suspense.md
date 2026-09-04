@@ -47,7 +47,7 @@ or root callback.
 
 The synchronous server target renders fulfilled records as content and pending
 records as fallback. Hydratable pending output carries a
-`<!--vidact:v1:p-->` marker inside the ordinary child-slot range. The hydrate
+`<!--v2:p-->` marker inside the ordinary child-slot range. The hydrate
 runtime consumes that marker and probes content with hydration temporarily
 disabled, so missing descendant component markers cannot corrupt the global
 claim cursor. A matching pending fallback is claimed with zero DOM mutation.

@@ -27,6 +27,12 @@ const DEFAULT_SNAPSHOT_ID = 'vidact-start-snapshot'
 export interface HydrateStartOptions {
   readonly fetch?: typeof globalThis.fetch
   readonly manifest: RouteManifest
+  /**
+   * Called when hydration could not attach to the server DOM and the root was rendered
+   * client-side instead. Defaults to a console warning: a silent recovery looks like a
+   * working page that merely flashes, and is far harder to notice than a warning.
+   */
+  readonly onRecoverableError?: (error: unknown) => void
   readonly root?: ParentNode
   readonly rootId?: string
   readonly snapshot?: string
@@ -57,7 +63,11 @@ export async function hydrateStart(options: HydrateStartOptions): Promise<StartC
     options.root ?? document.querySelector(`#${CSS.escape(options.rootId ?? DEFAULT_ROOT_ID)}`)
   if (host === null) throw new Error('Vidact Start hydration root is missing')
 
-  const root = hydrateRoot(host, createClientApplication(loaded, request.url))
+  const root = hydrateRoot(host, createClientApplication(loaded, request.url), {
+    onRecoverableError:
+      options.onRecoverableError ??
+      ((error) => console.warn('[vidact/start] hydration recovered by re-rendering:', error)),
+  })
   const fetchNavigation = options.fetch ?? window.fetch.bind(window)
   let navigation = 0
   let navigationController: AbortController | undefined

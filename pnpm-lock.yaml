@@ -4,6 +4,21 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    '@types/node':
+      specifier: 24.13.3
+      version: 24.13.3
+    tsdown:
+      specifier: 0.22.14
+      version: 0.22.14
+    typescript:
+      specifier: 7.0.2
+      version: 7.0.2
+    vite:
+      specifier: 8.2.2
+      version: 8.2.2
+
 importers:
 
   .:
@@ -52,7 +67,7 @@ importers:
         specifier: ^4.3.3
         version: 4.3.3(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0))
       '@types/node':
-        specifier: ^24.13.3
+        specifier: 'catalog:'
         version: 24.13.3
       '@types/react':
         specifier: ^19.2.18
@@ -88,10 +103,10 @@ importers:
         specifier: ^4.3.3
         version: 4.3.3
       typescript:
-        specifier: 7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vite:
-        specifier: 8.2.2
+        specifier: 'catalog:'
         version: 8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0)
       vitest:
         specifier: 4.1.11
@@ -134,7 +149,7 @@ importers:
         specifier: ^4.3.3
         version: 4.3.3(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0))
       '@types/node':
-        specifier: ^24.13.3
+        specifier: 'catalog:'
         version: 24.13.3
       '@types/react':
         specifier: ^19.2.18
@@ -158,10 +173,10 @@ importers:
         specifier: ^4.3.3
         version: 4.3.3
       typescript:
-        specifier: 7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vite:
-        specifier: 8.2.2
+        specifier: 'catalog:'
         version: 8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0)
       vitest:
         specifier: 4.1.11
@@ -180,7 +195,7 @@ importers:
         version: 0.12.7
     devDependencies:
       '@types/node':
-        specifier: ^24.13.3
+        specifier: 'catalog:'
         version: 24.13.3
       '@types/react':
         specifier: ^19.2.18
@@ -189,10 +204,10 @@ importers:
         specifier: workspace:*
         version: link:../../packages/react-types
       typescript:
-        specifier: 7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vite:
-        specifier: 8.2.2
+        specifier: 'catalog:'
         version: 8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0)
       vitest:
         specifier: 4.1.11
@@ -205,7 +220,7 @@ importers:
         version: link:../../packages/runtime
     devDependencies:
       '@types/node':
-        specifier: ^24.13.3
+        specifier: 'catalog:'
         version: 24.13.3
       '@types/react':
         specifier: ^19.2.18
@@ -223,10 +238,10 @@ importers:
         specifier: 1.62.1
         version: 1.62.1
       typescript:
-        specifier: 7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vite:
-        specifier: 8.2.2
+        specifier: 'catalog:'
         version: 8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0)
       vitest:
         specifier: 4.1.11
@@ -242,13 +257,13 @@ importers:
         version: 0.6.9
     devDependencies:
       '@types/node':
-        specifier: ^24.13.3
+        specifier: 'catalog:'
         version: 24.13.3
       tsdown:
-        specifier: 0.22.14
+        specifier: 'catalog:'
         version: 0.22.14(typescript@7.0.2)
       typescript:
-        specifier: 7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
         specifier: 4.1.11
@@ -263,10 +278,10 @@ importers:
         specifier: 3.8.2
         version: 3.8.2(@emnapi/runtime@2.0.0-alpha.3)(@types/node@24.13.3)
       tsdown:
-        specifier: 0.22.14
+        specifier: 'catalog:'
         version: 0.22.14(typescript@7.0.2)
       typescript:
-        specifier: 7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
         specifier: 4.1.11
@@ -282,7 +297,7 @@ importers:
         specifier: ^19.2.18
         version: 19.2.18
       typescript:
-        specifier: 7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
 
   packages/runtime:
@@ -300,10 +315,10 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(playwright@1.62.1)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0))(vitest@4.1.11)
       tsdown:
-        specifier: 0.22.14
+        specifier: 'catalog:'
         version: 0.22.14(typescript@7.0.2)
       typescript:
-        specifier: 7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
         specifier: 4.1.11
@@ -319,16 +334,16 @@ importers:
         version: link:../vite-plugin
     devDependencies:
       '@types/node':
-        specifier: ^24.13.3
+        specifier: 'catalog:'
         version: 24.13.3
       tsdown:
-        specifier: 0.22.14
+        specifier: 'catalog:'
         version: 0.22.14(typescript@7.0.2)
       typescript:
-        specifier: 7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vite:
-        specifier: 8.2.2
+        specifier: 'catalog:'
         version: 8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0)
       vitest:
         specifier: 4.1.11
@@ -340,10 +355,10 @@ importers:
         specifier: workspace:*
         version: link:../runtime
       tsdown:
-        specifier: 0.22.14
+        specifier: 'catalog:'
         version: 0.22.14(typescript@7.0.2)
       typescript:
-        specifier: 7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
         specifier: 4.1.11
@@ -371,16 +386,16 @@ importers:
         specifier: 1.7.0
         version: 1.7.0(@date-fns/tz@1.5.0)(@types/react@19.2.18)(date-fns@4.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@types/node':
-        specifier: ^24.13.3
+        specifier: 'catalog:'
         version: 24.13.3
       tsdown:
-        specifier: 0.22.14
+        specifier: 'catalog:'
         version: 0.22.14(typescript@7.0.2)
       typescript:
-        specifier: 7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vite:
-        specifier: 8.2.2
+        specifier: 'catalog:'
         version: 8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0)
       vitest:
         specifier: 4.1.11
@@ -396,7 +411,7 @@ importers:
         version: link:../../packages/runtime
     devDependencies:
       '@types/node':
-        specifier: ^24.13.3
+        specifier: 'catalog:'
         version: 24.13.3
       '@types/react':
         specifier: ^19.2.18
@@ -417,7 +432,7 @@ importers:
         specifier: 1.62.1
         version: 1.62.1
       typescript:
-        specifier: 7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vitest:
         specifier: 4.1.11
@@ -426,7 +441,7 @@ importers:
   tests/runtime-size:
     devDependencies:
       '@types/node':
-        specifier: ^24.13.3
+        specifier: 'catalog:'
         version: 24.13.3
       '@vidact/runtime':
         specifier: workspace:*
@@ -435,10 +450,10 @@ importers:
         specifier: workspace:*
         version: link:../../packages/vite-plugin
       typescript:
-        specifier: 7.0.2
+        specifier: 'catalog:'
         version: 7.0.2
       vite:
-        specifier: 8.2.2
+        specifier: 'catalog:'
         version: 8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0)
 
 packages:
@@ -7075,7 +7090,7 @@ snapshots:
 
   graceful-fs@4.2.11: {}
 
-  h3@2.0.1-rc.22(crossws@0.4.12(srvx@0.12.7)):
+  h3@2.0.1-rc.22(crossws@0.4.12(srvx@0.11.22)):
     dependencies:
       rou3: 0.8.1
       srvx: 0.11.22
@@ -7902,7 +7917,7 @@ snapshots:
       crossws: 0.4.12(srvx@0.11.22)
       db0: 0.3.4
       env-runner: 0.1.16
-      h3: 2.0.1-rc.22(crossws@0.4.12(srvx@0.12.7))
+      h3: 2.0.1-rc.22(crossws@0.4.12(srvx@0.11.22))
       hookable: 6.1.1
       nf3: 0.3.24
       ocache: 0.1.5

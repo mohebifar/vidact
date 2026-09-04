@@ -3,7 +3,7 @@ import {
   mountCompiledPropTransition,
   type CompiledPropTransition,
 } from './compiled/core.ts'
-import { HydrationMismatch, isHydrating } from './hydration-bridge.ts'
+import { HYDRATION_PREFIX, HydrationMismatch, isHydrating } from './hydration-bridge.ts'
 
 const RAW_HTML_PUBLICATION_PRIORITY = 100
 const rawHtmlHosts = new WeakSet<HTMLElement>()
@@ -46,9 +46,9 @@ function hasEqualHydrationRawChildren(container: Node, expected: DocumentFragmen
   const end = container.lastChild
   if (
     !(start instanceof Comment) ||
-    start.data !== 'vidact:v1:h' ||
+    start.data !== `${HYDRATION_PREFIX}:h` ||
     !(end instanceof Comment) ||
-    end.data !== '/vidact:v1:h'
+    end.data !== `/${HYDRATION_PREFIX}:h`
   ) {
     return false
   }

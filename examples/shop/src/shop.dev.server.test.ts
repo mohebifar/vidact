@@ -53,7 +53,7 @@ describe('shop development server', () => {
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(html).toContain('Ridge Bottle')
-    expect(html).toContain('vidact:v1')
+    expect(html).toContain('<!--v2:r-->')
     expect(html).toContain('/@vite/client')
     expect(html).toContain('src="/src/client.ts"')
     expect(clientResponse.status).toBe(200)

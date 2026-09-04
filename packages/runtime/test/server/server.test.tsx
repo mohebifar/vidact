@@ -110,7 +110,7 @@ describe('server rendering', () => {
 
     expect(html).toContain('<button>')
     expect(html).toContain('Save')
-    expect(html).not.toContain('vidact:v1:c')
+    expect(html).not.toContain('v2:c')
   })
 
   it('evaluates initial state and produces request-deterministic ids', () => {
@@ -124,7 +124,7 @@ describe('server rendering', () => {
       '<p id=":app-r0:">2</p>',
     )
     expect(renderToString(() => <Greeting />, { identifierPrefix: 'app-' })).toBe(
-      '<!--vidact:v1:r--><!--vidact:v1:b--><!--vidact:v1:c--><!--vidact:v1:b--><!--vidact:v1:s--><p id=":app-r0:"><!--vidact:v1:b--><!--vidact:v1:t-->2<!--/vidact:v1:t--><!--/vidact:v1:b--></p><!--/vidact:v1:s--><!--/vidact:v1:b--><!--/vidact:v1:c--><!--/vidact:v1:b--><!--/vidact:v1:r-->',
+      '<!--v2:r--><!--v2:b--><!--v2:c--><!--v2:b--><p id=":app-r0:"><!--v2:b-->2<!--/v2:b--></p><!--/v2:b--><!--/v2:c--><!--/v2:b--><!--/v2:r-->',
     )
   })
 
@@ -161,7 +161,7 @@ describe('server rendering', () => {
     }
 
     expect(renderToString(nodeFromPreviousModule as never)).toBe(
-      '<!--vidact:v1:r--><!--vidact:v1:b--><span>retained</span><!--/vidact:v1:b--><!--/vidact:v1:r-->',
+      '<!--v2:r--><!--v2:b--><span>retained</span><!--/v2:b--><!--/v2:r-->',
     )
   })
 
@@ -175,7 +175,7 @@ describe('server rendering', () => {
         </ul>
       )),
     ).toBe(
-      '<!--vidact:v1:r--><!--vidact:v1:b--><!--vidact:v1:s--><ul><!--vidact:v1:b--><!--vidact:v1:a--><!--vidact:v1:s--><li><!--vidact:v1:b--><!--vidact:v1:t-->one<!--/vidact:v1:t--><!--/vidact:v1:b--></li><!--/vidact:v1:s--><!--vidact:v1:s--><li><!--vidact:v1:b--><!--vidact:v1:t-->two<!--/vidact:v1:t--><!--/vidact:v1:b--></li><!--/vidact:v1:s--><!--/vidact:v1:a--><!--/vidact:v1:b--></ul><!--/vidact:v1:s--><!--/vidact:v1:b--><!--/vidact:v1:r-->',
+      '<!--v2:r--><!--v2:b--><ul><!--v2:b--><!--v2:a--><li><!--v2:b-->one<!--/v2:b--></li><li><!--v2:b-->two<!--/v2:b--></li><!--/v2:a--><!--/v2:b--></ul><!--/v2:b--><!--/v2:r-->',
     )
   })
 
@@ -299,5 +299,34 @@ describe('server rendering', () => {
     expect(html).toContain('action="/save?return=&quot;list&quot;&amp;ready=true"')
     expect(html).toContain('formaction="/save?return=&quot;list&quot;&amp;ready=true"')
     expect(html).toContain('>initial</button>')
+  })
+})
+
+describe('raw-text element contents', () => {
+  it('keeps hydration markers out of elements the parser reads as text', () => {
+    // A marker inside <textarea> would be parsed as literal text and shown to the visitor
+    // until hydration replaced it; the client claims the parsed text node directly.
+    expect(renderToString(() => <textarea>{'draft'}</textarea>)).toBe(
+      '<!--v2:r--><!--v2:b--><textarea>draft</textarea><!--/v2:b--><!--/v2:r-->',
+    )
+    expect(renderToString(() => <textarea>{''}</textarea>)).toBe(
+      '<!--v2:r--><!--v2:b--><textarea></textarea><!--/v2:b--><!--/v2:r-->',
+    )
+    expect(renderToString(() => <style>{'a{color:red}'}</style>)).toBe(
+      '<!--v2:r--><!--v2:b--><style>a{color:red}</style><!--/v2:b--><!--/v2:r-->',
+    )
+  })
+
+  it('resumes markers for siblings after a raw-text element', () => {
+    expect(
+      renderToString(() => (
+        <div>
+          <textarea>{'draft'}</textarea>
+          {'after'}
+        </div>
+      )),
+    ).toBe(
+      '<!--v2:r--><!--v2:b--><div><!--v2:b--><textarea>draft</textarea><!--/v2:b--><!--v2:b-->after<!--/v2:b--></div><!--/v2:b--><!--/v2:r-->',
+    )
   })
 })

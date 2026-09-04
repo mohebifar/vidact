@@ -13,14 +13,14 @@
     "@vidact/runtime": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^24.13.3",
+    "@types/node": "catalog:",
     "@types/react": "^19.2.18",
     "@vidact/react-types": "workspace:*",
     "@vidact/test-support": "workspace:*",
     "@vidact/vite": "workspace:*",
     "@vitest/browser-playwright": "4.1.11",
     "playwright": "1.62.1",
-    "typescript": "7.0.2",
+    "typescript": "catalog:",
     "vitest": "4.1.11"
   }
 }

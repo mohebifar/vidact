@@ -40,8 +40,8 @@
   },
   "devDependencies": {
     "@vidact/runtime": "workspace:*",
-    "tsdown": "0.22.14",
-    "typescript": "7.0.2",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
     "vitest": "4.1.11"
   },
   "peerDependencies": {

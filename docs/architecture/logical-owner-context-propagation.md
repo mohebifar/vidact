@@ -37,7 +37,7 @@ source.
 
 Context providers are transparent owned blocks during hydration. They establish
 the logical context frame while their descendants claim the server component,
-element, and child-slot ranges already present in the `vidact:v1` stream; a
+element, and child-slot ranges already present in the `v2` stream; a
 provider does not require or create an additional marker range of its own.
 
 ## Invariants

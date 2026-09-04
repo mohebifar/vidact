@@ -54,8 +54,8 @@
   "devDependencies": {
     "@emnapi/runtime": "2.0.0-alpha.3",
     "@napi-rs/cli": "3.8.2",
-    "tsdown": "0.22.14",
-    "typescript": "7.0.2",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
     "vitest": "4.1.11"
   },
   "napi": {

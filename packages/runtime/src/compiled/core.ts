@@ -25,6 +25,7 @@ import {
   isHydrating,
   isHydrationMismatch,
   noteHydrationStructuralParent,
+  skipHydrationRange,
   withoutHydration,
   withHydrationComponentRange,
   withHydrationInsertion,
@@ -172,7 +173,6 @@ const narrowSourceOperations: SourceOperations = [
 type RenderValue = CompiledRenderValue
 
 export function deferred(render: () => CompiledRenderValue): StructuralBinding {
-  noteHydrationStructuralParent()
   return [
     STRUCTURAL,
     (parent, before) => {
@@ -189,7 +189,6 @@ export function retainedActivity(
   modeInput: 'visible' | 'hidden' | CompiledBinding<'visible' | 'hidden'>,
   render: () => CompiledRenderValue,
 ): StructuralBinding {
-  noteHydrationStructuralParent()
   const context = activeContextFrame ?? activeOwner?.[2] ?? null
   const rootIdentity = activeOwner?.[3] ?? activeRootIdentity
   if (rootIdentity === null) {
@@ -334,7 +333,6 @@ export function profiled(
   render: () => CompiledRenderValue,
 ): StructuralBinding {
   if (!DEV) return deferred(render)
-  noteHydrationStructuralParent()
   const context = activeContextFrame ?? activeOwner?.[2] ?? null
   const rootIdentity = activeOwner?.[3] ?? activeRootIdentity
   if (rootIdentity === null) {
@@ -495,7 +493,6 @@ export function errorBoundary(
   fallback: (error: unknown, reset: () => void) => CompiledRenderValue,
   onError?: CompiledErrorHandler,
 ): StructuralBinding {
-  noteHydrationStructuralParent()
   const context = activeContextFrame ?? activeOwner?.[2] ?? null
   const rootIdentity = activeOwner?.[3] ?? activeRootIdentity
   if (rootIdentity === null) {
@@ -582,7 +579,6 @@ export function suspense(
   render: () => CompiledRenderValue,
   fallback: () => CompiledRenderValue,
 ): StructuralBinding {
-  noteHydrationStructuralParent()
   const context = activeContextFrame ?? activeOwner?.[2] ?? null
   const rootIdentity = activeOwner?.[3] ?? activeRootIdentity
   if (rootIdentity === null) {
@@ -614,11 +610,17 @@ export function suspense(
       let removeResourceListener = noop
       let generation = 0
       let boundary: ErrorBoundaryHandler
+      // Server content is on screen but the client suspended while hydrating it (a lazy
+      // chunk still loading, say). The server nodes are kept until the next publish,
+      // which renders client-side and replaces them — the same shape as a claimed
+      // pending fallback, without ever showing the fallback over content the visitor
+      // can already see.
+      let dehydrated = false
 
       const publish = (
         read: () => CompiledRenderValue,
         kind: 'content' | 'fallback',
-        detachedHydrationProbe = false,
+        replaceServerNodes = false,
       ): void => {
         const currentParent = rangeParent(start, end, 'Suspense boundary')
         const nextOwner = createOwner(
@@ -626,8 +628,8 @@ export function suspense(
           rootIdentity,
           kind === 'content' ? boundary : parentErrorBoundary,
         )
-        const serverNodes = detachedHydrationProbe ? nodesBetween(start, end) : []
-        const [fragment, nodes] = detachedHydrationProbe
+        const serverNodes = replaceServerNodes ? nodesBetween(start, end) : []
+        const [fragment, nodes] = replaceServerNodes
           ? withoutHydration(() => stageRender(read, nextOwner))
           : hydratedRange === undefined || currentKind !== null
             ? stageRender(read, nextOwner)
@@ -662,9 +664,20 @@ export function suspense(
           runOwnerTask(lifetimeOwner, () => attempt(false))
         }
         removeResourceListener = subscribeResource(failure.resource, retry)
+        if (
+          currentKind === null &&
+          hydratedRange !== undefined &&
+          pendingMarker === undefined &&
+          isHydrating()
+        ) {
+          dehydrated = true
+          skipHydrationRange(start, end)
+          return
+        }
         if (currentKind !== 'fallback') {
           try {
-            publish(fallback, 'fallback')
+            publish(fallback, 'fallback', dehydrated)
+            dehydrated = false
             if (pendingMarker !== undefined) {
               currentNodes = [pendingMarker, ...currentNodes]
             }
@@ -679,7 +692,8 @@ export function suspense(
       const attempt = (initial: boolean): void => {
         const attemptGeneration = beginAttempt()
         try {
-          publish(render, 'content', initial && pendingMarker !== undefined)
+          publish(render, 'content', (initial && pendingMarker !== undefined) || dehydrated)
+          dehydrated = false
         } catch (error) {
           if (!isSuspension(error)) {
             if (initial || !routeOwnerError(lifetimeOwner, error)) throw error
@@ -2904,7 +2918,8 @@ function structural(
   mount: StructuralBinding[1],
   hydrationKind?: StructuralBinding[2],
 ): StructuralBinding {
-  if (hydrationKind !== undefined) noteHydrationStructuralParent()
+  // Only lists carry an array marker; a slot-kind structural must not bias the claim.
+  if (hydrationKind === 'array') noteHydrationStructuralParent()
   let mounted = false
   const owner = activeOwner ?? scopeOwners.get(scope)!
   const context = activeContextFrame ?? owner[2]
