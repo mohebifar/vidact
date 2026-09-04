@@ -1,5 +1,12 @@
 # @vidact/test-support
 
+## 0.2.0-beta.5
+
+### Patch Changes
+
+- Updated dependencies [f7fe490]
+  - @vidact/runtime@0.2.0-beta.5
+
 ## 0.2.0-beta.4
 
 ### Patch Changes

@@ -1,5 +1,7 @@
 # @vidact/compiler
 
+## 0.2.0-beta.5
+
 ## 0.2.0-beta.4
 
 ### Patch Changes
