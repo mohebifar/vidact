@@ -35,6 +35,7 @@ fn normalizes_early_returns_as_a_shared_decision_graph() {
     let entry = facts.render_flow.entry.expect("graph entry");
     let RenderFlowNodeKind::Decision {
         kind,
+        test,
         consequent,
         alternate,
         ..
@@ -43,6 +44,7 @@ fn normalizes_early_returns_as_a_shared_decision_graph() {
         panic!("outer early return must be a decision")
     };
     assert_eq!(kind, RenderDecisionKind::If);
+    assert_eq!(&source[test.start as usize..test.end as usize], "!ready");
     assert!(matches!(
         facts.render_flow.nodes[consequent.get()].kind,
         RenderFlowNodeKind::Value { .. }

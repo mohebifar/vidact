@@ -82,11 +82,12 @@ contracts. Fallthrough and synchronous regions remain deferred.
 
 ## Verification
 
-- `crates/vidact-compiler/tests/render_flow_ir.rs` covers nested early returns,
-  shared continuations, logical value semantics, static and dynamic identity,
-  keys, and terminal switches with fallthrough rejection.
-- `crates/vidact-compiler/tests/oxc_react_adapter.rs` proves multiple exact CFG
-  return sites lower into stable render-flow facts.
+- `crates/vidact-compiler/tests/render_flow_ir.rs` covers nested early returns
+  with their exact test spans, shared continuations, logical value semantics,
+  static and dynamic identity, keys, and terminal switches with fallthrough
+  rejection.
+- `crates/vidact-compiler/tests/react_compiler_control_flow.rs` proves multiple
+  exact CFG return sites survive upstream analysis with original spans.
 - `crates/vidact-compiler/tests/surgical_codegen.rs`, the compatibility corpus,
   and `tests/browser/corpus/apps/control-flow/` prove executable control-flow
   codegen and fail-closed boundaries.

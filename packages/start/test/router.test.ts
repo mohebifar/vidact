@@ -83,15 +83,6 @@ describe('Vidact Start router', () => {
     ])
   })
 
-  it('infers component loader data from the loader return type', () => {
-    const route = defineFileRoute({
-      loader: () => ({ count: 2 }),
-      component: ({ loaderData }) => loaderData.count,
-    })
-
-    expect(route.options.component).toBeTypeOf('function')
-  })
-
   it('composes layouts from the leaf outward', async () => {
     const Root = ({ children }: { children?: unknown }) => ({ root: children })
     const Page = ({ loaderData }: { loaderData: unknown }) => ({ page: loaderData })

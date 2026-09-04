@@ -52,8 +52,11 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
+    "@emnapi/core": "2.0.0-alpha.3",
     "@emnapi/runtime": "2.0.0-alpha.3",
     "@napi-rs/cli": "3.8.2",
+    "@napi-rs/wasm-runtime": "~1.2.3",
+    "emnapi": "2.0.0-alpha.3",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "4.1.11"
@@ -68,7 +71,8 @@
       "aarch64-unknown-linux-gnu",
       "x86_64-unknown-linux-gnu",
       "aarch64-unknown-linux-musl",
-      "x86_64-unknown-linux-musl"
+      "x86_64-unknown-linux-musl",
+      "wasm32-wasip1-threads"
     ]
   },
   "engines": {

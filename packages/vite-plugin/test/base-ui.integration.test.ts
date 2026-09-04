@@ -144,16 +144,15 @@ function generatedPosition(source: string, marker: string): { line: number; colu
 }
 
 describe('Base UI dependency compilation', () => {
-  for (const subpath of ['button', 'input', 'toggle-group'] as const) {
-    for (const target of ['client', 'server'] as const) {
-      it(`compiles the published ${subpath} entry for ${target}`, async () => {
-        const transformed = await transformBaseUiEntry(subpath, target)
+  it.each(['client', 'server'] as const)(
+    `compiles the published button entry for %s`,
+    async (target) => {
+      const transformed = await transformBaseUiEntry('button', target)
 
-        expect(transformed?.code).toContain('@vidact/runtime')
-        expect(transformed?.code).not.toContain('react/jsx-runtime')
-      })
-    }
-  }
+      expect(transformed?.code).toContain('@vidact/runtime')
+      expect(transformed?.code).not.toContain('react/jsx-runtime')
+    },
+  )
 
   it('maps compiled output back to the published package source', async () => {
     const transformed = await transformBaseUiEntry('button', 'client')

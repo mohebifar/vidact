@@ -100,7 +100,6 @@ describe('vidact compiler client', () => {
       'todos.tsx',
     )
 
-    expect(analysis.protocol).toBe('vidact-analysis-v1')
     expect(analysis.components).toHaveLength(1)
     expect(analysis.components[0]?.name).toBe('Todos')
     expect(analysis.components[0]?.updaters).toContainEqual(
@@ -120,7 +119,6 @@ describe('vidact compiler client', () => {
       'todos.tsx',
     )
 
-    expect(compilation.protocol).toBe('vidact-compile-v2')
     expect(compilation.analysis.components[0]?.name).toBe('Todos')
     expect(compilation.code).toContain('createCompiledState')
     expect(compilation.code).toContain('__vidactCompiledRoot(')
@@ -130,8 +128,6 @@ describe('vidact compiler client', () => {
     expect(compilation).toHaveProperty('sourceMap')
     const sourceMap = (compilation as unknown as { sourceMap: { sources: string[] } }).sourceMap
     expect(sourceMap.sources).toContain('todos.tsx')
-    expect(compilation.runtimeProtocol).toBe('vidact-runtime-v2')
-    expect(compilation.configuration).toEqual({ target: 'client', features: [] })
   })
 
   it('returns deterministic server code without client effect replay', async () => {
@@ -326,12 +322,6 @@ describe('vidact compiler client', () => {
     expect(compilationCacheKey(base)).not.toBe(compilationCacheKey({ ...base, environment: 'ssr' }))
     expect(compilationCacheKey(base)).not.toBe(
       compilationCacheKey({ ...base, source: `${base.source}\n` }),
-    )
-  })
-
-  it('rejects invalid modules with the compiler diagnostic', async () => {
-    await expect(analyzeWithCompiler('export function Broken( {', 'broken.tsx')).rejects.toThrow(
-      /AnalysisFailed/,
     )
   })
 

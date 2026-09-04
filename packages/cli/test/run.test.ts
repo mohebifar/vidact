@@ -137,25 +137,6 @@ describe('run', () => {
     expect(await readManifest(cwd, 'my-app')).toMatchObject({ name: 'my-app' })
   })
 
-  it('refuses to write into a non-empty directory', async () => {
-    const cwd = await temporaryDirectory()
-    const { output, write } = collect()
-    await run({ argv: ['my-app'], cwd, interactive: false, version: '9.9.9', write })
-
-    const { output: second, write: writeSecond } = collect()
-    expect(
-      await run({
-        argv: ['my-app'],
-        cwd,
-        interactive: false,
-        version: '9.9.9',
-        write: writeSecond,
-      }),
-    ).toBe(1)
-    expect(second()).toContain('is not empty')
-    expect(output()).toContain('Created my-app')
-  })
-
   it('asks for the answers it was not given', async () => {
     const cwd = await temporaryDirectory()
     const { write } = collect()

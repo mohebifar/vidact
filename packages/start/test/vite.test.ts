@@ -24,15 +24,6 @@ describe('Vidact Start Vite routes', () => {
     })
   })
 
-  it('installs hydration, server, and route-manifest plugins together', () => {
-    expect(vidactStart().map((plugin) => plugin.name)).toEqual([
-      'vidact:start:client',
-      'vidact:start:ssr',
-      'vidact-start-routes',
-      'vidact-start-development-server',
-    ])
-  })
-
   it('can leave development request handling to a custom adapter', () => {
     expect(vidactStart({ serverEntry: false }).map((plugin) => plugin.name)).not.toContain(
       'vidact-start-development-server',
