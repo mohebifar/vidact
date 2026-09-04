@@ -1,14 +1,6 @@
-import { useState } from 'react'
-
 import { DocsLayout } from './components/docs-layout.tsx'
 import { DocsPage } from './components/docs-page.tsx'
-import { Button } from './components/ui/button.tsx'
-import { Switch } from './components/ui/switch.tsx'
-import { CounterDemo, EnginesDemo, HeroLogo } from './routes/index.tsx'
-
-export function SwitchProof() {
-  return <Switch label="Compiled output" />
-}
+import { CounterDemo, EnginesDemo } from './routes/index.tsx'
 
 export function DocsLayoutProof() {
   return (
@@ -122,19 +114,10 @@ export function DocsPageProof() {
   )
 }
 
-export function ButtonProof() {
-  const [pressed, setPressed] = useState(false)
-  return <Button onClick={() => setPressed(!pressed)}>{pressed ? 'Pressed' : 'Press me'}</Button>
-}
-
 export function LandingCounterProof() {
   return <CounterDemo />
 }
 
 export function LandingEnginesProof() {
   return <EnginesDemo />
-}
-
-export function LandingHeroLogoProof() {
-  return <HeroLogo />
 }

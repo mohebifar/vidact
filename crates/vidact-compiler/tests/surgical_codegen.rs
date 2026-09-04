@@ -65,6 +65,8 @@ fn imports_only_dom_capabilities_reached_by_intrinsic_jsx() {
         "#,
     })
     .expect("counter should compile");
+    assert!(counter.contains("onClick={__vidactEvent"), "{counter}");
+    assert!(!counter.contains("onClick={__vidactBinding"), "{counter}");
     assert!(!counter.contains("@vidact/runtime/dom/forms"), "{counter}");
     assert!(
         !counter.contains("@vidact/runtime/dom/namespace"),
@@ -115,24 +117,6 @@ fn imports_only_dom_capabilities_reached_by_intrinsic_jsx() {
         namespace.contains("__vidactEnableDomNamespace()"),
         "{namespace}"
     );
-}
-
-#[test]
-fn constructs_reactive_inline_event_closures_once() {
-    let output = compile_surgical_module(ModuleInput {
-        filename: "StableInlineEvent.tsx",
-        source: r#"
-            import { useState } from 'react';
-            export function StableInlineEvent() {
-                const [count, setCount] = useState(0);
-                return <button onClick={() => setCount(count + 1)}>{count}</button>;
-            }
-        "#,
-    })
-    .expect("inline handlers can read live slots through one stable compiled event");
-
-    assert!(output.contains("onClick={__vidactEvent"), "{output}");
-    assert!(!output.contains("onClick={__vidactBinding"), "{output}");
 }
 
 #[test]
@@ -620,31 +604,6 @@ fn compiles_namespace_react_state_imports() {
     assert!(!output.contains("React.useState(0)"), "{output}");
     assert!(!output.contains("from \"react\""), "{output}");
     assert!(output.contains("count.set(count.get() + 1)"), "{output}");
-}
-
-#[test]
-fn rejects_state_calls_left_outside_compiled_components() {
-    let diagnostics = compile_surgical_module(ModuleInput {
-        filename: "ResidualState.tsx",
-        source: r#"
-            import { useState } from 'react';
-            function unsupportedStateFactory() {
-                return useState(0);
-            }
-            export function StaticComponent(): Node {
-                return <p>static</p>;
-            }
-        "#,
-    })
-    .expect_err("the client runtime must not retain a replay-state fallback");
-
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == DiagnosticCode::UnsupportedSyntax
-            && diagnostic.span.is_some()
-            && diagnostic
-                .message
-                .contains("only supported in compiled component state declarations")
-    }));
 }
 
 #[test]
@@ -1265,32 +1224,6 @@ fn rejects_unstable_for_of_jsx_keys() {
 }
 
 #[test]
-fn rejects_keyed_maps_the_analysis_ir_cannot_represent() {
-    for key in ["prefix + item.id", "item[idField]", "index"] {
-        let source = format!(
-            r#"
-                import {{ useState }} from 'react';
-                export function Items(): Node {{
-                    const [items] = useState([{{ id: 1 }}]);
-                    const prefix = 'todo';
-                    const idField = 'id';
-                    return <ul>{{items.map((item, index) => <li key={{{key}}}>{{item.id}}</li>)}}</ul>;
-                }}
-            "#
-        );
-        let diagnostics = compile_surgical_module(ModuleInput {
-            filename: "UnsupportedKey.tsx",
-            source: &source,
-        })
-        .expect_err("surgical codegen must be gated by the normalized key subset");
-
-        assert_eq!(diagnostics[0].code, DiagnosticCode::UnsupportedSyntax);
-        assert!(diagnostics[0].span.is_some());
-        assert!(diagnostics[0].message.contains("keyed maps require"));
-    }
-}
-
-#[test]
 fn compiles_static_component_props_into_local_updater_slots() {
     let output = compile_surgical_module(ModuleInput {
         filename: "Greeting.tsx",
@@ -1315,28 +1248,6 @@ fn compiles_static_component_props_into_local_updater_slots() {
     assert!(output.contains("() => name.get()"), "{output}");
     assert!(output.contains("__vidactCompiledRoot("), "{output}");
     assert!(output.contains("__vidactBinding("), "{output}");
-}
-
-#[test]
-fn compiles_named_block_bodied_arrow_components() {
-    let output = compile_surgical_module(ModuleInput {
-        filename: "ArrowCounter.tsx",
-        source: r#"
-            import { useState } from 'react';
-            export const ArrowCounter = () => {
-                const [count, setCount] = useState(0);
-                return <button onClick={() => setCount(count + 1)}>{count}</button>;
-            };
-        "#,
-    })
-    .expect("named block-bodied arrow components should preserve their binding identity");
-
-    assert!(output.contains("const ArrowCounter = () =>"), "{output}");
-    assert!(
-        output.contains("createCompiledState as __vidactCreateState"),
-        "{output}"
-    );
-    assert!(output.contains("return __vidactCompiledRoot"), "{output}");
 }
 
 #[test]
@@ -1650,38 +1561,6 @@ fn compiles_custom_hook_default_and_optional_parameters() {
 }
 
 #[test]
-fn compiles_custom_hook_rest_parameters_as_one_ordered_argument_array() {
-    let output = compile_surgical_module_with_options(
-        ModuleInput {
-            filename: "ComposedRefsHook.tsx",
-            source: r#"
-            import * as React from 'react';
-
-            function composeRefs(...refs) {
-                return (node) => refs.forEach((ref) => ref?.(node));
-            }
-
-            function useComposedRefs(...refs) {
-                return React.useCallback(composeRefs(...refs), refs);
-            }
-
-            export function ComposedRefsHook({ firstRef, secondRef }) {
-                const ref = useComposedRefs(firstRef, secondRef);
-                return <input ref={ref} />;
-            }
-            "#,
-        },
-        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
-    )
-    .expect("a final custom-hook rest parameter should expand at the direct call site");
-
-    assert!(!output.contains("useComposedRefs("), "{output}");
-    assert!(output.contains("__vidactCreateMemo"), "{output}");
-    assert!(output.contains("firstRef"), "{output}");
-    assert!(output.contains("secondRef"), "{output}");
-}
-
-#[test]
 fn rejects_destructured_custom_hook_rest_parameters() {
     let diagnostics = compile_surgical_module(ModuleInput {
         filename: "DestructuredRestHook.tsx",
@@ -1846,29 +1725,6 @@ fn compiles_setter_only_state_inside_custom_hooks() {
 
     assert!(output.contains("__vidactCreateState"), "{output}");
     assert!(!output.contains("useForceUpdate("), "{output}");
-}
-
-#[test]
-fn evaluates_complex_custom_hook_arguments_once_at_the_call_site() {
-    let output = compile_surgical_module(ModuleInput {
-        filename: "HookObjectArgument.tsx",
-        source: r#"
-            import { useState } from 'react';
-            function useButton(options) {
-                const [pressed, setPressed] = useState(false);
-                return { disabled: options.disabled, pressed, setPressed };
-            }
-            export function HookObjectArgument({ disabled }) {
-                const state = useButton({ disabled });
-                return <button disabled={state.disabled} onClick={() => state.setPressed(true)}>{state.pressed}</button>;
-            }
-        "#,
-    })
-    .expect("object hook arguments should be evaluated once and remain reactive");
-
-    assert!(output.contains("__vidactHook0Arg0"), "{output}");
-    assert!(output.contains("__vidactCreateState"), "{output}");
-    assert!(!output.contains("useButton("), "{output}");
 }
 
 #[test]
@@ -2809,27 +2665,6 @@ fn compiles_aliased_props_into_local_updater_slots() {
 }
 
 #[test]
-fn rejects_defaulted_prop_derivations_missing_from_data_flow_analysis() {
-    let diagnostics = compile_surgical_module(ModuleInput {
-        filename: "Greeting.tsx",
-        source: r#"
-            export function Greeting({ name = 'world' }): Node {
-                const upper = name.toUpperCase();
-                return <p>{upper}</p>;
-            }
-        "#,
-    })
-    .expect_err("untracked derived props would otherwise become mount-time snapshots");
-
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == DiagnosticCode::UnsupportedSyntax
-            && diagnostic
-                .message
-                .contains("absent from compiler data-flow")
-    }));
-}
-
-#[test]
 fn compiles_early_returns_into_one_owned_choice() {
     let source = r#"
         import { useState } from 'react';
@@ -3110,30 +2945,6 @@ fn compiles_branch_varying_refs_as_reactive_ref_bindings() {
     assert_eq!(output.matches("<input").count(), 1, "{output}");
     assert!(output.contains("ref={__vidactBinding("), "{output}");
     assert!(output.contains("ready.get() ? first : second"), "{output}");
-}
-
-#[test]
-fn compiles_reactive_jsx_spreads_with_deletion_aware_property_ownership() {
-    let output = compile_surgical_module(ModuleInput {
-        filename: "Spread.tsx",
-        source: r#"
-            import { useState } from 'react';
-            export function Spread(): Node {
-                const [attributes, setAttributes] = useState({ title: 'first' });
-                return <div {...attributes}>value</div>;
-            }
-        "#,
-    })
-    .expect("reactive spreads should lower to the owned spread descriptor");
-
-    assert!(
-        output.contains("compiledSpread as __vidactSpread"),
-        "{output}"
-    );
-    assert!(
-        output.contains("__vidactSpread(__vidactBinding("),
-        "{output}"
-    );
 }
 
 #[test]

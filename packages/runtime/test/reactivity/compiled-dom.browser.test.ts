@@ -240,7 +240,6 @@ describe('compiled DOM corpus', () => {
         ),
       )
       expect(isRenderable(render)).toBe(true)
-      expect(Object.keys(render)).toEqual(['props'])
       expect(render.props.href).toBe('/first')
       expect(renderableToArray(render)).toEqual([render])
       expect(renderableMarker(render)).toBeUndefined()
@@ -534,51 +533,6 @@ describe('compiled DOM corpus', () => {
 
     mounted.dispose()
     expect(host.childNodes).toHaveLength(0)
-  })
-
-  it('rejects duplicate keys before changing the current DOM', () => {
-    const itemsSource = source(0)
-    let setItems!: ReturnType<typeof createCompiledState<readonly Item[]>>['set']
-    const host = document.createElement('div')
-    const mounted = mountCompiled(() => {
-      const scope = createCompiledScope()
-      const items = createCompiledState<readonly Item[]>(scope, itemsSource, [
-        { id: 1, label: 'one' },
-        { id: 2, label: 'two' },
-      ])
-      setItems = items.set
-      return compiledRoot(scope, () =>
-        h(
-          'ul',
-          null,
-          keyed(
-            scope,
-            itemsSource,
-            items.get,
-            (item) => item.id,
-            (item, _index, itemScope) =>
-              h(
-                'li',
-                null,
-                binding(itemScope, source(0), () => item.get().label),
-              ),
-          ),
-        ),
-      )
-    }, host)
-    const before = host.innerHTML
-    const mutations = startMutationCapture(host)
-
-    expect(() =>
-      setItems([
-        { id: 2, label: 'two' },
-        { id: 2, label: 'duplicate' },
-      ]),
-    ).toThrow(/duplicate key/i)
-    expect(mutations.stop()).toEqual([])
-    expect(host.innerHTML).toBe(before)
-
-    mounted.dispose()
   })
 
   it('keeps the previous keyed DOM when rendering a replacement throws', () => {

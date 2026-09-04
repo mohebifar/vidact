@@ -90,7 +90,13 @@ jobs:
         run: scripts/prepare-oxc.sh
       - run: pnpm install --frozen-lockfile
       - name: Build native addon
-        run: pnpm --filter @vidact/compiler exec napi build --manifest-path ../../crates/vidact-node/Cargo.toml --output-dir dist --platform --release --strip --esm --js binding.js --dts binding.d.ts --target ${{ matrix.target }}
+        # glibc targets link against the `@napi-rs/cross-toolchain` sysroot (glibc 2.17) so the
+        # addon loads on distributions older than the runner, which ships glibc 2.39.
+        run: pnpm --filter @vidact/compiler exec napi build --manifest-path ../../crates/vidact-node/Cargo.toml --output-dir dist --platform --release --strip --esm --js binding.js --dts binding.d.ts --target ${{ matrix.target }} ${{ endsWith(matrix.target, '-linux-gnu') && '--use-napi-cross' || '' }}
+      - name: Verify glibc baseline
+        if: endsWith(matrix.target, '-linux-gnu')
+        shell: bash
+        run: bash scripts/check-glibc-baseline.sh 2.17 packages/compiler/dist/*.node
       - name: Test native addon
         run: pnpm --filter @vidact/compiler test
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -153,8 +159,50 @@ jobs:
           path: packages/compiler/dist/*.node
           if-no-files-found: error
 
+  native-wasm:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@01ba1edad32c6f80dbcce879d3e0fa5a00b2a84e # 1.96.0
+        with:
+          targets: wasm32-wasip1-threads
+      - name: Prepare patched Oxc checkout
+        shell: bash
+        run: scripts/prepare-oxc.sh
+      - run: pnpm install --frozen-lockfile
+      - name: Build WASI addon
+        # The WASI loader is CommonJS, so napi refuses to derive its declaration from an ESM
+        # `.d.ts` in a `"type": "module"` package; only this target needs the `.d.cts` name.
+        run: pnpm --filter @vidact/compiler exec napi build --manifest-path ../../crates/vidact-node/Cargo.toml --output-dir dist --platform --release --esm --js binding.js --dts binding.d.cts --target wasm32-wasip1-threads
+      - name: Test WASI addon
+        env:
+          NAPI_RS_FORCE_WASI: error
+        run: pnpm --filter @vidact/compiler test
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: native-wasm32-wasi
+          path: |
+            packages/compiler/dist/vidact-compiler.wasm32-wasi.wasm
+            packages/compiler/dist/binding.js
+            packages/compiler/dist/vidact-compiler.wasi.cjs
+            packages/compiler/dist/vidact-compiler.wasi.d.cts
+            packages/compiler/dist/vidact-compiler.wasi-browser.js
+            packages/compiler/dist/wasi-worker.mjs
+            packages/compiler/dist/wasi-worker-browser.mjs
+          if-no-files-found: error
+
   assemble:
-    needs: [native, native-musl]
+    needs: [native, native-musl, native-wasm]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -181,6 +229,7 @@ jobs:
           pnpm --filter @vidact/compiler exec napi create-npm-dirs --npm-dir npm
           pnpm --filter @vidact/compiler exec napi artifacts --output-dir artifacts --npm-dir npm
           test "$(find packages/compiler/npm -name '*.node' | wc -l | tr -d ' ')" = 7
+          test "$(find packages/compiler/npm -name '*.wasm' | wc -l | tr -d ' ')" = 1
           pnpm --filter @vidact/compiler exec napi pre-publish --npm-dir npm --tag-style npm --no-gh-release --skip-optional-publish
           pnpm --filter @vidact/runtime build
           pnpm --filter @vidact/test-support build

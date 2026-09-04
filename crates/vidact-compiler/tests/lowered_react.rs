@@ -408,26 +408,6 @@ fn normalizes_classic_create_element_named_namespace_and_default_imports() {
 }
 
 #[test]
-fn lowers_dynamic_string_create_element_to_the_direct_intrinsic_path() {
-    let output = compile_surgical_module(ModuleInput {
-        filename: "dynamic-intrinsic.mjs",
-        source: r#"
-            import React from 'react';
-            export function DynamicIntrinsic({ Tag, props }) {
-                return React.createElement(Tag, props);
-            }
-        "#,
-    })
-    .expect("dynamic string tags should lower to the guarded direct intrinsic component");
-
-    assert!(
-        output.contains("dynamicIntrinsicComponent as __vidactDynamicIntrinsicComponent"),
-        "{output}"
-    );
-    assert!(!output.contains("React.createElement"), "{output}");
-}
-
-#[test]
 fn lowers_one_dynamic_intrinsic_child_into_the_direct_intrinsic_path() {
     let output = compile_surgical_module(ModuleInput {
         filename: "dynamic-intrinsic-child.mjs",

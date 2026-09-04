@@ -44,9 +44,10 @@ const compilerVersion = rootsByName.get('@vidact/compiler').manifest.version
 const tag = compilerVersion.match(/-([^.]+)/)?.[1] ?? 'latest'
 const publishArguments = ['--tag', tag, '--access', 'public']
 if (process.env.GITHUB_ACTIONS !== 'true') publishArguments.push('--provenance=false')
-if (native.length !== 7 || tarballs.length !== native.length + roots.length) {
+// Seven native targets plus the `wasm32-wasi` fallback.
+if (native.length !== 8 || tarballs.length !== native.length + roots.length) {
   throw new Error(
-    `expected 7 native and ${publicPackages.length} root tarballs, found ${native.length} and ${roots.length}`,
+    `expected 8 native and ${publicPackages.length} root tarballs, found ${native.length} and ${roots.length}`,
   )
 }
 

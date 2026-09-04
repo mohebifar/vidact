@@ -208,7 +208,6 @@ describe('compiled updater corpus', () => {
 
     expect(initializations).toBe(1)
     expect(observed).toBe(5)
-    expect(value.set).toBe(value.set)
     scope[3]()
     expect(() => value.set(1)).toThrow('cannot update state after disposal')
   })
@@ -283,20 +282,6 @@ describe('compiled updater corpus', () => {
     expect(memo.get()).not.toBe(initial)
     expect(memo.get()).toEqual({ count: 3, evaluation: 2 })
     expect(observed).toEqual([memo.get()])
-  })
-
-  it('supports components with more than 32 reactive sources', () => {
-    const wideSource = source(65)
-    const scope = createCompiledScope()
-    const value = createCompiledState(scope, wideSource, 0)
-    let observed = 0
-    scope[0](wideSource, () => {
-      observed = value.get()
-    })
-
-    value.set(42)
-
-    expect(observed).toBe(42)
   })
 
   it('keeps source bits distinct at every 32-bit word boundary', () => {

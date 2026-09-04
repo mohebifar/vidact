@@ -164,11 +164,13 @@ source maps and additional per-pass drift fixtures remain follow-up work.
   React imports, foreign-hook rejection, shadowed bindings, source-text
   lookalikes, derived declaration order, and the normalized keyed-map subset.
 - `crates/vidact-compiler/tests/surgical_codegen.rs` proves the executable path
-  transforms aliased and namespace hooks through the semantic contract, removes
-  lowered state imports, and prevents unsupported key forms from bypassing
-  analysis.
+  transforms aliased and namespace hooks through the semantic contract and
+  removes lowered state imports.
 - `crates/vidact-compiler/tests/compatibility_corpus.rs` requires every fixture
-  to be manifested and every rejection to carry its declared code and span.
+  to be manifested and every rejection to carry its declared code and span; its
+  `rejected/invalid-list-key.tsx`, `rejected/residual-state-call.tsx`, and
+  `rejected/*-mutation.tsx` fixtures own the key-form, residual-state, and
+  destructive-mutation rejections through the executable path.
 - `crates/vidact-compiler/tests/react_compiler_control_flow.rs` proves exact
   multi-return and JSX instruction spans while guarding against callback,
   expression-branch, and source-lookalike false positives.

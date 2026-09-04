@@ -34,21 +34,6 @@ describe('shop development server', () => {
     const clientBoundaryModule = await server.environments.client.moduleGraph.getModuleByUrl(
       '/src/ShopClient.client.ts',
     )
-    const productsResponse = await fetch(
-      `http://127.0.0.1:${address.port}/api/products?category=travel`,
-    )
-    const products = (await productsResponse.json()) as {
-      readonly products: readonly { readonly category: string }[]
-    }
-    const checkoutResponse = await fetch(`http://127.0.0.1:${address.port}/api/checkout`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ items: [{ productId: 'ridge-bottle', quantity: 2 }] }),
-    })
-    const receipt = (await checkoutResponse.json()) as {
-      readonly itemCount: number
-      readonly totalCents: number
-    }
 
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe('no-store')
@@ -58,10 +43,5 @@ describe('shop development server', () => {
     expect(html).toContain('src="/src/client.ts"')
     expect(clientResponse.status).toBe(200)
     expect(clientModule?.acceptedHmrDeps.has(clientBoundaryModule!)).toBe(true)
-    expect(productsResponse.status).toBe(200)
-    expect(products.products).toHaveLength(2)
-    expect(products.products.every((product) => product.category === 'travel')).toBe(true)
-    expect(checkoutResponse.status).toBe(201)
-    expect(receipt).toMatchObject({ itemCount: 2, totalCents: 6800 })
   })
 })

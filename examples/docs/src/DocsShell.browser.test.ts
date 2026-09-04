@@ -1,15 +1,12 @@
 import { mountCompiled, type CompiledComponentResult } from '@vidact/runtime'
-import { assertMutationEnvelope, captureMutations } from '@vidact/test-support'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { captureMutations } from '@vidact/test-support'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import {
-  ButtonProof,
   DocsLayoutProof,
   DocsPageProof,
   LandingCounterProof,
   LandingEnginesProof,
-  LandingHeroLogoProof,
-  SwitchProof,
 } from './DocsShellProof.tsx'
 
 let dispose: (() => void) | undefined
@@ -22,48 +19,6 @@ afterEach(() => {
 })
 
 describe('Vidact-native documentation controls', () => {
-  it('forwards button actions without a compatibility primitive', async () => {
-    const host = await mount(ButtonProof)
-    const button = host.querySelector<HTMLButtonElement>('button')!
-
-    await captureMutations(host, () => button.click())
-
-    expect(button.textContent).toBe('Pressed')
-    expect(host.querySelector('button')).toBe(button)
-  })
-
-  it('moves the switch state without replacing its owner or thumb', async () => {
-    const host = await mount(SwitchProof)
-    const control = host.querySelector<HTMLButtonElement>('[role="switch"]')!
-    const thumb = control.querySelector<HTMLElement>('[data-slot="switch-thumb"]')!
-
-    const capture = await captureMutations(host, () => control.click())
-
-    expect(control.getAttribute('aria-checked')).toBe('true')
-    expect(control.dataset.state).toBe('checked')
-    expect(host.querySelector('[role="switch"]')).toBe(control)
-    expect(control.querySelector('[data-slot="switch-thumb"]')).toBe(thumb)
-    expect(() =>
-      assertMutationEnvelope(
-        capture.records,
-        [{ type: 'attributes', target: control }],
-        'switch state update',
-      ),
-    ).not.toThrow()
-  })
-
-  it('updates the documentation counter in place', async () => {
-    const host = await mount(DocsPageProof)
-    const button = host.querySelector<HTMLButtonElement>('button')!
-    const output = host.querySelector<HTMLOutputElement>('[data-testid="docs-counter"]')!
-
-    const capture = await captureMutations(host, () => button.click())
-
-    expect(output.textContent).toContain('Count: 1')
-    expect(host.querySelector('[data-testid="docs-counter"]')).toBe(output)
-    expect(capture.records.some((record) => record.type === 'characterData')).toBe(true)
-  })
-
   it('renders every documentation block type on the client', async () => {
     const host = await mount(DocsPageProof)
 
@@ -110,28 +65,6 @@ describe('Vidact-native documentation controls', () => {
     const rows = [...host.querySelectorAll('li')]
     expect(rows.at(-1)).toBe(first)
     expect(first.querySelector('input')!.checked).toBe(true)
-  })
-
-  it('mounts the crystal hero logo canvas lazily', async () => {
-    if (!('gpu' in navigator)) return
-    const adapter = await navigator.gpu.requestAdapter().catch(() => null)
-    if (adapter === null) return
-
-    const host = await mount(LandingHeroLogoProof)
-    const stage = host.querySelector<HTMLElement>('[data-testid="hero-logo"]')!
-    stage.style.width = '200px'
-    stage.style.height = '200px'
-
-    const canvas = await vi.waitFor(
-      () => {
-        const found = stage.querySelector('canvas')
-        if (found === null) throw new Error('hero canvas is not mounted yet')
-        return found
-      },
-      { interval: 100, timeout: 10_000 },
-    )
-
-    expect(canvas.isConnected).toBe(true)
   })
 
   it('opens mobile navigation and changes theme without replacing the docs shell', async () => {

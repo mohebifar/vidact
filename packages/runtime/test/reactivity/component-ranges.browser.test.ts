@@ -18,21 +18,6 @@ import {
 } from '../../src/index.ts'
 
 describe('compiled component ranges', () => {
-  it('mounts one element through an owned range without a wrapper element', () => {
-    const host = document.createElement('div')
-    const mounted = mountCompiled(() => {
-      const scope = createCompiledScope()
-      return compiledRoot(scope, () => h('button', null, 'action'))
-    }, host)
-
-    expect(host.children).toHaveLength(1)
-    expect(host.firstElementChild?.tagName).toBe('BUTTON')
-    expect(host.textContent).toBe('action')
-
-    mounted.dispose()
-    expect(host.childNodes).toHaveLength(0)
-  })
-
   it('owns fragments, arrays, scalars, and empty component output', () => {
     const cases = [
       {

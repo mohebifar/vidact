@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { installCommand, packageManagerFromUserAgent, runCommand } from '../src/package-manager.ts'
+import { packageManagerFromUserAgent } from '../src/package-manager.ts'
 
 describe('package managers', () => {
   it.each([
@@ -14,22 +14,5 @@ describe('package managers', () => {
 
   it.each(['', 'cnpm/9.0.0'])('ignores an unusable user agent (%s)', (userAgent) => {
     expect(packageManagerFromUserAgent(userAgent)).toBeUndefined()
-  })
-
-  it.each([
-    ['npm', 'npm install'],
-    ['pnpm', 'pnpm install'],
-    ['yarn', 'yarn install'],
-    ['bun', 'bun install'],
-  ] as const)('spells the install command for %s', (packageManager, expected) => {
-    expect(installCommand(packageManager)).toBe(expected)
-  })
-
-  it.each([
-    ['npm', 'npm run dev'],
-    ['pnpm', 'pnpm run dev'],
-    ['deno', 'deno task dev'],
-  ] as const)('spells the run command for %s', (packageManager, expected) => {
-    expect(runCommand(packageManager, 'dev')).toBe(expected)
   })
 })

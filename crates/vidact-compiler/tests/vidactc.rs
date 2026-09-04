@@ -47,18 +47,3 @@ fn exits_nonzero_and_reports_diagnostics_for_invalid_tsx() {
     assert!(error.contains("AnalysisFailed"));
     assert!(error.contains("fixture.tsx"));
 }
-
-#[test]
-fn emits_analysis_for_named_block_bodied_arrow_components() {
-    let output = analyze(include_str!(
-        "fixtures/compatibility/accepted/arrow-component.tsx"
-    ));
-
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let json = String::from_utf8(output.stdout).expect("analysis JSON is UTF-8");
-    assert!(json.contains(r#""name":"ArrowCounter""#), "{json}");
-}

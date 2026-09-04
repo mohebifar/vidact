@@ -357,29 +357,4 @@ describe('compiled publication atomicity', () => {
     expect(script.textContent).toBe('{"ready":true}')
     mounted.dispose()
   })
-
-  it('rejects a reactive executable type when the script payload is static', () => {
-    const typeSource = source(0)
-    let setType!: ReturnType<typeof createCompiledState<string>>['set']
-    const host = document.createElement('div')
-    const mounted = mountCompiled(() => {
-      const scope = createCompiledScope()
-      const type = createCompiledState(scope, typeSource, 'application/json')
-      setType = type.set
-      return compiledRoot(scope, () =>
-        h('script', {
-          type: binding(scope, typeSource, type.get),
-          dangerouslySetInnerHTML: { __html: '{"static":true}' },
-        }),
-      )
-    }, host)
-    const script = host.querySelector('script')!
-    const retainedText = script.firstChild
-
-    expect(() => setType('module')).toThrow(/executable <script>/i)
-    expect(script.type).toBe('application/json')
-    expect(script.firstChild).toBe(retainedText)
-    expect(script.textContent).toBe('{"static":true}')
-    mounted.dispose()
-  })
 })

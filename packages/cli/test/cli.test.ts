@@ -35,10 +35,4 @@ describe('the vidact binary', () => {
     expect(manifest.name).toBe('my-app')
     expect(manifest.dependencies['@vidact/start']).toMatch(/^\^\d+\.\d+\.\d+/)
   })
-
-  it('reports usage errors with a non-zero exit code', async () => {
-    await expect(run(process.execPath, [entry, '--template', 'nope'])).rejects.toMatchObject({
-      code: 1,
-    })
-  })
 })

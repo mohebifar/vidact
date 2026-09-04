@@ -119,23 +119,6 @@ describe('direct DOM construction', () => {
     expect(received).toBe(child)
   })
 
-  it('maps React double-click handlers to the native dblclick event', () => {
-    let calls = 0
-    const button = h(
-      'button',
-      {
-        onDoubleClick: () => {
-          calls += 1
-        },
-      },
-      'Edit',
-    )
-
-    button.dispatchEvent(new MouseEvent('dblclick'))
-
-    expect(calls).toBe(1)
-  })
-
   it('supplies React event metadata over the native event object', () => {
     let received: (Event & { nativeEvent?: Event }) | undefined
     const button = h('button', {
@@ -153,6 +136,7 @@ describe('direct DOM construction', () => {
     ['onAnimationEnd', 'animationend'],
     ['onBeforeInput', 'beforeinput'],
     ['onCompositionStart', 'compositionstart'],
+    ['onDoubleClick', 'dblclick'],
     ['onGotPointerCapture', 'gotpointercapture'],
     ['onMouseEnter', 'mouseenter'],
     ['onPointerLeave', 'pointerleave'],
