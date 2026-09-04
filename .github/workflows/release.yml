@@ -185,8 +185,9 @@ jobs:
         # `.d.ts` in a `"type": "module"` package; only this target needs the `.d.cts` name.
         run: pnpm --filter @vidact/compiler exec napi build --manifest-path ../../crates/vidact-node/Cargo.toml --output-dir dist --platform --release --esm --js binding.js --dts binding.d.cts --target wasm32-wasip1-threads
       - name: Test WASI addon
-        env:
-          NAPI_RS_FORCE_WASI: error
+        # This job builds no native addon, so the loader reaches the WASI binding on its own and a
+        # broken one fails the tests. `NAPI_RS_FORCE_WASI` would not work here: every napi-rs addon
+        # in the process reads it, including the rolldown that vitest loads.
         run: pnpm --filter @vidact/compiler test
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
