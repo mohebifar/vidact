@@ -1,6 +1,6 @@
 {
   "name": "@vidact/vite",
-  "version": "0.2.0-beta.5",
+  "version": "0.2.0-beta.6",
   "description": "Vite integration for the Vidact React-to-Vanilla compiler",
   "keywords": [
     "compiler",
