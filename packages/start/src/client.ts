@@ -123,6 +123,9 @@ export async function hydrateStart(options: HydrateStartOptions): Promise<StartC
 
       const nextSnapshot = decodeStartSnapshot(await response.text())
       const nextUrl = new URL(nextSnapshot.pathname, target.origin)
+      // Fragments never reach the server request. Preserve the caller's fragment unless
+      // the snapshot explicitly supplies one, including when the server redirects the path.
+      if (nextUrl.hash === '') nextUrl.hash = target.hash
       const snapshotMatches = matchRoutes(options.manifest, nextUrl.pathname)
       if (snapshotMatches.length === 0) {
         navigateDocument(target, historyMode === 'replace')
