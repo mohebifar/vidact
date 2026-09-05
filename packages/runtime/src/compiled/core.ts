@@ -44,7 +44,13 @@ import {
   type RenderableProtocol,
 } from '../renderable-protocol.ts'
 import { scheduleDeferredTask, scheduleTask, type CancelScheduledTask } from '../scheduler.ts'
-import { intersectsSources, isEmptySources, unionSources, type SourceMask } from '../source-mask.ts'
+import {
+  forEachSource,
+  intersectsSources,
+  isEmptySources,
+  unionSources,
+  type SourceMask,
+} from '../source-mask.ts'
 import { createStateSlot, type StateSlot } from '../state-slot.ts'
 import { isSuspension, subscribeResource, useAsync } from './async-resource.ts'
 import {
@@ -161,13 +167,20 @@ type SourceOperations = readonly [
   empty: (mask: SourceMask) => boolean,
   intersects: (left: SourceMask, right: SourceMask) => boolean,
   union: (left: SourceMask, right: SourceMask) => SourceMask,
+  visit: (mask: SourceMask, visitor: (index: number) => void) => void,
 ]
 
-const wideSourceOperations: SourceOperations = [isEmptySources, intersectsSources, unionSources]
+const wideSourceOperations: SourceOperations = [
+  isEmptySources,
+  intersectsSources,
+  unionSources,
+  forEachSource,
+]
 const narrowSourceOperations: SourceOperations = [
   (mask) => mask === 0,
   (left, right) => ((left as number) & (right as number)) !== 0,
   (left, right) => ((left as number) | (right as number)) >>> 0,
+  (mask, visitor) => forEachSource(mask, visitor),
 ]
 
 type RenderValue = CompiledRenderValue
@@ -1069,17 +1082,30 @@ function topologicalUpdaterOrder(
   const activeIndexes = updaters.flatMap((updater, index) =>
     updater === undefined || !updater[3] ? [] : [index],
   )
+  const readersBySource = new Map<number, number[]>()
+  for (const readerIndex of activeIndexes) {
+    operations[3](updaters[readerIndex]![0], (sourceIndex) => {
+      const readers = readersBySource.get(sourceIndex)
+      if (readers === undefined) readersBySource.set(sourceIndex, [readerIndex])
+      else readers.push(readerIndex)
+    })
+  }
   const edges = new Map<number, number[]>()
   for (const writerIndex of activeIndexes) {
     const writes = updaters[writerIndex]![1]
     if (writes === undefined) continue
-    const readers: number[] = []
-    for (const readerIndex of activeIndexes) {
-      if (writerIndex !== readerIndex && operations[1](writes, updaters[readerIndex]![0])) {
-        readers.push(readerIndex)
+    const readers = new Set<number>()
+    operations[3](writes, (sourceIndex) => {
+      for (const readerIndex of readersBySource.get(sourceIndex) ?? []) {
+        if (writerIndex !== readerIndex) readers.add(readerIndex)
       }
+    })
+    if (readers.size > 0) {
+      edges.set(
+        writerIndex,
+        [...readers].toSorted((left, right) => left - right),
+      )
     }
-    if (readers.length > 0) edges.set(writerIndex, readers)
   }
 
   const visitIndexes = new Int32Array(updaters.length).fill(-1)

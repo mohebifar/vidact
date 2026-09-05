@@ -50,6 +50,17 @@ export function intersectsSources(left: SourceMask, right: SourceMask): boolean 
   return false
 }
 
+export function forEachSource(mask: SourceMask, visit: (index: number) => void): void {
+  if (typeof mask === 'number') {
+    visitWordSources(mask, 0, visit)
+    return
+  }
+
+  for (let word = 0; word < mask.length; word += 1) {
+    visitWordSources(mask[word] ?? 0, word * BITS_PER_WORD, visit)
+  }
+}
+
 export function isEmptySources(mask: SourceMask): boolean {
   if (typeof mask === 'number') return mask === 0
   for (const word of mask) {
@@ -76,6 +87,15 @@ export function unionSources(left: SourceMask, right: SourceMask): SourceMask {
 function wordAt(mask: SourceMask, index: number): number {
   if (typeof mask === 'number') return index === 0 ? mask : 0
   return mask[index] ?? 0
+}
+
+function visitWordSources(word: number, offset: number, visit: (index: number) => void): void {
+  let remaining = word >>> 0
+  while (remaining !== 0) {
+    const bit = 31 - Math.clz32(remaining)
+    visit(offset + bit)
+    remaining = (remaining & ~(1 << bit)) >>> 0
+  }
 }
 
 function wordLength(mask: SourceMask): number {

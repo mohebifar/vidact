@@ -170,7 +170,7 @@ React source
 1. `@vidact/vite` sends untouched TSX to `@vidact/compiler`, a prebuilt native Node-API addon. Consumers never need Rust or Cargo.
 2. The Rust compiler runs a vendored React Compiler analysis, lowers a static updater graph, and rewrites state, scalar, branch, and keyed-list expressions.
 3. OXC prints the transformed module and lowers JSX through `@vidact/runtime/jsx-runtime`.
-4. At runtime the component constructs its DOM once. A state write marks a compiler-assigned source dirty; updaters are emitted in execution order with static read/write masks, so the browser never discovers dependencies or diffs a tree.
+4. At runtime the component constructs its DOM once. A state write marks a compiler-assigned source dirty. The compiler emits known updaters in execution order with static read/write masks; when runtime-owned capabilities add or remove an updater, the scope composes those declared masks into a cached order. The browser never observes reads or diffs a tree.
 
 React Compiler is an analysis dependency, not Vidact's renderer or code generator. Its internal types terminate at a narrow adapter, and the rest of Vidact uses its own stable facts and IR. The [architecture notes](docs/architecture) record these decisions and the [analysis boundary](docs/architecture/react-analysis-boundary.md) explains the integration constraints.
 

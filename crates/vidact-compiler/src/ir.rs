@@ -32,7 +32,8 @@ pub struct ComponentIr {
     pub reactive_flow: ReactiveFlowGraph,
     pub render_flow: RenderFlowGraph,
     pub sources: Vec<IrSource>,
-    /// Compiler execution order. The runtime must not rediscover this graph.
+    /// Compiler execution order for the statically known component graph. Runtime-owned
+    /// updaters compose with this order through the same declared read/write sources.
     pub updaters: Vec<IrUpdater>,
 }
 
