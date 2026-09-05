@@ -1,18 +1,24 @@
 import {
+  binding,
   cloneRenderable,
   compiledRoot,
+  createComponentRenderable,
   createCompiledScope,
+  createCompiledState,
+  source,
   type CompiledComponentResult,
+  type CompiledRenderValue,
   type CompiledRoot,
 } from '@vidact/runtime'
-import { createElement, hydrateRoot } from '@vidact/runtime/hydrate'
+import { hydrateRoot } from '@vidact/runtime/hydrate'
 
 import {
-  composeRouteMatches,
   loadRouteMatches,
   matchRoutes,
   type LoadedRouteMatch,
+  type RouteComponentProps,
   type RouteManifest,
+  type RouteManifestEntry,
   type StartComponent,
 } from './router.ts'
 import {
@@ -50,6 +56,26 @@ export interface StartClient extends CompiledRoot {
 
 type HistoryMode = 'none' | 'push' | 'replace'
 
+interface ClientRouteState {
+  readonly components: readonly ClientRouteComponent[]
+  readonly requestUrl: string
+}
+
+interface ClientRouteComponent {
+  readonly component: StartComponent
+  readonly entry: RouteManifestEntry
+  readonly loaderData: LoadedRouteMatch['loaderData']
+  readonly params: LoadedRouteMatch['params']
+}
+
+interface RetainedClientApplication {
+  readonly application: () => CompiledComponentResult
+  readonly state: ClientRouteState
+  readonly update: (state: ClientRouteState) => void
+}
+
+const routeComponentIdentities = new WeakMap<RouteManifestEntry, WeakMap<StartComponent, object>>()
+
 export async function hydrateStart(options: HydrateStartOptions): Promise<StartClient> {
   const snapshot = decodeStartSnapshot(
     options.snapshot ?? readSnapshot(options.snapshotId ?? DEFAULT_SNAPSHOT_ID),
@@ -63,7 +89,8 @@ export async function hydrateStart(options: HydrateStartOptions): Promise<StartC
     options.root ?? document.querySelector(`#${CSS.escape(options.rootId ?? DEFAULT_ROOT_ID)}`)
   if (host === null) throw new Error('Vidact Start hydration root is missing')
 
-  const root = hydrateRoot(host, createClientApplication(loaded, request.url), {
+  let application = createClientApplication(loaded, request.url)
+  const root = hydrateRoot(host, application.application, {
     onRecoverableError:
       options.onRecoverableError ??
       ((error) => console.warn('[vidact/start] hydration recovered by re-rendering:', error)),
@@ -139,7 +166,14 @@ export async function hydrateStart(options: HydrateStartOptions): Promise<StartC
       )
       if (attempt !== navigation) return false
 
-      root.replace(createClientApplication(nextLoaded, nextRequest.url))
+      const nextState = createClientRouteState(nextLoaded, nextRequest.url)
+      if (sharedRouteComponentCount(application.state, nextState) === 0) {
+        const replacement = createClientApplication(nextLoaded, nextRequest.url)
+        root.replace(replacement.application)
+        application = replacement
+      } else {
+        application.update(nextState)
+      }
       updateHistory(nextUrl, historyMode)
       if (scroll) scrollToLocation(nextUrl)
       return true
@@ -195,16 +229,124 @@ export async function hydrateStart(options: HydrateStartOptions): Promise<StartC
 function createClientApplication(
   matches: readonly LoadedRouteMatch[],
   requestUrl: string,
-): () => CompiledComponentResult {
-  return () => {
-    const scope = createCompiledScope()
-    const application = composeRouteMatches(
-      matches,
-      (component, props) => createElement(component as never, props),
-      requestUrl,
-    )
-    return compiledRoot(scope, () => cloneRenderable(application))
+): RetainedClientApplication {
+  const initialState = createClientRouteState(matches, requestUrl)
+  let currentState = initialState
+  let updateState: ((state: ClientRouteState) => void) | undefined
+  return {
+    application: () => {
+      const scope = createCompiledScope()
+      const routeSource = source(0)
+      const state = createCompiledState(scope, routeSource, currentState)
+      updateState = (nextState) => {
+        const previousState = currentState
+        try {
+          state.set(nextState)
+          currentState = nextState
+        } catch (error) {
+          try {
+            state.set(previousState)
+          } catch {
+            // Preserve the navigation failure that triggered the rollback.
+          }
+          currentState = previousState
+          throw error
+        }
+      }
+      const route = createRetainedRouteRenderable(scope, routeSource, state.get, 0)
+      return compiledRoot(scope, () => cloneRenderable(route))
+    },
+    get state() {
+      return currentState
+    },
+    update(nextState) {
+      if (updateState === undefined) {
+        throw new Error('cannot update a Vidact Start application before it mounts')
+      }
+      updateState(nextState)
+    },
   }
+}
+
+function createClientRouteState(
+  matches: readonly LoadedRouteMatch[],
+  requestUrl: string,
+): ClientRouteState {
+  return {
+    components: matches.flatMap((match) => {
+      const component = match.definition.options.component
+      return component === undefined
+        ? []
+        : [{ component, entry: match.entry, loaderData: match.loaderData, params: match.params }]
+    }),
+    requestUrl,
+  }
+}
+
+function createRetainedRouteRenderable(
+  scope: ReturnType<typeof createCompiledScope>,
+  routeSource: ReturnType<typeof source>,
+  readState: () => ClientRouteState,
+  index: number,
+): CompiledRenderValue {
+  const initial = readState().components[index]
+  if (initial === undefined) return undefined
+  const identity = routeComponentIdentity(initial.entry, initial.component)
+  let lastProps = routeComponentProps(scope, routeSource, readState, index)
+  const input = binding(scope, routeSource, () => {
+    const current = readState().components[index]
+    if (
+      current === undefined ||
+      routeComponentIdentity(current.entry, current.component) !== identity
+    ) {
+      return lastProps
+    }
+    lastProps = routeComponentProps(scope, routeSource, readState, index)
+    return lastProps
+  })
+  return createComponentRenderable(initial.component as never, input, identity)
+}
+
+function routeComponentProps(
+  scope: ReturnType<typeof createCompiledScope>,
+  routeSource: ReturnType<typeof source>,
+  readState: () => ClientRouteState,
+  index: number,
+): RouteComponentProps {
+  const state = readState()
+  const match = state.components[index]!
+  return {
+    children: createRetainedRouteRenderable(scope, routeSource, readState, index + 1),
+    loaderData: match.loaderData,
+    params: match.params,
+    requestUrl: state.requestUrl,
+  }
+}
+
+function sharedRouteComponentCount(left: ClientRouteState, right: ClientRouteState): number {
+  const length = Math.min(left.components.length, right.components.length)
+  let index = 0
+  while (index < length) {
+    const previous = left.components[index]!
+    const next = right.components[index]!
+    if (previous.entry !== next.entry || previous.component !== next.component) break
+    index += 1
+  }
+  return index
+}
+
+function routeComponentIdentity(entry: RouteManifestEntry, component: StartComponent): object {
+  let componentIdentities = routeComponentIdentities.get(entry)
+  if (componentIdentities === undefined) {
+    componentIdentities = new WeakMap()
+    routeComponentIdentities.set(entry, componentIdentities)
+  }
+  let identity = componentIdentities.get(component)
+  if (identity === undefined) {
+    identity = {}
+    componentIdentities.set(component, identity)
+  }
+  return identity
 }
 
 function linkForEvent(event: MouseEvent): HTMLAnchorElement | undefined {

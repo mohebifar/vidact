@@ -67,11 +67,33 @@ A client navigation sends `x-vidact-start-navigation: 1` to the matched URL. The
 server executes the same root-to-leaf loaders but returns only a script-safe
 `application/x-vidact-start+json` snapshot; server-only loaders never execute in
 the browser. The client imports the matched route modules, supplies the snapshot
-data without rerunning loaders, and uses the compiled root's failure-atomic
-`replace` operation. Only after successful replacement does it push or replace
-history and apply scroll behavior. A newer navigation aborts the previous fetch
-and invalidates all later work from that attempt. `popstate` performs the same
-route replacement without writing another history entry.
+data without rerunning loaders, and reconciles the component-bearing route chain.
+Only after successful publication does it push or replace history and apply
+scroll behavior. A newer navigation aborts the previous fetch and invalidates
+all later work from that attempt. `popstate` performs the same route update
+without writing another history entry.
+
+A route owner is identified by its manifest entry object and resolved component
+function. The client retains the longest common prefix with equal identities.
+Every retained component receives `loaderData`, `params`, `requestUrl`, and
+`children` through one reactive route-state transaction, so the compiler-owned
+prop bridges update the existing component scope without invoking the component
+again. A parameter or query change therefore retains the matching leaf owner as
+well as its layouts. Matches without a component carry loader authority but do
+not establish a DOM owner.
+
+At the first changed component identity, the parent's live `children` range
+stages the new suffix before disposing the previous suffix. Runtime renderable
+identity reconciliation keeps every earlier owner and its DOM in place. If no
+component identity is shared, the client uses the compiled root's
+failure-atomic `replace` operation. The initial tree keeps the same marker shape
+as server composition, so this client-only retention layer does not change the
+hydration protocol.
+
+`createComponentRenderable` is the runtime bridge used for this route-owned
+identity. It projects a reactive props object through the existing component
+spread and child-prop protocols while opting the wrapper into same-identity
+renderable reconciliation. It does not introduce a generic element-tree diff.
 
 Programmatic navigation is exposed by the `StartClient` returned from
 `hydrateStart()`. Unmatched URLs, non-Start response media, server failures, and
@@ -112,6 +134,12 @@ builds, one client and one SSR entry, followed by a host adapter.
 - A loader runs at most once during the initial server-to-client lifecycle.
 - A navigation loader runs on the server, never again while applying its client
   snapshot.
+- Equal component-bearing route prefixes retain their DOM owners, local state,
+  refs, effects, and prop bridges.
+- Retained owners observe the next loader data, parameters, request URL, and
+  child range in one route-state transaction.
+- A changed route suffix is published before the previous suffix is disposed,
+  and each removed owner is disposed exactly once.
 - Parent loaders settle before descendant loaders and expose only prior data.
 - Endpoint dispatch never runs unrelated UI loaders.
 - A loader-thrown Web `Response` preserves its status, headers, and body.
@@ -150,19 +178,16 @@ builds, one client and one SSR entry, followed by a host adapter.
 ## Consequences
 
 Vidact applications now have one file-route manifest and request lifecycle for
-nested layouts, typed loaders, endpoint handlers, SSR, hydration, and
-same-document navigation. Links remain progressively enhanced anchors. The Vite
-development path no longer requires application-specific Node middleware, while
-deployment hosts can keep using standard Web handlers.
+nested layouts, typed loaders, endpoint handlers, SSR, hydration, retained
+same-document navigation, and history traversal. Links remain progressively
+enhanced anchors. The Vite development path no longer requires
+application-specific Node middleware, while deployment hosts can keep using
+standard Web handlers.
 
 This release does not yet include route preloading, pending or error route
 components, middleware, mutations/actions integration, metadata merging, static
 route generation, deployment adapters, build-manifest asset hashing, scroll
-position restoration, retained shared-layout owners, or incremental boundary
-streaming. The current failure-atomic root replacement resets component-local
-state throughout the route chain. Adding retained layouts must preserve
-route-owner disposal, request cancellation, loader authority, and the existing
-framework trust boundary.
+position restoration, or incremental boundary streaming.
 
 ## Verification
 
@@ -175,6 +200,10 @@ framework trust boundary.
   output, `replace`, and `reloadDocument`.
 - `packages/start/test/vite.test.ts` covers file conventions and environment
   plugin composition.
+- `tests/browser/corpus/apps/start-navigation/StartLayoutRetention.browser.test.ts`
+  covers hydration, retained component and DOM identity, loader and parameter
+  updates, bounded mutations, suffix disposal, cancellation, failed navigation,
+  and back/forward navigation in Chromium, Firefox, and WebKit.
 - `examples/start/test/server.test.ts` imports the generated manifest and proves
   an SSR dynamic route plus a JSON endpoint.
 - `pnpm --filter @vidact/start test`

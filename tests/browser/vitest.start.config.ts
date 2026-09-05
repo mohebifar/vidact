@@ -1,15 +1,9 @@
-import { vidact } from '@vidact/vite'
 import { playwright } from '@vitest/browser-playwright'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
-  plugins: [vidact({ features: ['css-insertion', 'unsafe-html'] })],
   test: {
-    include: ['corpus/apps/**/*.browser.test.ts'],
-    exclude: [
-      'corpus/apps/base-ui-dependency/**/*.browser.test.ts',
-      'corpus/apps/start-navigation/StartLayoutRetention.browser.test.ts',
-    ],
+    include: ['corpus/apps/start-navigation/StartLayoutRetention.browser.test.ts'],
     browser: {
       enabled: true,
       headless: true,
