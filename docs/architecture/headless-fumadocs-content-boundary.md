@@ -27,7 +27,7 @@ then uses `fumadocs-core/source` to derive canonical URLs and page-tree order.
 
 Route loaders convert each selected page into a closed, serializable view model:
 navigation records, headings, table-of-contents entries, paragraphs, lists,
-quotes, code blocks, separators, and the shadcn support matrix. Vidact Start
+quotes, code blocks, separators, and tables. Vidact Start
 places only that data in its server snapshot. Local compiled TSX renders the
 shell and page; no MDX component function, React element descriptor, or
 Fumadocs UI component crosses the boundary.
@@ -64,7 +64,8 @@ form requires an explicit serializable block and a local Vidact renderer.
 - `fumadocs-ui` is absent from the dependency graph.
 - A production build fails if any emitted JavaScript retains a React renderer or
   compatibility path.
-- Compile-only shadcn modules are not presented as interaction-certified.
+- The local docs components are not presented as published-dependency
+  certification.
 
 ## Alternatives considered
 
@@ -96,17 +97,10 @@ they can be added.
 
 - `examples/docs/test/server.test.ts` proves SSR for the docs index and component
   page, navigation snapshots, and a loader-backed `404`.
-- `examples/docs/src/App.browser.test.ts` proves surgical navigation filtering,
-  theme updates, and mobile navigation while retaining stable page owners.
-- `examples/docs/src/ComponentShowcase.browser.test.ts` mounts the integrated
-  component page showcase and operates only interaction-certified controls.
-- `examples/docs/src/ShadcnExpansionProof.browser.test.ts` and
-  `examples/docs/src/PopoverProof.browser.test.ts` prove the published Base UI
-  Collapsible and local owner-aware Popover behavior.
-- `examples/docs/scripts/audit-shadcn-compatibility.mjs` classifies all 61 copied
-  registry modules.
-- `examples/docs/scripts/verify-production-bundle.mjs` scans the client and
-  server output for retained React runtime paths.
+- `examples/docs/src/DocsShell.browser.test.ts` proves local block rendering,
+  surgical counter and keyed-list updates, theme changes, and mobile navigation
+  while retaining stable shell owners.
+- `examples/docs/test/vite-dev.test.ts` exercises the real Vite SSR development
+  pipeline and verifies React-free transformed output.
 - `pnpm --filter @vidact/example-docs test`
 - `pnpm --filter @vidact/example-docs build`
-- `pnpm --filter @vidact/example-docs audit:shadcn`

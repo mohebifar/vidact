@@ -1,16 +1,16 @@
 ---
 title: React compatibility
-description: A complete list of React 19 APIs and how each one behaves under Vidact.
+description: The documented React-shaped subset and how each surface behaves under Vidact.
 group: Reference
 ---
 
-Vidact compiles a subset of React 19. This page is the authoritative list of what is in that subset, what needs a feature flag, what behaves differently, and what is rejected.
+Vidact compiles a subset of React 19. This page summarizes what is in that subset, what needs a feature flag, what behaves differently, and what is rejected. Compatibility remains source-shape and target specific; a package or component is certified only to the level exercised by its repository tests.
 
 ## How to read the tables
 
 | Status | Meaning |
 | --- | --- |
-| **Supported** | Works as in React |
+| **Supported** | Works in compiled source subject to the documented notes |
 | **Opt-in** | Works when the named feature is enabled |
 | **Adapted** | Works for the same purpose, with a documented difference |
 | **Server / Hydrate** | Available only in that build target |
@@ -108,4 +108,4 @@ Vidact compiles a subset of React 19. This page is the authoritative list of wha
 
 ## Third-party packages
 
-A package works with Vidact when it ships React-shaped source inside this subset. The Vite plugin compiles such packages automatically when their `package.json` declares React. Packages that are precompiled against React's runtime, or that depend on rejected APIs, do not work and are reported at build time.
+A source-published package is eligible for Vidact compilation when its reachable code stays inside this subset. The Vite plugin qualifies such packages automatically when their `package.json` declares React. Qualification is not a package-wide support claim: compilation, SSR, browser behavior, DOM ownership, and typing require separate evidence. Packages that are precompiled against React's runtime, or that depend on rejected APIs, fail at build time.

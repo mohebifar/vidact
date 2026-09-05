@@ -35,7 +35,7 @@ Vidact keeps the programming model and replaces the runtime model. Because the c
 
 - A compiled counter is 8 kB gzipped with the runtime included, because there is no reconciler to download.
 - A state write runs a known list of updaters, so there are no surprise re-renders, no stale closures, and no `memo` needed to keep things fast.
-- `useState`, `useEffect`, `useContext`, `useRef`, and the rest work the way you expect, and most React components compile without changes.
+- Vidact supports the function-component, JSX, hook, DOM, SSR, and feature-gated APIs listed in the compatibility reference; unsupported forms fail the build.
 - Code Vidact cannot compile fails the build at the exact source location, rather than falling back to a slower path.
 
 ## What Vidact is not

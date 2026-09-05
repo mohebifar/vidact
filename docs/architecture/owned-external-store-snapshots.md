@@ -82,8 +82,5 @@ those arguments are reactive and would require resubscription lowering.
 - `tests/browser/corpus/apps/external-store/ExternalStoreApp.browser.test.ts`
   proves subscribe-time rechecking, surgical publication, unrelated-source
   isolation, and disposal unsubscribe behavior.
-- `examples/docs/src/PopoverProof.browser.test.ts` proves the one-root-
-  subscription pattern across controlled state, a portal open interval, and
-  owner disposal.
 - `cargo test -p vidact-compiler`
 - `pnpm --filter @vidact/browser-corpus test`

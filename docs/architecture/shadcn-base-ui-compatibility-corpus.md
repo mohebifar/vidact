@@ -1,11 +1,18 @@
 # shadcn Base UI as a compatibility corpus
 
-- Decision state: Accepted
+- Decision state: Accepted historical decision; certification results superseded
 - Decided: 2026-08-27
+- Certification superseded: 2026-09-05 by [Compatibility certification levels](compatibility-certification-levels.md)
 - Amends: [Lowered React dependency capsules](lowered-react-dependency-capsules.md)
 - Amends: [Deletion-aware reactive spreads and rest props](deletion-aware-reactive-spreads-and-rest-props.md)
 
 ## Context
+
+> This document preserves the August 27 registry experiment and the compiler
+> decisions it produced. Its component counts, docs-example paths, and
+> certification results are historical and must not be used as current support
+> claims. See [Compatibility certification levels](compatibility-certification-levels.md)
+> and the [current evidence table](../react-compatibility.md#current-certification-evidence).
 
 Fumadocs UI currently builds its component layer on Base UI and adopts shadcn's
 theme model. Importing Fumadocs UI as an opaque React package would test whether
@@ -217,42 +224,10 @@ entries. Renderer-coupled widget packages, hook-bearing class methods,
 hook-replay component wrappers, and render-time hook-object mutation remain
 incompatible by design.
 
-## Verification
+## Historical verification
 
-- `crates/vidact-compiler/tests/surgical_codegen.rs` covers ordered reactive JSX
-  spreads, zero-argument state, expression-bodied local hooks, guarded hook
-  arguments, deep optional-chain and left-logical hook bases, React 19 hook aliases,
-  dependency-owned memo semantics, simple logical assignments, provider-owned
-  construction, and reactive object destructuring.
-- `crates/vidact-compiler/tests/lowered_react.rs` covers exported `forwardRef`
-  binding identity, expression-bodied inline arrows, verified transpiler name
-  wrappers and statements, keyed factory fragments, final factory `children`
-  coalescing, and guarded dynamic intrinsic children.
-- `crates/vidact-compiler/tests/server_codegen.rs` covers dispatcher preservation
-  inside a dependency-owned `forwardRef` component.
-- `packages/vite-plugin/test/base-ui.integration.test.ts` server-renders the
-  published Base UI Avatar provider and fallback from a React-free bundle.
-- `examples/docs/test/vite-dev.test.ts` requests the generated Avatar reference
-  page through the real Vite SSR development pipeline.
-- `examples/docs/src/App.browser.test.ts` exercises the Base UI-backed Button and
-  Input and asserts surgical sidebar/theme updates with retained page owners.
-- `examples/docs/src/ComponentShowcase.browser.test.ts` mounts the integrated
-  component showcase and operates the four interaction-certified controls.
-- `examples/docs/src/ShadcnExpansionProof.browser.test.ts` proves Avatar context
-  construction plus functional, accessible Collapsible interaction with
-  retained root and trigger owners.
-- `examples/docs/src/PopoverProof.browser.test.ts` proves uncontrolled and
-  controlled Popover behavior, retained trigger identity, bounded portal
-  mutations, reason-aware focus, dismissal, and disposal cleanup.
-- `tests/browser/corpus/apps/composed-refs/ComposedRefsApp.browser.test.ts`
-  proves composed callback refs replace in detach-before-attach order without
-  replacing or mutating their host node.
-- `examples/docs/scripts/audit-shadcn-compatibility.mjs` builds all 61 generated
-  modules independently and classifies production compilation separately from
-  browser certification.
-- `examples/docs/scripts/verify-production-bundle.mjs` rejects React runtime and
-  compatibility paths in emitted JavaScript.
-
-Run `cargo test -p vidact-compiler`,
-`pnpm --filter @vidact/example-docs test`, and
-`pnpm --filter @vidact/example-docs build`.
+The original proof paths were removed when the docs example became a smaller
+Vidact-native shell. They are intentionally not redirected to unrelated tests.
+Current package and application claims, with executable evidence, live in
+[Compatibility certification levels](compatibility-certification-levels.md)
+and the [React compatibility matrix](../react-compatibility.md#current-certification-evidence).

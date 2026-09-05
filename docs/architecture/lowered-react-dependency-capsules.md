@@ -264,10 +264,6 @@ integration after the dependency capsule contract is stable.
   and [`tests/browser/corpus/apps/dynamic-create-element-child/DynamicCreateElementChildApp.browser.test.ts`](../../tests/browser/corpus/apps/dynamic-create-element-child/DynamicCreateElementChildApp.browser.test.ts)
   prove retained target, child, and sibling identity with exact attribute/text
   mutation envelopes in Chromium, Firefox, and WebKit.
-- [`examples/docs/src/ShadcnExpansionProof.browser.test.ts`](../../examples/docs/src/ShadcnExpansionProof.browser.test.ts)
-  proves Base UI's dynamic `useRenderElement` intrinsic retains both the
-  Collapsible root and trigger while publishing accessibility state and panel
-  ownership.
 - [`packages/vite-plugin/test/base-ui.integration.test.ts`](../../packages/vite-plugin/test/base-ui.integration.test.ts)
   compiles published Button, Input, and Toggle Group entries for client and
   server, maps output to published source, and server-renders both render-prop
