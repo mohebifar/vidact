@@ -33,6 +33,17 @@ function createForeignRealmResponse(body: BodyInit | null, init: ResponseInit): 
   })
 }
 
+function varyAwareCacheKey(request: Request, response: Response): string {
+  const vary = response.headers.get('vary')
+  const dimensions = vary
+    ?.split(',')
+    .map((header) => header.trim().toLowerCase())
+    .filter(Boolean)
+    .map((header) => `${header}:${request.headers.get(header) ?? ''}`)
+    .join('|')
+  return `${request.url}|${dimensions ?? ''}`
+}
+
 describe('Vidact Start server', () => {
   it('renders nested file routes with loader data and a hydration snapshot', async () => {
     const manifest = createRouteManifest([
@@ -70,6 +81,7 @@ describe('Vidact Start server', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toBe('text/html; charset=utf-8')
+    expect(response.headers.get('vary')).toBe(VIDACT_START_NAVIGATION_HEADER)
     expect(html).toContain('<main>')
     expect(html).toContain('<h1>')
     expect(html).toContain('ridge')
@@ -183,21 +195,44 @@ describe('Vidact Start server', () => {
         }),
       ),
     ])
-    const response = await createStartHandler({ manifest })(
-      new Request('https://example.test/products/bottle?currency=usd', {
-        headers: { [VIDACT_START_NAVIGATION_HEADER]: '1' },
-      }),
-    )
+    const handler = createStartHandler({ manifest })
+    const url = 'https://example.test/products/bottle?currency=usd'
+    const documentRequest = new Request(url)
+    const navigationRequest = new Request(url, {
+      headers: { [VIDACT_START_NAVIGATION_HEADER]: '1' },
+    })
+    const [documentResponse, response] = await Promise.all([
+      handler(documentRequest),
+      handler(navigationRequest),
+    ])
 
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toBe(
       `${VIDACT_START_SNAPSHOT_MEDIA_TYPE}; charset=utf-8`,
     )
+    expect(response.headers.get('vary')).toBe(VIDACT_START_NAVIGATION_HEADER)
+    expect(varyAwareCacheKey(documentRequest, documentResponse)).not.toBe(
+      varyAwareCacheKey(navigationRequest, response),
+    )
     expect(decodeStartSnapshot(await response.text())).toMatchObject({
       pathname: '/products/bottle?currency=usd',
       loaderData: { 'products/$productId': { productId: 'bottle' } },
     })
-    expect(component).not.toHaveBeenCalled()
+    expect(component).toHaveBeenCalledTimes(1)
+  })
+
+  it('declares response variation for document HEAD requests', async () => {
+    const manifest = createRouteManifest([
+      entry('index', '/', null, defineFileRoute({ component: () => 'ready' })),
+    ])
+
+    const response = await createStartHandler({ manifest })(
+      new Request('https://example.test/', { method: 'HEAD' }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe('')
+    expect(response.headers.get('vary')).toBe(VIDACT_START_NAVIGATION_HEADER)
   })
 
   it('uses a cross-realm Response thrown by a loader as the route response', async () => {
@@ -211,7 +246,7 @@ describe('Vidact Start server', () => {
           loader: () => {
             throw createForeignRealmResponse('Unknown document', {
               status: 404,
-              headers: { 'x-docs-miss': '1' },
+              headers: { vary: 'accept-language', 'x-docs-miss': '1' },
             })
           },
           component,
@@ -237,6 +272,7 @@ describe('Vidact Start server', () => {
     expect(documentResponse.status).toBe(404)
     expect(await documentResponse.text()).toBe('Unknown document')
     expect(documentResponse.headers.get('x-docs-miss')).toBe('1')
+    expect(documentResponse.headers.get('vary')).toBe('accept-language')
     expect(navigationResponse.status).toBe(404)
     expect(headResponse.status).toBe(404)
     expect(headResponse.headers.get('x-docs-miss')).toBe('1')

@@ -60,6 +60,11 @@ replace the current history entry.
 `hydrateStart()` returns a `StartClient` whose `navigate()` method provides the
 same behavior for programmatic navigation.
 
+Document HTML and client-navigation snapshots share the same route URL. Start
+marks both successful representations with `Vary: x-vidact-start-navigation`,
+so HTTP caches that honor `Vary` keep them separate. Deployments must preserve
+that response header when adding their own caching rules.
+
 This first navigation contract replaces the owned route root atomically, so
 component-local state in shared layouts resets. Retaining unchanged layout
 owners is a follow-up routing contract.

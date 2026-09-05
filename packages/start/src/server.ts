@@ -100,7 +100,7 @@ export function createStartHandler(
     )
     if (request.headers.get(VIDACT_START_NAVIGATION_HEADER) === '1') {
       return new Response(request.method === 'HEAD' ? null : snapshot, {
-        headers: { 'content-type': `${VIDACT_START_SNAPSHOT_MEDIA_TYPE}; charset=utf-8` },
+        headers: representationHeaders(`${VIDACT_START_SNAPSHOT_MEDIA_TYPE}; charset=utf-8`),
       })
     }
 
@@ -127,9 +127,15 @@ export function createStartHandler(
         ? defaultDocument(documentContext)
         : await options.renderDocument(documentContext)
     return new Response(request.method === 'HEAD' ? null : html, {
-      headers: { 'content-type': 'text/html; charset=utf-8' },
+      headers: representationHeaders('text/html; charset=utf-8'),
     })
   }
+}
+
+function representationHeaders(contentType: string): Headers {
+  const headers = new Headers({ 'content-type': contentType })
+  headers.append('vary', VIDACT_START_NAVIGATION_HEADER)
+  return headers
 }
 
 function responseForRequest(request: Request, response: Response): Response {
