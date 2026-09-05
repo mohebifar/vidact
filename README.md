@@ -216,7 +216,7 @@ cargo test --workspace
 pnpm test:browser
 ```
 
-`pnpm check` runs everything CI runs: lint and format gates, type checks, the Rust suite, the cross-browser corpus, package and example verification, production size budgets, and compiler and runtime benchmarks.
+`pnpm check` runs everything CI runs: lint and format gates, type checks, the Rust suite, the cross-browser corpus, package and example verification, production size budgets, and compiler and runtime benchmarks. The [benchmark methodology](docs/benchmarking.md) records workloads, sampling, environments, and regression thresholds.
 
 > [!TIP]
 > Ordinary builds do not need Go. Only maintainers editing the checked-in Oxc patch install `git-go-patch` with `go install github.com/microsoft/go-infra/cmd/git-go-patch@v0.0.16`. See [patched Oxc submodule](docs/architecture/patched-oxc-submodule.md).
