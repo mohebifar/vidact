@@ -40,11 +40,26 @@ export interface StartDocumentContext {
   readonly snapshotId: string
 }
 
+export interface StartDocumentShellContext {
+  readonly clientEntry: string | undefined
+  readonly rootId: string
+  readonly snapshot: string
+  readonly snapshotId: string
+}
+
+export interface StartDocumentShell {
+  readonly afterApplication: string
+  readonly beforeApplication: string
+}
+
 export interface StartHandlerOptions {
   readonly clientEntry?: string
   readonly manifest: RouteManifest
   readonly notFound?: (request: Request) => Response | Promise<Response>
   readonly renderDocument?: (context: StartDocumentContext) => string | Promise<string>
+  readonly renderDocumentShell?: (
+    context: StartDocumentShellContext,
+  ) => StartDocumentShell | Promise<StartDocumentShell>
   readonly rootId?: string
   readonly snapshotId?: string
 }
@@ -52,6 +67,9 @@ export interface StartHandlerOptions {
 export function createStartHandler(
   options: StartHandlerOptions,
 ): (request: Request) => Promise<Response> {
+  if (options.renderDocument !== undefined && options.renderDocumentShell !== undefined) {
+    throw new TypeError('renderDocument and renderDocumentShell cannot be used together')
+  }
   const rootId = options.rootId ?? DEFAULT_ROOT_ID
   const snapshotId = options.snapshotId ?? DEFAULT_SNAPSHOT_ID
   return async (request) => {
@@ -103,6 +121,8 @@ export function createStartHandler(
         headers: representationHeaders(`${VIDACT_START_SNAPSHOT_MEDIA_TYPE}; charset=utf-8`),
       })
     }
+    const headers = representationHeaders('text/html; charset=utf-8')
+    if (request.method === 'HEAD') return new Response(null, { headers })
 
     const application = composeRouteMatches(
       loaded,
@@ -112,23 +132,25 @@ export function createStartHandler(
     ) as ServerChild
     const stream = await renderToReadableStream(
       () => createElement(StartApplication, { children: application }) as ServerChild,
-      { identifierPrefix: 'start-' },
+      { identifierPrefix: 'start-', signal: request.signal },
     )
-    const applicationHtml = await new Response(stream).text()
-    const documentContext = {
-      applicationHtml,
+    void stream.allReady.catch(() => undefined)
+    const shellContext = {
       clientEntry: options.clientEntry,
       rootId,
       snapshot,
       snapshotId,
     }
-    const html =
-      options.renderDocument === undefined
-        ? defaultDocument(documentContext)
-        : await options.renderDocument(documentContext)
-    return new Response(request.method === 'HEAD' ? null : html, {
-      headers: representationHeaders('text/html; charset=utf-8'),
-    })
+    if (options.renderDocument !== undefined) {
+      const applicationHtml = await new Response(stream).text()
+      const html = await options.renderDocument({ ...shellContext, applicationHtml })
+      return new Response(html, { headers })
+    }
+    const shell =
+      options.renderDocumentShell === undefined
+        ? defaultDocumentShell(shellContext)
+        : validateDocumentShell(await options.renderDocumentShell(shellContext))
+    return new Response(streamDocument(shell, stream), { headers })
   }
 }
 
@@ -194,12 +216,68 @@ function methodRank(method: string): number {
   return method === 'GET' ? 0 : method === 'HEAD' ? 1 : 2
 }
 
-function defaultDocument(context: StartDocumentContext): string {
+function defaultDocumentShell(context: StartDocumentShellContext): StartDocumentShell {
   const clientScript =
     context.clientEntry === undefined
       ? ''
       : `<script type="module" src="${escapeAttribute(context.clientEntry)}"></script>`
-  return `<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body><div id="${escapeAttribute(context.rootId)}">${context.applicationHtml}</div><script id="${escapeAttribute(context.snapshotId)}" type="application/json">${context.snapshot}</script>${clientScript}</body></html>`
+  return {
+    beforeApplication: `<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body><div id="${escapeAttribute(context.rootId)}">`,
+    afterApplication: `</div><script id="${escapeAttribute(context.snapshotId)}" type="application/json">${context.snapshot}</script>${clientScript}</body></html>`,
+  }
+}
+
+function validateDocumentShell(value: StartDocumentShell): StartDocumentShell {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    typeof value.beforeApplication !== 'string' ||
+    typeof value.afterApplication !== 'string'
+  ) {
+    throw new TypeError('renderDocumentShell must return beforeApplication and afterApplication')
+  }
+  return value
+}
+
+function streamDocument(
+  shell: StartDocumentShell,
+  application: ReadableStream<Uint8Array>,
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder()
+  const before = encoder.encode(shell.beforeApplication)
+  const after = encoder.encode(shell.afterApplication)
+  const reader = application.getReader()
+  let phase: 'after' | 'application' | 'before' | 'done' = 'before'
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        if (phase === 'before') {
+          phase = 'application'
+          if (before.length > 0) controller.enqueue(before)
+          return
+        }
+        if (phase === 'application') {
+          const result = await reader.read()
+          if (!result.done) {
+            controller.enqueue(result.value)
+            return
+          }
+          phase = 'after'
+        }
+        if (phase === 'after') {
+          phase = 'done'
+          if (after.length > 0) controller.enqueue(after)
+          return
+        }
+        controller.close()
+      } catch (error) {
+        controller.error(error)
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason)
+    },
+  })
 }
 
 function escapeAttribute(value: string): string {

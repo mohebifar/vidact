@@ -1,4 +1,5 @@
 import { jsx as serverJsx, type ServerChild } from '@vidact/runtime/framework/server/jsx-runtime'
+import { Suspense, use } from '@vidact/runtime/server'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
@@ -93,6 +94,149 @@ describe('Vidact Start server', () => {
     expect(decodeStartSnapshot(snapshotPayload!)).toMatchObject({
       pathname: '/products/ridge?currency=usd',
     })
+  })
+
+  it('streams the document shell before a delayed application settles', async () => {
+    const message = deferred<string>()
+    const manifest = createRouteManifest([
+      entry(
+        'index',
+        '/',
+        null,
+        defineFileRoute({
+          component: () =>
+            Suspense({
+              children: () => serverJsx('strong', { children: use(message.promise) }),
+              fallback: () => serverJsx('p', { children: 'loading' }),
+            }),
+        }),
+      ),
+    ])
+    const response = await createStartHandler({ manifest })(new Request('https://example.test/'))
+    const reader = response.body!.getReader()
+
+    const first = await reader.read()
+    const shell = new TextDecoder().decode(first.value)
+    expect(first.done).toBe(false)
+    expect(shell).toContain('<!doctype html>')
+    expect(shell).toContain('<div id="vidact-start-root">')
+    expect(shell).not.toContain('ready')
+    expect(shell).not.toContain('vidact-start-snapshot')
+
+    const applicationRead = reader.read()
+    let applicationSettled = false
+    void applicationRead.then(() => {
+      applicationSettled = true
+    })
+    await Promise.resolve()
+    expect(applicationSettled).toBe(false)
+
+    message.resolve('ready')
+    const applicationChunk = await applicationRead
+    const html =
+      shell + new TextDecoder().decode(applicationChunk.value) + (await readReader(reader))
+    expect(html).toContain('<strong>')
+    expect(html).toContain('ready')
+    expect(html).toContain('id="vidact-start-snapshot"')
+    expect(html.indexOf('ready')).toBeLessThan(html.indexOf('vidact-start-snapshot'))
+    expectBalancedMarker(html, 'r')
+    expectBalancedMarker(html, 'b')
+    expectBalancedMarker(html, 'c')
+  })
+
+  it('supports streaming custom shells and keeps legacy custom documents buffered', async () => {
+    const streamedMessage = deferred<string>()
+    const bufferedMessage = deferred<string>()
+    const route = (message: ReturnType<typeof deferred<string>>) =>
+      createRouteManifest([
+        entry(
+          'index',
+          '/',
+          null,
+          defineFileRoute({
+            component: () =>
+              Suspense({
+                children: () => serverJsx('strong', { children: use(message.promise) }),
+                fallback: () => 'loading',
+              }),
+          }),
+        ),
+      ])
+    const streaming = await createStartHandler({
+      manifest: route(streamedMessage),
+      renderDocumentShell: ({ snapshot, snapshotId }) => ({
+        beforeApplication: '<!doctype html><main data-custom-shell>',
+        afterApplication: `</main><script id="${snapshotId}">${snapshot}</script>`,
+      }),
+    })(new Request('https://example.test/'))
+    const streamingReader = streaming.body!.getReader()
+
+    expect(new TextDecoder().decode((await streamingReader.read()).value)).toContain(
+      'data-custom-shell',
+    )
+    streamedMessage.resolve('streamed')
+    expect(await readReader(streamingReader)).toContain('streamed')
+
+    let legacyResolved = false
+    const legacyResponse = createStartHandler({
+      manifest: route(bufferedMessage),
+      renderDocument: ({ applicationHtml, snapshot }) =>
+        `<main data-legacy>${applicationHtml}</main><script>${snapshot}</script>`,
+    })(new Request('https://example.test/'))
+    void legacyResponse.then(() => {
+      legacyResolved = true
+    })
+    await Promise.resolve()
+    expect(legacyResolved).toBe(false)
+    bufferedMessage.resolve('buffered')
+    expect(await (await legacyResponse).text()).toContain('data-legacy')
+    expect(() =>
+      createStartHandler({
+        manifest: route(deferred()),
+        renderDocument: () => '',
+        renderDocumentShell: () => ({ afterApplication: '', beforeApplication: '' }),
+      }),
+    ).toThrow('renderDocument and renderDocumentShell cannot be used together')
+  })
+
+  it('propagates document stream errors and aborts while omitting HEAD render work', async () => {
+    const pending = new Promise<never>(() => {})
+    const component = vi.fn<() => ServerChild>(() =>
+      Suspense({ children: () => use(pending), fallback: () => 'loading' }),
+    )
+    const manifest = createRouteManifest([
+      entry('index', '/', null, defineFileRoute({ component })),
+    ])
+    const handler = createStartHandler({ manifest })
+    const head = await handler(new Request('https://example.test/', { method: 'HEAD' }))
+    expect(head.body).toBeNull()
+    expect(component).not.toHaveBeenCalled()
+
+    const abort = new AbortController()
+    const response = await handler(new Request('https://example.test/', { signal: abort.signal }))
+    const reader = response.body!.getReader()
+    expect(new TextDecoder().decode((await reader.read()).value)).toContain('<!doctype html>')
+    abort.abort(new Error('cancel Start document'))
+    await expect(reader.read()).rejects.toThrow('cancel Start document')
+
+    const failedManifest = createRouteManifest([
+      entry(
+        'index',
+        '/',
+        null,
+        defineFileRoute({
+          component: () => {
+            throw new Error('Start document failed')
+          },
+        }),
+      ),
+    ])
+    const failed = await createStartHandler({ manifest: failedManifest })(
+      new Request('https://example.test/'),
+    )
+    const failedReader = failed.body!.getReader()
+    expect(new TextDecoder().decode((await failedReader.read()).value)).toContain('<!doctype html>')
+    await expect(failedReader.read()).rejects.toThrow('Start document failed')
   })
 
   it('dispatches server endpoints without running UI loaders', async () => {
@@ -330,3 +474,32 @@ describe('Vidact Start server', () => {
     ).rejects.toBe(taggedError)
   })
 })
+
+function deferred<Value>(): {
+  readonly promise: Promise<Value>
+  readonly resolve: (value: Value) => void
+} {
+  let resolve!: (value: Value) => void
+  const promise = new Promise<Value>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
+async function readReader(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<string> {
+  const decoder = new TextDecoder()
+  let text = ''
+  while (true) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- A stream reader is inherently sequential.
+    const result = await reader.read()
+    if (result.done) return text + decoder.decode()
+    text += decoder.decode(result.value, { stream: true })
+  }
+}
+
+function expectBalancedMarker(html: string, kind: 'b' | 'c' | 'r'): void {
+  const opens = html.split(`<!--v2:${kind}-->`).length - 1
+  const closes = html.split(`<!--/v2:${kind}-->`).length - 1
+  expect(opens).toBeGreaterThan(0)
+  expect(closes).toBe(opens)
+}

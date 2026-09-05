@@ -57,6 +57,30 @@ loads the same generated route modules, consumes the supplied loader results
 without rerunning loaders, reconstructs the same component chain, and claims the
 whole server root through the existing hydrate runtime.
 
+For a document `GET`, Start returns a stream split into three ordered parts. The
+first chunk contains the doctype, head, body, and open application root. The
+runtime application stream follows once its async resources settle, preserving
+its component, binding, and root markers without parsing or concatenating its
+bytes. The final chunk closes the root and emits the escaped loader snapshot and
+client entry. Loaders still settle before the response because their results
+determine both route composition and the snapshot.
+
+`renderDocumentShell` customizes this streaming path with
+`beforeApplication` and `afterApplication` strings. Its context includes the
+escaped snapshot and document IDs, so a custom shell remains responsible for
+the same root, snapshot-script, and client-entry placements as the default.
+The original `renderDocument` contract remains supported for templates that
+need the full `applicationHtml` string; selecting it explicitly buffers the
+runtime stream. The two callbacks are mutually exclusive.
+
+Request abort propagates into pending runtime resources, and cancelling the
+document body cancels the application reader. Once the opening shell has been
+published, an application render error terminates the response stream; the HTTP
+status is already committed. A document `HEAD` runs loaders and returns the same
+headers without constructing the application stream. Navigation snapshot
+requests return their single JSON representation before document rendering and
+therefore never enter the HTML stream contract.
+
 `Link` renders an ordinary anchor in both targets and adds private navigation
 attributes unless `reloadDocument` is requested. After hydration, one delegated
 click listener intercepts only unmodified, primary-button, same-origin HTTP(S)
@@ -145,6 +169,13 @@ builds, one client and one SSR entry, followed by a host adapter.
 - A loader-thrown Web `Response` preserves its status, headers, and body.
 - Query text survives the snapshot and becomes part of the hydration request URL.
 - Untrusted loader data cannot terminate the snapshot script element.
+- A document shell can publish before pending application resources settle;
+  application markers remain byte-for-byte runtime output and precede the
+  snapshot.
+- Aborting the request or cancelling its response stops pending application
+  work. Stream errors after the shell never emit a snapshot or closing suffix.
+- Document `HEAD` and navigation-snapshot requests do not construct an
+  application stream.
 - Route-module changes invalidate the virtual module and trigger a development
   reload.
 - Superseded navigation work cannot publish a route or history entry.
@@ -171,6 +202,10 @@ builds, one client and one SSR entry, followed by a host adapter.
 - **Fetch and parse a complete HTML document:** this preserves server authority
   but transfers and renders markup that failure-atomic client root replacement
   does not consume.
+- **Buffer every custom document behind `applicationHtml`:** this preserves the
+  original callback shape but prevents an early response. Keeping that callback
+  as an explicit buffered compatibility path and adding a split shell contract
+  makes the streaming choice visible.
 - **Intercept every anchor:** downloads, external targets, modifier gestures,
   hash navigation, and explicit document reloads belong to native browser
   behavior.
@@ -187,14 +222,18 @@ standard Web handlers.
 This release does not yet include route preloading, pending or error route
 components, middleware, mutations/actions integration, metadata merging, static
 route generation, deployment adapters, build-manifest asset hashing, scroll
-position restoration, or incremental boundary streaming.
+position restoration, or application-level fallback streaming. The document
+shell streams before pending application resources, while the current framework
+runtime publishes the final marker-complete application after those resources
+settle.
 
 ## Verification
 
 - `packages/start/test/router.test.ts` covers specificity, parameters, parent
   chains, loader ordering, loader-data typing, and layout composition.
 - `packages/start/test/server.test.ts` covers nested SSR, query and navigation
-  snapshots, endpoints, `HEAD`, method negotiation, missing routes,
+  snapshots, document chunk order, custom streaming and buffered templates,
+  abort and render errors, endpoints, `HEAD`, method negotiation, missing routes,
   loader-thrown responses, and script-text safety.
 - `packages/start/test/link.test.ts` covers progressively enhanced server anchor
   output, `replace`, and `reloadDocument`.

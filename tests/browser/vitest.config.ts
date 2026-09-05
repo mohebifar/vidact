@@ -9,6 +9,7 @@ export default defineConfig({
     exclude: [
       'corpus/apps/base-ui-dependency/**/*.browser.test.ts',
       'corpus/apps/start-navigation/StartLayoutRetention.browser.test.ts',
+      'corpus/apps/start-navigation/StartStreaming.browser.test.ts',
     ],
     browser: {
       enabled: true,

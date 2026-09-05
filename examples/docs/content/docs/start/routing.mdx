@@ -62,7 +62,7 @@ export function RootLayout({ children }: RouteComponentProps<undefined>) {
 export const Route = defineFileRoute({ component: RootLayout })
 ```
 
-The root layout renders inside the document's root element. The `<html>`, `<head>`, and `<body>` are produced by your `renderDocument` function on the server; see [@vidact/start](/docs/reference/start).
+The root layout renders inside the document's root element. The `<html>`, `<head>`, and `<body>` come from Start's streaming shell or your `renderDocumentShell` customization. The buffered `renderDocument` callback remains available when a template needs the complete application HTML; see [@vidact/start](/docs/reference/start).
 
 ## Parameters
 

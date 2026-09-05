@@ -65,6 +65,13 @@ marks both successful representations with `Vary: x-vidact-start-navigation`,
 so HTTP caches that honor `Vary` keep them separate. Deployments must preserve
 that response header when adding their own caching rules.
 
+The built-in document streams its opening shell as soon as loaders settle. The
+marker-complete application follows after its async resources settle, then the
+snapshot and client script close the document. `renderDocumentShell` customizes
+the strings before and after the application while preserving this behavior.
+The older `renderDocument` callback still receives one `applicationHtml` string
+and therefore buffers the application before returning a response.
+
 Start retains the longest common prefix of component-bearing route entries.
 Those components keep their DOM, local state, refs, and effects while their
 `loaderData`, `params`, `requestUrl`, and `children` props update. The first

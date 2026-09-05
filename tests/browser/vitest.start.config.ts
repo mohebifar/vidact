@@ -3,7 +3,10 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
-    include: ['corpus/apps/start-navigation/StartLayoutRetention.browser.test.ts'],
+    include: [
+      'corpus/apps/start-navigation/StartLayoutRetention.browser.test.ts',
+      'corpus/apps/start-navigation/StartStreaming.browser.test.ts',
+    ],
     browser: {
       enabled: true,
       headless: true,
