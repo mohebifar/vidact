@@ -36,11 +36,17 @@ async function transformBaseUiEntry(
     | 'switch'
     | 'toggle-group',
   target: 'client' | 'server',
+  concurrent = true,
 ) {
   const entry = join(baseUiRoot, subpath, 'index.mjs')
   const source = await readFile(entry, 'utf8')
   const transform = Reflect.get(
-    vidact({ target, features: ['concurrent', 'css-insertion', 'profiling'] }),
+    vidact({
+      target,
+      features: concurrent
+        ? ['concurrent', 'css-insertion', 'profiling']
+        : ['css-insertion', 'profiling'],
+    }),
     'transform',
   ) as (
     this: {
@@ -73,8 +79,10 @@ async function buildBaseUiApp(target: 'client' | 'server', bundleRuntime = false
     entry,
     `
       import { Button } from '@base-ui/react/button'
+      import { Accordion } from '@base-ui/react/accordion'
       import { Avatar } from '@base-ui/react/avatar'
       import { Input } from '@base-ui/react/input'
+      import { Switch } from '@base-ui/react/switch'
       import { ToggleGroup } from '@base-ui/react/toggle-group'
 
       export function App() {
@@ -83,15 +91,24 @@ async function buildBaseUiApp(target: 'client' | 'server', bundleRuntime = false
           <Button render={(props) => <a {...props} href="/callback">Callback</a>} />
           <Button render={<a href="/element">Element</a>} />
           <Input aria-label="Search" />
+          <Switch.Root aria-label="Published setting" defaultChecked><Switch.Thumb /></Switch.Root>
+          <Accordion.Root defaultValue={['details']}>
+            <Accordion.Item value="details">
+              <Accordion.Header><Accordion.Trigger>Published details</Accordion.Trigger></Accordion.Header>
+              <Accordion.Panel keepMounted>Dependency content</Accordion.Panel>
+            </Accordion.Item>
+          </Accordion.Root>
           <ToggleGroup defaultValue={['all']} aria-label="Category" />
         </main>
       }
     `,
   )
   const aliases: Array<{ find: string; replacement: string }> = [
+    'accordion',
     'avatar',
     'button',
     'input',
+    'switch',
     'toggle-group',
   ].map((subpath) => ({
     find: `@base-ui/react/${subpath}`,
@@ -184,6 +201,12 @@ describe('Base UI dependency compilation', () => {
     expect(transformed?.code).not.toMatch(/let\s*\{\s*controlled:/u)
   })
 
+  it('locates the published Accordion diagnostic when its required capability is disabled', async () => {
+    await expect(transformBaseUiEntry('accordion', 'client', false)).rejects.toThrow(
+      /useAnimationsFinished\.mjs:33:\d+.*flushSync requires the `concurrent` compiler feature/s,
+    )
+  })
+
   it('serves helper-bearing dependency capsules through the development pipeline', async () => {
     const direct = await transformBaseUiEntry('avatar', 'client')
     expect(direct?.code).not.toContain('\\0rolldown/runtime.js')
@@ -243,7 +266,7 @@ describe('Base UI dependency compilation', () => {
     })
   }
 
-  it('server-renders Avatar and Button dependency behavior', async () => {
+  it('server-renders Avatar, Button, Switch, and Accordion dependency behavior', async () => {
     const code = await buildBaseUiApp('server', true)
     const root = await mkdtemp(join(tmpdir(), 'vidact-base-ui-output-'))
     temporaryDirectories.push(root)
@@ -256,5 +279,11 @@ describe('Base UI dependency compilation', () => {
     expect(html).toContain('<a href="/callback" tabIndex="0" type="button">Callback</a>')
     expect(html).toContain('<a href="/element" tabIndex="0" type="button">Element</a>')
     expect(html).toContain('<input aria-label="Search"')
+    expect(html).toContain('aria-label="Published setting"')
+    expect(html).toContain('role="switch"')
+    expect(html).toContain('aria-checked="true"')
+    expect(html).toContain('Published details')
+    expect(html).toContain('aria-expanded="true"')
+    expect(html).toContain('Dependency content')
   })
 })
