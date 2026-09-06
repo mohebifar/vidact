@@ -16,6 +16,30 @@ Documentation lives in `content/docs/**/*.mdx` and is organized the way React's 
 
 Page order within each section is defined in `src/lib/source.server.ts`.
 
+## Search and WebMCP
+
+Search opens from either header, **⌘K** on macOS, or **Ctrl+K** on other platforms. Arrow keys
+select a result, Enter opens it, and Escape closes the dialog and restores focus. The dialog
+uses Vidact components and a native modal `<dialog>`. Fumadocs Core indexes page titles,
+headings, prose, and code on the server through `/api/search?query=...`. Heading IDs come from
+the same parsed content used to render pages. The search engine and index stay out of the
+client bundle.
+
+Browsers that expose [`document.modelContext`](https://developer.chrome.com/docs/ai/webmcp/imperative-api)
+receive three WebMCP tools after hydration:
+
+- `search_docs({ query })` returns matching text and documentation paths.
+- `read_doc({ path })` returns page sections and code without navigating.
+- `open_doc({ path })` navigates this tab to a published page or heading.
+
+The tools share the website's content and search APIs. Reads accept only published `/docs`
+paths; they cannot fetch arbitrary URLs or files. Fetches honor tool cancellation, and an
+aborted registration signal removes the tools on page exit or hot replacement. Registration
+failure does not interrupt hydration. WebMCP is an experimental browser API: unsupported
+browsers retain normal search and navigation, with no polyfill or agent service required.
+
+Run `pnpm test` for endpoint, deployment-bundle, WebMCP lifecycle, and search interaction tests.
+
 ## Authoring
 
 Each page starts with `title`, `description`, and `group` frontmatter. Content before the first `##`
