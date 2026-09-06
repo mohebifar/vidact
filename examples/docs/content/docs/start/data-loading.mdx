@@ -85,7 +85,7 @@ Handlers receive `{ params, request }` and return a `Response`. They are plain w
 
 ## Loading in the browser
 
-After hydration, a `<Link>` click asks the server for a snapshot of the target URL's loader data rather than a full page, then re-renders the route tree with it. You do not write any client-side fetching for route data; the same loaders serve both the first request and later navigations.
+After hydration, a `<Link>` click requests a snapshot of the target URL's loader data. The client updates retained route components and mounts any new routes with that data. The same loaders serve both the first request and later navigations.
 
 For data that changes while a page is open, such as a live feed, use an [effect](/docs/learn/effects) or an [external store](/docs/learn/context) as you would in any client application.
 

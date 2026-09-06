@@ -19,8 +19,6 @@ export function HomeRoute({ loaderData }: LandingProps) {
     <main className="min-h-screen bg-background text-foreground">
       <SiteHeader />
 
-      {/* The hero and the compiled-output panes share one dark slab, so the
-          first thing below the headline is the compiler's actual output. */}
       <div className="bg-zinc-950 text-white">
         <section className="relative overflow-hidden">
           <HeroLogo />
@@ -30,13 +28,11 @@ export function HomeRoute({ loaderData }: LandingProps) {
           />
           <div className="relative mx-auto max-w-6xl px-6 pt-24 pb-20 sm:pt-32 sm:pb-24">
             <h1 className="font-display max-w-3xl text-5xl font-bold tracking-tight text-balance sm:text-7xl">
-              React, compiled to VanillaJS
+              React components, compiled to DOM
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-8 text-zinc-400">
-              Vidact reads your function components at build time and writes the DOM code for them.
-              The component body runs once, at mount. A{' '}
-              <code className="text-zinc-200">setState</code> call after that reaches only the text
-              nodes and attributes that read that state.
+              Write JSX and hooks. Vidact compiles them into JavaScript that creates your DOM and
+              updates it when state changes. Components run once per mount.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link
@@ -57,7 +53,7 @@ export function HomeRoute({ loaderData }: LandingProps) {
               >
                 documented subset
               </Link>{' '}
-              of React 19 and refuses the rest at build time.
+              of React 19. Check compatibility before migrating an existing app.
             </p>
           </div>
         </section>
@@ -70,12 +66,12 @@ export function HomeRoute({ loaderData }: LandingProps) {
       <section className="mx-auto grid max-w-6xl items-center gap-12 px-6 py-20 sm:py-24 lg:grid-cols-2">
         <div>
           <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">
-            There is a framework around it
+            Routes and server rendering with Vidact Start
           </h2>
           <p className="mt-4 leading-7 text-muted-foreground">
-            Vidact Start adds file routes, server loaders, SSR, hydration, and client navigation.
-            The same compiler produces the server and the browser build, so the markup the server
-            sends and the DOM the client hydrates come from one description of the component.
+            Add a route file, load its data on the server, and render it with a component. Vidact
+            Start handles routing, server rendering, hydration, and client navigation. Shared
+            layouts keep their state when you move between pages.
           </p>
           <Link
             className="decoration-muted-foreground/60 mt-6 inline-flex items-center gap-2 font-medium underline underline-offset-4 hover:decoration-current"
@@ -172,12 +168,12 @@ function Measurements() {
           <Measurement
             label="A counter app, runtime included"
             note="tests/runtime-size/fixtures/counter.tsx"
-            value="8.0 kB"
+            value="8.1 kB"
           />
           <Measurement
             label="TodoMVC, runtime included"
             note="examples/todomvc/src/TodoApp.tsx"
-            value="11.8 kB"
+            value="11.9 kB"
           />
           <Measurement
             label="Component calls after mount"
@@ -186,7 +182,8 @@ function Measurements() {
           />
         </div>
         <p className="mt-10 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Bundle sizes are gzipped
+          Gzipped production bundles, including the Vidact runtime, measured September 6, 2026.
+          Reproduce with <code>pnpm size</code> after building the repository packages.
         </p>
       </div>
     </section>
@@ -217,19 +214,20 @@ function Limits() {
       <div className="mx-auto grid max-w-6xl gap-12 px-6 py-20 sm:py-24 lg:grid-cols-2">
         <div>
           <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">
-            What it refuses
+            Check your React dependencies
           </h2>
           <p className="mt-4 leading-7 text-muted-foreground">
-            Class components, <code>createRef</code>, most of the <code>Children</code> helpers, and
-            React DevTools are outside the subset. So is any third-party package that ships
-            precompiled against React's runtime rather than React-shaped source.
+            Vidact supports function components and hooks, with some differences from React. Class
+            components, <code>createRef</code>, and most <code>Children</code> helpers are
+            unsupported. React DevTools cannot inspect the compiled app.
           </p>
           <p className="mt-4 leading-7 text-muted-foreground">
-            None of that degrades quietly. The compiler stops the build at the line that caused it
-            and names the API, and there is no fallback path that loads React instead.
+            The Vite plugin also compiles eligible dependencies, including published JSX-runtime
+            calls. Support depends on the code a package uses. The compatibility reference lists the
+            supported APIs and the library interactions covered by tests.
           </p>
           <ButtonLink className="mt-6" href="/docs/reference/react-compatibility" variant="outline">
-            See every API and its status <ArrowIcon className="size-4" />
+            Check compatibility <ArrowIcon className="size-4" />
           </ButtonLink>
         </div>
         <div className="self-start overflow-hidden rounded-xl border border-white/10 bg-zinc-950">
@@ -267,10 +265,10 @@ function Examples({ data }: { readonly data: LandingData }) {
       className="mx-auto max-w-6xl px-6 pt-16 pb-20 sm:pt-20 sm:pb-24"
     >
       <h2 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">
-        Four things, running here
+        Try the compiled components
       </h2>
       <p className="mt-3 max-w-2xl text-muted-foreground">
-        Every example below is ordinary React, compiled by Vidact and mounted into this page.
+        Edit a field, reorder a list, or update the counter. These examples run on Vidact.
       </p>
       <div className="mt-8 flex gap-1 border-b" role="tablist">
         {EXAMPLES.map((example) => (
@@ -330,7 +328,7 @@ function ExamplePanel({ data, tab }: { readonly data: LandingData; readonly tab:
     case 'list':
       return (
         <ExampleWindow
-          caption="Tick a row, then reverse. The row moves with its checkbox, and nothing is rebuilt."
+          caption="Check a row, then reverse the list. The same DOM node moves with its checkbox state."
           filename="Engines.tsx"
           lines={data.list}
         >
@@ -350,7 +348,7 @@ function ExamplePanel({ data, tab }: { readonly data: LandingData; readonly tab:
     default:
       return (
         <ExampleWindow
-          caption="Counted live by a MutationObserver watching this demo."
+          caption="Click Increment to see the DOM mutation count, measured with MutationObserver."
           filename="Counter.tsx"
           lines={data.counter}
         >
@@ -521,6 +519,7 @@ function GreetingDemo() {
   return (
     <form className="flex max-w-sm flex-col gap-3" onSubmit={(event) => event.preventDefault()}>
       <input
+        aria-label="Your name"
         className="h-9 rounded-md border bg-background px-3 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
         placeholder="Your name"
         value={name}

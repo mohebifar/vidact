@@ -33,6 +33,6 @@ describe('docs Vite development server', () => {
     const html = await response.text()
 
     expect(response.status).toBe(200)
-    expect(html).toContain('Why Vidact?')
+    expect(html).toContain('How updates work')
   }, 30_000)
 })

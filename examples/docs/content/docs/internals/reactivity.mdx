@@ -1,10 +1,10 @@
 ---
 title: Static reactivity
-description: How a state write turns into exactly the right DOM updates without runtime dependency tracking.
+description: How declared source dependencies determine which updaters run after a state change.
 group: Under the hood
 ---
 
-Vidact is reactive in the sense that changing a value updates the UI that depends on it. It is *statically* reactive because the dependency graph is computed by the compiler and shipped as data, rather than discovered while the program runs.
+The compiler identifies which values each updater reads and writes. Runtime helpers declare their dependencies through the same source masks. Vidact uses these declarations to schedule work without observing property reads while your code executes.
 
 ## Sources and updaters
 
@@ -20,11 +20,11 @@ An updater is a unit of work with a static list of the sources it reads and the 
 - **Prop**: pass a new value to a child component. Writes the child's prop source.
 - **Effect**: schedule a `useEffect` or `useLayoutEffect` callback for the commit phase.
 
-The compiler orders updaters topologically, so any updater that writes a source runs before the updaters that read it. A cycle, or two updaters writing the same source, is a compile error.
+The compiler topologically orders the updaters it emits and rejects cycles or multiple writers in that graph. Runtime helpers can register additional updaters during construction. The runtime combines their declared dependencies with the compiler's graph, placing producers before consumers and caching the resulting order until registrations change.
 
 ## Masks
 
-Reads and writes are stored as bit masks over source IDs. When a source changes, the runtime ORs its bit into a dirty mask, then walks the updater list once, running each updater whose read mask intersects the dirty mask and folding its write mask back in. The walk is linear and allocation-free.
+Reads and writes are stored as bit masks over source IDs. When a source changes, the runtime adds its bit to a dirty mask. During a flush it checks updaters in the cached order and runs those whose read masks intersect the dirty mask. Derived writes can make downstream updaters eligible in the same pass. Further invalidations can require another pass, bounded by a stabilization limit.
 
 Masks are not limited to 32 sources; the compiler widens them as needed.
 
@@ -50,22 +50,20 @@ const count = results.length
 8. Updater "reconcile list" reads `results`: runs, moving, inserting, and removing `<li>` rows by key.
 9. Effects scheduled during the flush run in their commit phase.
 
-Nothing else in the component was visited. There was no diff and no allocation of a virtual tree.
-
 ## Batching
 
-Writes inside a compiled event handler are collected and flushed once when the handler returns. Writes from elsewhere, such as after an `await`, are flushed on the next microtask. Within a flush, each updater runs at most once, no matter how many of its sources changed.
+Writes inside a compiled event handler are collected and flushed when the handler returns. Writes from elsewhere, such as after an `await`, are flushed on the next microtask. Multiple dirty sources can be handled by one updater execution per pass; follow-up writes may schedule another pass.
 
 The synchronous core has exactly one priority. Transitions and deferred values, when enabled through the `concurrent` feature, add an interruptible lane on top of it.
 
 ## Derived values versus effects
 
-Because derivations are ordinary updaters, `const doubled = count * 2` is reactive with no hook. This is why `useMemo` is not a performance tool in Vidact: the memoization it would provide is the default behaviour of every expression. Effects are different in kind: they run after the DOM is committed and exist for side effects the compiler cannot express as a DOM write.
+The compiler turns `const doubled = count * 2` into a derived updater when needed. `useMemo` is not required to make it reactive, though memoization hooks still preserve observable identity. Effects run in their commit phases and handle work such as subscriptions, timers, and browser APIs.
 
-## Why no runtime tracking?
+## Declared dependencies
 
-Runtime dependency tracking, as in signal-based frameworks, discovers the same graph by observing reads while a computation runs. It is flexible, but every read pays for a subscription check, and every computation pays to record its dependencies. Static masks cost a bitwise AND per updater per flush and nothing per read. The trade is that the graph must be knowable at compile time, which is what the supported React subset guarantees.
+Vidact can schedule an updater only from its declared reads and writes. It cannot infer a missing dependency by inspecting the callback at runtime. This keeps property reads free of tracking hooks, but requires code the compiler can analyze and accurate masks from runtime helpers.
 
-## Failing loudly
+## Update cycles
 
-Two situations cannot be resolved statically and are rejected at compile time: an updater cycle, and two writers for one source. One situation cannot be detected statically and is bounded at runtime: an effect or subscription that keeps writing a source it depends on. The runtime stops after a fixed number of passes and throws, rather than freezing the tab.
+Cycles in runtime-composed graphs use stable registration order. Effects and subscriptions can also cause repeated writes. If the work does not stabilize within the runtime's pass limit, Vidact throws an error. Check for a callback that repeatedly writes a value it depends on.

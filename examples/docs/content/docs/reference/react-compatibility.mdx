@@ -108,4 +108,6 @@ Vidact compiles a subset of React 19. This page summarizes what is in that subse
 
 ## Third-party packages
 
-A source-published package is eligible for Vidact compilation when its reachable code stays inside this subset. The Vite plugin qualifies such packages automatically when their `package.json` declares React. Qualification is not a package-wide support claim: compilation, SSR, browser behavior, DOM ownership, and typing require separate evidence. Packages that are precompiled against React's runtime, or that depend on rejected APIs, fail at build time.
+A package is eligible for Vidact compilation when its reachable code stays inside this subset. The Vite plugin detects React dependencies from package metadata and recognizes both JSX and published `react/jsx-runtime` calls. Packages that depend on rejected APIs or React internals fail at build time.
+
+Successful compilation does not certify an entire package. The browser corpus exercises selected `@base-ui/react` button, switch, and accordion interactions. Other components and combinations need their own tests, including hydration and keyboard behavior. Run the paths your application uses against the package versions you intend to ship.

@@ -14,7 +14,7 @@ describe('Vidact documentation site', () => {
     const html = await response.text()
 
     expect(response.status).toBe(200)
-    expect(html).toContain('Why Vidact?')
+    expect(html).toContain('How updates work')
     expect(html).toContain('Vidact is in beta')
     expect(html).toContain('vidact-start-snapshot')
     expect(html).toContain('Quick start')

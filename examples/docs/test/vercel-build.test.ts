@@ -76,7 +76,7 @@ it('builds a portable Vercel function for page routes alongside public client as
     expect(landing.body).toContain('<!doctype html>')
     expect(landing.body).toContain('/assets/client.js')
     expect(overview.status).toBe(200)
-    expect(overview.body).toContain('Why Vidact?')
+    expect(overview.body).toContain('How updates work')
     expect(reference.status).toBe(200)
     expect(reference.body).toContain('How to read the tables')
     expect(navigation.status).toBe(200)

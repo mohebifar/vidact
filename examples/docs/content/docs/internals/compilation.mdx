@@ -4,7 +4,7 @@ description: Follow a component from TSX through analysis to the direct DOM code
 group: Under the hood
 ---
 
-You do not need this page to use Vidact. It is here for the curious, and for anyone who wants to predict what the compiler will do with a piece of code.
+This page follows a component from parsed TSX through dependency analysis to generated JavaScript.
 
 ## The pipeline
 
@@ -49,7 +49,7 @@ Generation emits code that creates the `<p>` and its three text nodes, attaches 
 
 ## What ships to the browser
 
-The compiled module imports a handful of small helpers from `@vidact/runtime`: element creation, text binding, event wrapping, state slots, and the scheduler. There is no reconciler, no element tree, no component instance objects, and no dependency-tracking proxy. A compiled counter, runtime included, is 8 kB gzipped.
+The compiled module imports helpers from `@vidact/runtime` for element creation, text bindings, event batching, state slots, ownership, and scheduling. It creates DOM directly. The runtime keeps owner records and declared dependencies rather than a virtual element tree.
 
 Feature families such as Suspense and transitions are separate entry points, so a module that does not use them never imports them.
 
@@ -69,4 +69,4 @@ The Vite plugin runs the same pipeline on packages that ship React-shaped source
 
 ## Why compile ahead of time?
 
-Frameworks that track dependencies at runtime pay for it on every read: a proxy trap, a subscription, a bookkeeping allocation. Frameworks that re-render pay for it on every write: run the function, allocate a tree, diff it. Compiling ahead of time pays once, at build time, and the browser receives a program that already knows what to do. The cost is that the compiler has to understand your code, which is why the supported subset is explicit and why unsupported code is a build error rather than a slow path.
+Build-time analysis lets Vidact emit bindings tied to known source values. The runtime still handles scheduling, ownership, and DOM publication, but it does not need to re-run the component to discover its next output. This requires code the compiler can analyze, which limits the supported React subset.

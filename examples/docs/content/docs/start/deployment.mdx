@@ -74,7 +74,9 @@ export default defineConfig({
 
 ## Serving
 
-`dist/server/start.js` listens on `PORT` (default `4173`) and serves `dist/client` as static files through the middleware in `src/start.ts`. In front of it you can put any reverse proxy or CDN. Static assets under `/assets` are safe to cache aggressively; HTML responses should not be cached unless your loaders are pure.
+`dist/server/start.js` listens on `PORT` (default `4173`) and serves `dist/client` as static files through the middleware in `src/start.ts`. You can put a reverse proxy or CDN in front of it. The fixed asset names in this guide require revalidation on each request. Use long-lived immutable caching only for content-hashed filenames.
+
+HTML and navigation snapshots may contain user-specific loader data. Keep them out of shared caches unless you have configured an appropriate cache key and policy. Start sends `Vary: x-vidact-start-navigation` because a page URL can return either HTML or a navigation snapshot.
 
 If you would rather serve static files from a CDN or a different host, drop the static middleware and point `clientEntry` and your stylesheet link at the CDN URL.
 
