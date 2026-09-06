@@ -70,7 +70,7 @@ const files: StaticSource<{ pageData: ContentPageData; metaData: MetaData }>['fi
   ]),
 ]
 
-const source = loader({
+export const source = loader({
   baseUrl: '/docs',
   source: { files },
 })

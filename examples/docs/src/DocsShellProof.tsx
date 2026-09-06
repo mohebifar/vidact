@@ -1,5 +1,6 @@
 import { DocsLayout } from './components/docs-layout.tsx'
 import { DocsPage } from './components/docs-page.tsx'
+import { DocsSearch, SearchButton } from './components/docs-search.tsx'
 import { CounterDemo, EnginesDemo } from './routes/index.tsx'
 
 export function DocsLayoutProof() {
@@ -120,4 +121,13 @@ export function LandingCounterProof() {
 
 export function LandingEnginesProof() {
   return <EnginesDemo />
+}
+
+export function DocsSearchProof() {
+  return (
+    <>
+      <SearchButton />
+      <DocsSearch />
+    </>
+  )
 }

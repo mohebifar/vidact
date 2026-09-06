@@ -133,6 +133,43 @@
 }
 
 @layer components {
+  .search-trigger {
+    @apply inline-flex h-9 items-center gap-2 rounded-md border border-current/20 px-2.5 text-sm transition-colors hover:bg-current/5 focus-visible:outline-2 focus-visible:outline-offset-2;
+  }
+
+  .search-trigger kbd {
+    @apply ml-5 rounded border border-current/20 px-1.5 py-0.5 font-mono text-[11px];
+  }
+
+  .docs-search-dialog {
+    @apply fixed inset-x-0 top-[12vh] m-0 mx-auto w-[calc(100%-2rem)] max-w-xl overflow-hidden rounded-xl border bg-background p-0 text-foreground shadow-2xl;
+  }
+
+  .docs-search-dialog::backdrop {
+    background: rgb(0 0 0 / 50%);
+    backdrop-filter: blur(3px);
+  }
+
+  .search-close {
+    @apply rounded border px-2 py-1 text-xs text-muted-foreground hover:bg-accent focus-visible:outline-2;
+  }
+
+  .search-result {
+    @apply block rounded-lg px-3 py-2.5 break-words hover:bg-accent;
+  }
+
+  .search-result[aria-selected='true'] {
+    @apply bg-accent;
+  }
+
+  .search-suggestion {
+    @apply flex flex-wrap items-center justify-between gap-x-4 rounded-md px-2 py-3 text-sm hover:bg-accent focus-visible:outline-2;
+  }
+
+  .search-suggestion span {
+    @apply text-xs text-muted-foreground;
+  }
+
   .docs-prose h2 {
     @apply scroll-m-24 text-2xl font-semibold tracking-tight;
   }

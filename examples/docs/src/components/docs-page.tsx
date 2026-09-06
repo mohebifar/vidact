@@ -34,7 +34,11 @@ export function DocsPage({ page }: DocsPageProps) {
 
         <div className="docs-prose space-y-10">
           {page.sections.map((section) => (
-            <section id={section.id === '' ? undefined : section.id} key={section.id}>
+            <section
+              className="scroll-mt-24"
+              id={section.id === '' ? undefined : section.id}
+              key={section.id}
+            >
               {section.title === '' ? null : <h2>{section.title}</h2>}
               <div className={classes('space-y-5', section.title !== '' && 'mt-5')}>
                 {section.blocks.map((block) => (

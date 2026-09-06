@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { classes } from '@/lib/classes.ts'
 import type { NavigationGroup } from '@/lib/docs-types.ts'
 
+import { SearchButton } from './docs-search.tsx'
 import { MenuIcon, MoonIcon, SunIcon } from './icons.tsx'
 
 type DocsLayoutProps = {
@@ -73,6 +74,7 @@ export function DocsLayout({ children, navigation, requestUrl }: DocsLayoutProps
             </a>
           </nav>
           <div className="ml-auto flex items-center gap-1">
+            <SearchButton />
             <button
               aria-label="Toggle color theme"
               className="inline-flex size-9 items-center justify-center rounded-md transition-colors hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"

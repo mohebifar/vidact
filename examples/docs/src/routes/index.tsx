@@ -2,6 +2,7 @@ import type { VidactNode } from '@vidact/react-types'
 import { defineFileRoute, Link, type RouteComponentProps } from '@vidact/start'
 import { useEffect, useRef, useState } from 'react'
 
+import { SearchButton } from '@/components/docs-search.tsx'
 import { ArrowIcon } from '@/components/icons.tsx'
 import { Button, ButtonLink } from '@/components/ui/button.tsx'
 import type { DocCodeLine } from '@/lib/docs-types.ts'
@@ -145,10 +146,11 @@ function SiteHeader() {
           Vidact
         </Link>
         <nav className="ml-auto flex items-center gap-5 text-sm text-zinc-400">
+          <SearchButton />
           <Link className="hover:text-white" href="/docs">
             Docs
           </Link>
-          <Link className="hover:text-white" href="/docs/learn/thinking-in-vidact">
+          <Link className="hidden hover:text-white sm:inline" href="/docs/learn/thinking-in-vidact">
             Learn
           </Link>
           <a className="hover:text-white" href="https://github.com/mohebifar/vidact">
