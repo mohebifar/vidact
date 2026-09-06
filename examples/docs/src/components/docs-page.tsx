@@ -1,5 +1,5 @@
 import { Link } from '@vidact/start'
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 
 import { classes } from '@/lib/classes.ts'
 import type {
@@ -270,11 +270,28 @@ function CodeBlock({
   readonly lines: readonly DocCodeLine[]
   readonly title: string
 }) {
-  const [copied, setCopied] = useState(false)
-  const copy = () => {
-    void navigator.clipboard.writeText(code)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1_500)
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle')
+  const copyTask = useRef<{ version: number; timer?: number }>({ version: 0 })
+  useLayoutEffect(() => {
+    setCopyStatus('idle')
+    return () => {
+      copyTask.current.version += 1
+      window.clearTimeout(copyTask.current.timer)
+    }
+  }, [code])
+
+  const copy = async () => {
+    const version = ++copyTask.current.version
+    window.clearTimeout(copyTask.current.timer)
+    setCopyStatus('copying')
+    try {
+      await navigator.clipboard.writeText(code)
+      if (version !== copyTask.current.version) return
+      setCopyStatus('copied')
+      copyTask.current.timer = window.setTimeout(() => setCopyStatus('idle'), 1_500)
+    } catch {
+      if (version === copyTask.current.version) setCopyStatus('error')
+    }
   }
 
   return (
@@ -284,11 +301,19 @@ function CodeBlock({
           {title === '' ? language : title}
         </span>
         <button
+          aria-live="polite"
           className="ml-auto rounded px-2 py-1 text-zinc-300 transition-colors hover:bg-white/10 hover:text-white"
+          disabled={copyStatus === 'copying'}
           onClick={copy}
           type="button"
         >
-          {copied ? 'Copied' : 'Copy'}
+          {copyStatus === 'copying'
+            ? 'Copying…'
+            : copyStatus === 'copied'
+              ? 'Copied'
+              : copyStatus === 'error'
+                ? 'Copy failed · retry'
+                : 'Copy'}
         </button>
       </div>
       <pre className="overflow-x-auto p-5 text-[13px] leading-6" data-language={language}>
@@ -350,6 +375,11 @@ function TogglePreview() {
 
 function ListPreview() {
   const [items, setItems] = useState(['Compile', 'Mount', 'Update'])
+  const nextItem = useRef(4)
+  const addItem = () => {
+    const item = `Item ${nextItem.current++}`
+    setItems([...items, item])
+  }
 
   return (
     <div className="space-y-4">
@@ -357,7 +387,7 @@ function ListPreview() {
         <Button onClick={() => setItems(items.toReversed())} variant="outline">
           Reverse
         </Button>
-        <Button onClick={() => setItems([...items, `Item ${items.length + 1}`])} variant="outline">
+        <Button onClick={addItem} variant="outline">
           Add
         </Button>
         <Button onClick={() => setItems(items.slice(1))} variant="outline">
