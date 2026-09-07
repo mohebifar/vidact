@@ -33,6 +33,35 @@ export function Counter() {
     </div>);
 }`
 
+/**
+ * A readable expansion of the generated helpers and JSX lowering. This is
+ * explanatory code rather than compiler output; `compiledCounter` above is the
+ * exact output checked by the compiler regression test.
+ */
+export const readableCounter = `export function Counter() {
+  let count = 0
+
+  const root = document.createElement('div')
+  const button = document.createElement('button')
+  const output = document.createElement('output')
+  const countText = document.createTextNode('0')
+
+  button.textContent = 'Increment'
+  output.append('Count: ', countText)
+  root.append(button, output)
+
+  const updateCount = () => {
+    countText.data = String(count)
+  }
+
+  button.addEventListener('click', () => {
+    count += 1
+    updateCount()
+  })
+
+  return root
+}`
+
 export const formSource = `import { useState } from 'react'
 
 export function Greeting() {

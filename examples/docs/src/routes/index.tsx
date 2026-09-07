@@ -31,8 +31,8 @@ export function HomeRoute({ loaderData }: LandingProps) {
               Write React. Ship direct DOM.
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-8 text-zinc-400">
-              Vidact compiles function components, JSX, and hooks into DOM updates. Your component
-              runs once when it mounts.
+              Vidact compiles React-style function components and hooks into direct DOM operations.
+              Components run once when they mount.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link
@@ -58,7 +58,13 @@ export function HomeRoute({ loaderData }: LandingProps) {
         </section>
       </div>
 
+      <CompilerModel />
+
+      <CompilerDemo data={loaderData} />
+
       <Examples data={loaderData} />
+
+      <Origin />
 
       <section className="border-y bg-muted/30">
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-6 py-20 sm:py-24 lg:grid-cols-2">
@@ -67,8 +73,8 @@ export function HomeRoute({ loaderData }: LandingProps) {
               Build full-stack apps
             </h2>
             <p className="mt-4 leading-7 text-muted-foreground">
-              Vidact Start adds file routes, server loaders, SSR, hydration, and client navigation.
-              The route below loads and renders a product in one file.
+              Vidact Start applies the same compiler model to SSR and hydration, then adds file
+              routes, loaders, and client navigation. This documentation site runs on it.
             </p>
             <Link
               className="decoration-muted-foreground/60 mt-6 inline-flex items-center gap-2 font-medium underline underline-offset-4 hover:decoration-current"
@@ -163,17 +169,240 @@ function SiteHeader() {
   )
 }
 
+const REACT_PIPELINE = [
+  'State changes',
+  'Run component',
+  'Create element tree',
+  'Reconcile',
+  'Update DOM',
+] as const
+const VIDACT_PIPELINE = ['State changes', 'Run selected updater', 'Update DOM'] as const
+
+function CompilerModel() {
+  return (
+    <section className="border-b">
+      <div className="mx-auto grid max-w-6xl gap-12 px-6 py-20 sm:py-24 lg:grid-cols-[0.8fr_1.2fr]">
+        <div>
+          <p className="font-mono text-xs text-muted-foreground">What changes</p>
+          <h2 className="font-display mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+            State goes straight to the DOM
+          </h2>
+          <p className="mt-5 leading-7 text-muted-foreground">
+            The compiler works out which expressions depend on each value and writes an updater for
+            them. A state change runs that updater instead of running the component again.
+          </p>
+          <p className="mt-5 leading-7 text-muted-foreground">
+            The browser runs Vidact's small runtime. React, the Virtual DOM, the reconciler, and
+            runtime dependency tracking stay out of the bundle.
+          </p>
+        </div>
+        <div className="space-y-5 self-center">
+          <Pipeline label="React runtime" steps={REACT_PIPELINE} />
+          <Pipeline label="Vidact" signal steps={VIDACT_PIPELINE} />
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function Pipeline({
+  label,
+  signal = false,
+  steps,
+}: {
+  readonly label: string
+  readonly signal?: boolean
+  readonly steps: readonly string[]
+}) {
+  return (
+    <div
+      className={
+        signal ? 'border-signal/40 rounded-xl border bg-signal/5 p-5' : 'rounded-xl border p-5'
+      }
+    >
+      <p
+        className={
+          signal ? 'text-signal font-mono text-xs' : 'font-mono text-xs text-muted-foreground'
+        }
+      >
+        {label}
+      </p>
+      <ol className="mt-4 flex flex-wrap items-center gap-2 text-sm">
+        {steps.map((step, index) => (
+          <li className="flex items-center gap-2" key={step}>
+            <span className="rounded-md bg-muted px-2.5 py-1.5 font-medium">{step}</span>
+            {index === steps.length - 1 ? null : (
+              <span aria-hidden="true" className="text-muted-foreground">
+                →
+              </span>
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+type CompilerView = 'actual' | 'readable' | 'source'
+
+const COMPILER_VIEWS: readonly { readonly key: CompilerView; readonly label: string }[] = [
+  { key: 'source', label: 'Component' },
+  { key: 'readable', label: 'Readable output' },
+  { key: 'actual', label: 'Actual output' },
+]
+
+/** Exported for the compiled browser interaction tests. */
+export function CompilerDemo({ data }: { readonly data: LandingData }) {
+  const [view, setView] = useState<CompilerView>('readable')
+
+  return (
+    <section className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
+      <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">
+        What the compiler writes
+      </h2>
+      <p className="mt-4 max-w-2xl leading-7 text-muted-foreground">
+        The readable view expands Vidact's runtime helpers into ordinary DOM code. Switch to the
+        actual view to see the compiler output.
+      </p>
+      <div className="mt-8 overflow-hidden rounded-xl border">
+        <div
+          aria-label="Counter code view"
+          className="flex gap-1 overflow-x-auto border-b px-3 pt-2"
+          role="tablist"
+        >
+          {COMPILER_VIEWS.map((item) => (
+            <button
+              aria-controls="compiler-code"
+              aria-selected={view === item.key}
+              className={
+                view === item.key
+                  ? '-mb-px border-b-2 border-foreground px-3 py-2 text-sm font-medium'
+                  : '-mb-px border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:text-foreground'
+              }
+              id={`compiler-tab-${item.key}`}
+              key={item.key}
+              onClick={() => setView(item.key)}
+              role="tab"
+              type="button"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <div className="grid lg:grid-cols-[1.15fr_0.85fr]">
+          <div
+            aria-label="Selected compiler code"
+            className="min-w-0 border-b bg-zinc-950 lg:border-r lg:border-b-0"
+            id="compiler-code"
+            role="tabpanel"
+          >
+            {view === 'source' ? (
+              <CompilerCode
+                filename="Counter.tsx"
+                lines={data.counter}
+                note="The component you write."
+              />
+            ) : null}
+            {view === 'readable' ? (
+              <CompilerCode
+                filename="Counter.js"
+                lines={data.readable}
+                note="Runtime scheduling and cleanup are omitted for readability."
+              />
+            ) : null}
+            {view === 'actual' ? (
+              <CompilerCode
+                filename="Counter.compiled.tsx"
+                lines={data.compiled}
+                note="Exact output from @vidact/compiler."
+              />
+            ) : null}
+          </div>
+          <div className="flex flex-col bg-background">
+            <div className="border-b px-5 py-2.5 font-mono text-xs text-muted-foreground">
+              Running result
+            </div>
+            <div className="grow p-6 sm:p-8">
+              <CounterDemo />
+            </div>
+            <p className="border-t px-5 py-3 text-xs text-muted-foreground">
+              Increment updates the existing text node.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function CompilerCode({
+  filename,
+  lines,
+  note,
+}: {
+  readonly filename: string
+  readonly lines: readonly DocCodeLine[]
+  readonly note: string
+}) {
+  return (
+    <>
+      <CodePane filename={filename} lines={lines} />
+      <p className="border-t border-white/10 px-5 py-3 text-xs text-zinc-400">{note}</p>
+    </>
+  )
+}
+
+function Origin() {
+  return (
+    <section className="border-t bg-muted/30">
+      <div className="mx-auto grid max-w-6xl gap-12 px-6 py-20 sm:py-24 lg:grid-cols-2">
+        <div>
+          <p className="font-mono text-xs text-muted-foreground">Why now</p>
+          <h2 className="font-display mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+            I came back to a six-year-old experiment
+          </h2>
+          <p className="mt-5 leading-7 text-muted-foreground">
+            I started Vidact in 2020, then put it aside. Work on{' '}
+            <a className="underline underline-offset-4" href="https://grep.codemod.com">
+              grep.codemod.com
+            </a>{' '}
+            gave me a reason to rebuild it with React Compiler's analysis doing much of the heavy
+            lifting.
+          </p>
+        </div>
+        <div className="self-end border-t pt-5">
+          <h3 className="font-display text-xl font-semibold">What Vidact reuses</h3>
+          <p className="mt-4 leading-7 text-muted-foreground">
+            The compiler is written in Rust and uses React Compiler's analysis infrastructure for
+            AST, scope, HIR, CFG, SSA, and dependency information. Vidact has its own IR, DOM code
+            generator, and runtime.
+          </p>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function Limits() {
   return (
     <section>
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-8 px-6 py-16 sm:py-20">
         <div className="max-w-2xl">
           <h2 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">
-            Bringing an existing React app?
+            Unsupported React stays a compile error
           </h2>
           <p className="mt-4 leading-7 text-muted-foreground">
-            Vidact supports a growing subset of React 19. Check the APIs and libraries your app uses
-            before you migrate.
+            Unsupported code fails at build time. Vidact never responds by shipping React or
+            switching to a slower renderer, which makes it a deliberate subset of React today.
+          </p>
+          <p className="mt-4 text-sm text-muted-foreground">
+            Found a React pattern that should compile?{' '}
+            <a
+              className="text-foreground underline underline-offset-4"
+              href="https://github.com/mohebifar/vidact/issues"
+            >
+              Open an issue.
+            </a>
           </p>
         </div>
         <ButtonLink href="/docs/reference/react-compatibility" variant="outline">
@@ -184,26 +413,27 @@ function Limits() {
   )
 }
 
-type ExampleKey = 'branches' | 'counter' | 'form' | 'list'
+type ExampleKey = 'branches' | 'form' | 'list'
 
 const EXAMPLES: readonly { readonly key: ExampleKey; readonly label: string }[] = [
-  { key: 'counter', label: 'Counter' },
   { key: 'form', label: 'Form' },
   { key: 'list', label: 'Keyed list' },
   { key: 'branches', label: 'Branches' },
 ]
 
 function Examples({ data }: { readonly data: LandingData }) {
-  const [tab, setTab] = useState<ExampleKey>('counter')
+  const [tab, setTab] = useState<ExampleKey>('form')
 
   return (
     <section
       aria-label="Live compiled examples"
       className="mx-auto max-w-6xl px-6 pt-16 pb-20 sm:pt-20 sm:pb-24"
     >
-      <h2 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">See it run</h2>
+      <h2 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">
+        More compiled behavior
+      </h2>
       <p className="mt-3 max-w-2xl text-muted-foreground">
-        The code on the left is running on the right. Try the controls.
+        Forms, keyed lists, and conditional branches use the same update model.
       </p>
       <div className="mt-8 flex gap-1 border-b" role="tablist">
         {EXAMPLES.map((example) => (
@@ -250,16 +480,6 @@ function TabButton({
 
 function ExamplePanel({ data, tab }: { readonly data: LandingData; readonly tab: ExampleKey }) {
   switch (tab) {
-    case 'form':
-      return (
-        <ExampleWindow
-          caption="Typing updates the existing greeting."
-          filename="Greeting.tsx"
-          lines={data.form}
-        >
-          <GreetingDemo />
-        </ExampleWindow>
-      )
     case 'list':
       return (
         <ExampleWindow
@@ -283,11 +503,11 @@ function ExamplePanel({ data, tab }: { readonly data: LandingData; readonly tab:
     default:
       return (
         <ExampleWindow
-          caption="Increment updates the existing text node."
-          filename="Counter.tsx"
-          lines={data.counter}
+          caption="Typing updates the existing greeting."
+          filename="Greeting.tsx"
+          lines={data.form}
         >
-          <CounterDemo />
+          <GreetingDemo />
         </ExampleWindow>
       )
   }

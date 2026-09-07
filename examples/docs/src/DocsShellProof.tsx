@@ -1,7 +1,8 @@
 import { DocsLayout } from './components/docs-layout.tsx'
 import { DocsPage } from './components/docs-page.tsx'
 import { DocsSearch, SearchButton } from './components/docs-search.tsx'
-import { CounterDemo, EnginesDemo } from './routes/index.tsx'
+import type { DocCodeLine } from './lib/docs-types.ts'
+import { CompilerDemo, CounterDemo, EnginesDemo } from './routes/index.tsx'
 
 export function DocsLayoutProof() {
   return (
@@ -135,6 +136,26 @@ export function LandingCounterProof() {
 
 export function LandingEnginesProof() {
   return <EnginesDemo />
+}
+
+const compilerLine = (key: string, content: string): readonly DocCodeLine[] => [
+  { key, tokens: [{ key: `${key}-token`, color: '#fff', content }] },
+]
+
+export function LandingCompilerProof() {
+  return (
+    <CompilerDemo
+      data={{
+        branch: [],
+        compiled: compilerLine('compiled', 'createCompiledState(scope, 1, 0)'),
+        counter: compilerLine('counter', 'const [count] = useState(0)'),
+        form: [],
+        list: [],
+        readable: compilerLine('readable', "document.createElement('button')"),
+        route: [],
+      }}
+    />
+  )
 }
 
 export function DocsSearchProof() {

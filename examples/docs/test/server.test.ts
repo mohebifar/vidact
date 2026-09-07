@@ -20,6 +20,17 @@ describe('Vidact documentation site', () => {
     expect(html).toContain('Quick start')
   })
 
+  it('shows a readable expansion of the landing counter compiler output', async () => {
+    const response = await handler(new Request('https://example.test/'))
+    const html = await response.text()
+
+    expect(response.status).toBe(200)
+    expect(html).toContain('What the compiler writes')
+    expect(html).toContain('Readable output')
+    expect(html).toContain('createElement')
+    expect(html).toContain('Runtime scheduling and cleanup are omitted for readability.')
+  })
+
   it('server-renders nested tutorial and reference documents', async () => {
     const response = await handler(
       new Request('https://example.test/docs/reference/react-compatibility'),

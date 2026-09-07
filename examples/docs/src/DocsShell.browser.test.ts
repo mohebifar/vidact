@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   DocsLayoutProof,
   DocsPageProof,
+  LandingCompilerProof,
   LandingCounterProof,
   LandingEnginesProof,
 } from './DocsShellProof.tsx'
@@ -20,6 +21,35 @@ afterEach(() => {
 })
 
 describe('Vidact-native documentation controls', () => {
+  it('switches compiler views without resetting the running counter', async () => {
+    const host = await mount(LandingCompilerProof)
+    const output = host.querySelector<HTMLOutputElement>('output')!
+    const increment = [...host.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Increment',
+    )!
+
+    increment.click()
+    expect(output.textContent).toBe('Count: 1')
+    expect(host.querySelector('#compiler-code pre')!.textContent).toContain(
+      "document.createElement('button')",
+    )
+
+    const component = [...host.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Component',
+    )!
+    await captureMutations(host, () => component.click())
+    expect(host.querySelector('#compiler-code pre')!.textContent).toContain('useState(0)')
+    expect(host.querySelector('output')).toBe(output)
+    expect(output.textContent).toBe('Count: 1')
+
+    const actual = [...host.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Actual output',
+    )!
+    await captureMutations(host, () => actual.click())
+    expect(host.querySelector('#compiler-code pre')!.textContent).toContain('createCompiledState')
+    expect(actual.getAttribute('aria-selected')).toBe('true')
+  })
+
   it('reports clipboard success only after writing and allows a failed write to be retried', async () => {
     const write = vi.spyOn(navigator.clipboard, 'writeText')
     const pending = Promise.withResolvers<void>()
