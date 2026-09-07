@@ -1,5 +1,15 @@
 # @vidact/vite
 
+## 0.2.0-beta.7
+
+### Patch Changes
+
+- 9581420: Bound the compilation cache to one source revision per module configuration.
+- Updated dependencies [ed60a1c]
+- Updated dependencies [977b90f]
+  - @vidact/runtime@0.2.0-beta.7
+  - @vidact/compiler@0.2.0-beta.7
+
 ## 0.2.0-beta.6
 
 ### Patch Changes

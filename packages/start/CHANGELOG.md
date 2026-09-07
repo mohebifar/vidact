@@ -1,5 +1,19 @@
 # @vidact/start
 
+## 0.2.0-beta.7
+
+### Patch Changes
+
+- 5d2dd5d: Preserve destination fragments through successful client navigation and redirects.
+- 977b90f: Retain unchanged Start route owners and update their loader, parameter, URL, and child props during client navigation.
+- d35d98f: Stream the Start document shell before pending application resources and support streaming custom document shells.
+- 8ce4ca8: Separate cached document and client-navigation responses with a Vary header.
+- Updated dependencies [ed60a1c]
+- Updated dependencies [977b90f]
+- Updated dependencies [9581420]
+  - @vidact/runtime@0.2.0-beta.7
+  - @vidact/vite@0.2.0-beta.7
+
 ## 0.2.0-beta.6
 
 ### Patch Changes
