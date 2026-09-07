@@ -4,7 +4,7 @@ description: Who owns each piece of DOM, when it is created and disposed, and wh
 group: Under the hood
 ---
 
-Without a virtual tree to diff, Vidact needs a different answer to the question "what happens to this DOM when things change?" The answer is ownership: every dynamic region of the page has exactly one owner, and the owner's identity decides whether the region is kept, updated, or thrown away.
+Owners track the DOM, state, and cleanup work associated with a component or dynamic region. An update either preserves that owner or disposes it, depending on the region's identity.
 
 ## Owners
 
@@ -44,7 +44,7 @@ Concretely:
 - Reordering a keyed list moves owners; it disposes none of them.
 - Reordering an unkeyed list keeps owners by position and updates their props, so a row's state may end up attached to a different item.
 
-These are the same rules React applies during reconciliation. Vidact reaches them from the compiled ownership tree instead.
+These rules depend on Vidact's compiled ownership boundaries. In particular, two branches can own separate component instances even when both use the same component type.
 
 ## Ranges
 
@@ -52,13 +52,13 @@ A component or branch may own several top-level nodes, or none. Vidact tracks ea
 
 ## Disposal order and safety
 
-Disposal is depth-first: children are disposed before their parent's own cleanup runs, so a parent's effect cleanup can still see child DOM if it needs to. Writing state that belongs to a disposed owner is an error ("cannot update state after disposal" in development, `V012` in production). A late `setState` from a resolved promise or a leftover timer means a cleanup is missing, so Vidact reports it instead of silently dropping the write; cancel timers and subscriptions in your effect cleanups.
+Disposal runs registered cleanup work and removes owned DOM. Do not depend on child DOM remaining attached during a parent's cleanup. Writing state that belongs to a disposed owner is an error ("cannot update state after disposal" in development, `V012` in production). Cancel timers and subscriptions, and ignore late asynchronous results after cleanup.
 
-When a batch fails partway through, the owners it created are disposed and the DOM writes it made are rolled back before the error is routed to a boundary. The page is never left with half of an update applied.
+Vidact stages construction and supported DOM writes before publication. If computation fails, staged owners are disposed; supported publication operations have rollback behavior. This does not undo arbitrary side effects in your callbacks or restore a state value already written. Use error boundaries and test the failure paths your application relies on.
 
 ## Roots
 
-A root is the owner with no parent. It records the error callbacks and `useId` prefix for everything below it. `createRoot(...).replace(nextApp)` constructs the next application's owner first and disposes the previous one after, so the host element is never briefly empty. Hot module replacement and Vidact Start navigation both use this mechanism.
+A root is the owner with no parent. It records the error callbacks and `useId` prefix for everything below it. `createRoot(...).replace(nextApp)` constructs the next application's owner before disposing the previous one. Hot module replacement uses root replacement. Vidact Start navigation retains shared route owners and replaces only the changed route suffix.
 
 ## What this means for your code
 

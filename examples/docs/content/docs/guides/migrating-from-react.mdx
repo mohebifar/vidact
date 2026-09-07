@@ -4,7 +4,7 @@ description: What to change, what to leave alone, and what to watch for when mov
 group: Guides
 ---
 
-Most modern React code compiles under Vidact without edits. This guide is about the parts that do not, and about the handful of runtime differences that can surprise you even when the code compiles.
+Start with one route or component and run its tests under Vidact. Function components, JSX, and many hooks carry over, but compatibility depends on the forms your code and dependencies use. This guide covers toolchain changes and runtime differences to check during migration.
 
 ## Step 1: Swap the toolchain
 
@@ -80,7 +80,7 @@ The error message names the flag.
 
 ## Step 7: Deal with dependencies
 
-Vidact compiles your application code. It also compiles packages that ship React-shaped **source**, such as many headless UI libraries, when their package metadata declares React and their code stays inside the supported subset. Precompiled packages that import React internals, or component libraries that depend on `React.Children` and `cloneElement`, will not work and are reported at build time.
+Vidact compiles eligible dependencies as well as application code. The Vite plugin recognizes JSX and published `react/jsx-runtime` calls in packages that declare React. Packages must still stay within the supported subset: React internals and rejected APIs cause build errors. `cloneElement` and `Children.toArray` have bounded support for compiled values; they do not provide an arbitrary React element tree.
 
 For a package that ships compatible source but lacks React metadata, add it with the `includeDependencies` option. See [@vidact/vite](/docs/reference/vite).
 
@@ -88,7 +88,7 @@ For a package that ships compatible source but lacks React metadata, add it with
 
 These will not produce errors. Know about them before you ship.
 
-**No re-renders.** `memo`, `useMemo`, and `useCallback` are accepted but do nothing for performance. A component that relied on re-rendering to recompute something in its body will recompute only if the compiler sees the dependency in an expression. Effects and derived expressions are the reliable tools.
+**Components run once per mount.** The compiler updates derived expressions when it can trace their dependencies. `memo` does not skip component calls, while `useMemo` and `useCallback` preserve identity where observable. Use effects for work that must respond to changes, and measure expensive calculations before optimizing them.
 
 **Synchronous updates by default.** Without `concurrent`, every update is applied synchronously and atomically at the end of the event. There is no time slicing.
 

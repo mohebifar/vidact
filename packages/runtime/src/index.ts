@@ -71,6 +71,7 @@ export { createRef, useRef, type MutableRef } from './ref.ts'
 export {
   cloneRenderable,
   cloneRenderableComponent,
+  createComponentRenderable,
   createReactElement,
   createReactElement as createElement,
   createRenderable,

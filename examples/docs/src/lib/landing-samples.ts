@@ -100,9 +100,3 @@ export const Route = defineFileRoute({
   loader,
   component: ProductRoute,
 })`
-
-/** Verbatim compiler output for a class component and a misspelled event prop. */
-export const rejectionOutput = [
-  'src/Clock.tsx:3:28: UnsupportedSyntax: React class components are unsupported; use a function component and Vidact errorBoundary',
-  'src/Toggle.tsx:5:18: UnsupportedSyntax: unsupported React event prop onWiggle; use a supported React 19 event name',
-] as const

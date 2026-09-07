@@ -1,6 +1,6 @@
 import { mountCompiled, type CompiledComponentResult } from '@vidact/runtime'
 import { captureMutations } from '@vidact/test-support'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   DocsLayoutProof,
@@ -16,9 +16,53 @@ afterEach(() => {
   dispose = undefined
   document.body.replaceChildren()
   document.documentElement.classList.remove('dark')
+  vi.restoreAllMocks()
 })
 
 describe('Vidact-native documentation controls', () => {
+  it('reports clipboard success only after writing and allows a failed write to be retried', async () => {
+    const write = vi.spyOn(navigator.clipboard, 'writeText')
+    const pending = Promise.withResolvers<void>()
+    write.mockReturnValueOnce(pending.promise).mockResolvedValueOnce()
+    const host = await mount(DocsPageProof)
+    const copy = [...host.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Copy',
+    )!
+
+    copy.click()
+    expect(copy.textContent).toBe('Copying…')
+    expect(copy.disabled).toBe(true)
+    pending.reject(new Error('Clipboard permission denied'))
+    await expect.poll(() => copy.textContent).toBe('Copy failed · retry')
+    expect(copy.disabled).toBe(false)
+
+    copy.click()
+    await expect.poll(() => copy.textContent).toBe('Copied')
+    expect(write).toHaveBeenCalledTimes(2)
+    expect(write).toHaveBeenLastCalledWith('const count = 0')
+    expect(host.contains(copy)).toBe(true)
+  })
+
+  it('keeps docs preview keys unique after adding, removing, and reordering rows', async () => {
+    const host = await mount(DocsPageProof)
+    const list = host.querySelector<HTMLUListElement>('[data-testid="docs-list"]')!
+    const retained = [...list.querySelectorAll('li')].slice(1)
+    const button = (label: string) =>
+      [...host.querySelectorAll('button')].find((item) => item.textContent === label)!
+
+    await captureMutations(host, () => button('Add').click())
+    await captureMutations(host, () => button('Remove first').click())
+    await captureMutations(host, () => button('Add').click())
+    const rows = [...list.querySelectorAll('li')]
+    expect(rows.map((row) => row.textContent)).toEqual(['Mount', 'Update', 'Item 4', 'Item 5'])
+    expect(rows[0]).toBe(retained[0])
+    expect(rows[1]).toBe(retained[1])
+
+    await captureMutations(host, () => button('Reverse').click())
+    const reversed = [...list.querySelectorAll('li')]
+    rows.toReversed().forEach((row, index) => expect(reversed[index]).toBe(row))
+  })
+
   it('renders every documentation block type on the client', async () => {
     const host = await mount(DocsPageProof)
 

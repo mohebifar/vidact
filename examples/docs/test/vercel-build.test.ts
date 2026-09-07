@@ -61,6 +61,8 @@ it('builds a portable Vercel function for page routes alongside public client as
               ['/docs/getting-started/quick-start', { headers: { 'x-vidact-start-navigation': '1' } }],
               ['/docs/not-a-page', {}],
               ['/docs', { method: 'HEAD' }],
+              ['/api/search?query=useState', {}],
+              ['/api/docs?path=/docs/learn/state', {}],
             ]) {
               const response = await handler.fetch(new Request(origin + path, options));
               responses.push({ status: response.status, type: response.headers.get('content-type'), body: await response.text() });
@@ -71,12 +73,13 @@ it('builds a portable Vercel function for page routes alongside public client as
       ],
       { cwd: temporary },
     )
-    const [landing, overview, reference, navigation, missing, head] = JSON.parse(stdout)
+    const [landing, overview, reference, navigation, missing, head, search, document] =
+      JSON.parse(stdout)
     expect(landing.status).toBe(200)
     expect(landing.body).toContain('<!doctype html>')
     expect(landing.body).toContain('/assets/client.js')
     expect(overview.status).toBe(200)
-    expect(overview.body).toContain('Why Vidact?')
+    expect(overview.body).toContain('How updates work')
     expect(reference.status).toBe(200)
     expect(reference.body).toContain('How to read the tables')
     expect(navigation.status).toBe(200)
@@ -86,6 +89,14 @@ it('builds a portable Vercel function for page routes alongside public client as
     expect(missing.status).toBe(404)
     expect(head.status).toBe(200)
     expect(head.body).toBe('')
+    expect(search.status).toBe(200)
+    expect(
+      JSON.parse(search.body).some((result: { url: string }) =>
+        result.url.startsWith('/docs/learn/state'),
+      ),
+    ).toBe(true)
+    expect(document.status).toBe(200)
+    expect(JSON.parse(document.body).title).toBe('State')
 
     expect(await readFile(join(output, 'static/assets/client.js'), 'utf8')).not.toBe('')
     expect(await readFile(join(output, 'static/assets/style.css'), 'utf8')).not.toBe('')

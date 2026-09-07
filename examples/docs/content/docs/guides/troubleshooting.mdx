@@ -4,7 +4,7 @@ description: How to read compiler diagnostics, what the common ones mean, and ho
 group: Guides
 ---
 
-Vidact prefers a build error to a runtime surprise. When it cannot compile something, it stops and tells you where. This page explains what you will see and what to do about it.
+Compiler diagnostics include a source location, an error code, and a message. This page explains common errors and how to resolve them.
 
 ## Reading a diagnostic
 
@@ -71,7 +71,7 @@ Rendering inside `try` blocks that also `throw` or use `finally` cannot be lower
 
 ### Dependency failed to compile
 
-A package you import was compiled because it declares React, and something inside it is outside the subset. Either exclude it (`exclude` option) and replace it with a Vidact-compatible alternative, or, if the problem is only missing metadata, use `includeDependencies`. See [@vidact/vite](/docs/reference/vite).
+A package you import uses code outside the supported subset. Update or replace the affected component, or report the unsupported form with a minimal reproduction. Excluding a React component package from compilation does not make it work in Vidact. `includeDependencies` is only for compatible packages that were not detected automatically; see [@vidact/vite](/docs/reference/vite).
 
 ## Runtime errors
 

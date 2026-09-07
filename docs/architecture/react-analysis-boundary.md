@@ -44,7 +44,7 @@ Vidact must not:
 - expose React Compiler HIR types from public Vidact crates;
 - invoke React Compiler's memoization code generator;
 - depend on React's runtime cache protocol;
-- rediscover the dependency graph in the browser.
+- discover dependencies by observing browser-time reads or executing user code.
 
 ## Updaters, not signals
 
@@ -55,12 +55,15 @@ idea rather than a signal graph.
 - Reads are ordinary JavaScript reads and register no subscribers.
 - A setter invalidates its source mask.
 - Each generated updater declares static `reads` and optional derived `writes`.
-- The compiler emits updaters in topological execution order.
+- The compiler emits its statically known updaters in topological execution
+  order. Runtime-owned capabilities may register additional updaters; the scope
+  composes their declared masks into a cached order as described in
+  [Static updater ordering boundary](static-updater-ordering-boundary.md).
 - A component scope batches dirty masks and executes only intersecting updaters.
 
-This resembles fine-grained reactive systems in update granularity, but the
-dependency graph is a compile artifact. There are no signal objects, observers,
-or runtime tracking stacks.
+This resembles fine-grained reactive systems in update granularity, but every
+dependency edge comes from compiler or capability metadata. There are no signal
+objects, observers, or runtime tracking stacks.
 
 For common components a source mask is one number. Wider components use a
 `Uint32Array`, preserving the compact common path without imposing a 32-source

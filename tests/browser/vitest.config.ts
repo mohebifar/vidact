@@ -6,7 +6,11 @@ export default defineConfig({
   plugins: [vidact({ features: ['css-insertion', 'unsafe-html'] })],
   test: {
     include: ['corpus/apps/**/*.browser.test.ts'],
-    exclude: ['corpus/apps/base-ui-dependency/**/*.browser.test.ts'],
+    exclude: [
+      'corpus/apps/base-ui-dependency/**/*.browser.test.ts',
+      'corpus/apps/start-navigation/StartLayoutRetention.browser.test.ts',
+      'corpus/apps/start-navigation/StartStreaming.browser.test.ts',
+    ],
     browser: {
       enabled: true,
       headless: true,

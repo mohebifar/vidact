@@ -57,6 +57,30 @@ loads the same generated route modules, consumes the supplied loader results
 without rerunning loaders, reconstructs the same component chain, and claims the
 whole server root through the existing hydrate runtime.
 
+For a document `GET`, Start returns a stream split into three ordered parts. The
+first chunk contains the doctype, head, body, and open application root. The
+runtime application stream follows once its async resources settle, preserving
+its component, binding, and root markers without parsing or concatenating its
+bytes. The final chunk closes the root and emits the escaped loader snapshot and
+client entry. Loaders still settle before the response because their results
+determine both route composition and the snapshot.
+
+`renderDocumentShell` customizes this streaming path with
+`beforeApplication` and `afterApplication` strings. Its context includes the
+escaped snapshot and document IDs, so a custom shell remains responsible for
+the same root, snapshot-script, and client-entry placements as the default.
+The original `renderDocument` contract remains supported for templates that
+need the full `applicationHtml` string; selecting it explicitly buffers the
+runtime stream. The two callbacks are mutually exclusive.
+
+Request abort propagates into pending runtime resources, and cancelling the
+document body cancels the application reader. Once the opening shell has been
+published, an application render error terminates the response stream; the HTTP
+status is already committed. A document `HEAD` runs loaders and returns the same
+headers without constructing the application stream. Navigation snapshot
+requests return their single JSON representation before document rendering and
+therefore never enter the HTML stream contract.
+
 `Link` renders an ordinary anchor in both targets and adds private navigation
 attributes unless `reloadDocument` is requested. After hydration, one delegated
 click listener intercepts only unmodified, primary-button, same-origin HTTP(S)
@@ -67,11 +91,33 @@ A client navigation sends `x-vidact-start-navigation: 1` to the matched URL. The
 server executes the same root-to-leaf loaders but returns only a script-safe
 `application/x-vidact-start+json` snapshot; server-only loaders never execute in
 the browser. The client imports the matched route modules, supplies the snapshot
-data without rerunning loaders, and uses the compiled root's failure-atomic
-`replace` operation. Only after successful replacement does it push or replace
-history and apply scroll behavior. A newer navigation aborts the previous fetch
-and invalidates all later work from that attempt. `popstate` performs the same
-route replacement without writing another history entry.
+data without rerunning loaders, and reconciles the component-bearing route chain.
+Only after successful publication does it push or replace history and apply
+scroll behavior. A newer navigation aborts the previous fetch and invalidates
+all later work from that attempt. `popstate` performs the same route update
+without writing another history entry.
+
+A route owner is identified by its manifest entry object and resolved component
+function. The client retains the longest common prefix with equal identities.
+Every retained component receives `loaderData`, `params`, `requestUrl`, and
+`children` through one reactive route-state transaction, so the compiler-owned
+prop bridges update the existing component scope without invoking the component
+again. A parameter or query change therefore retains the matching leaf owner as
+well as its layouts. Matches without a component carry loader authority but do
+not establish a DOM owner.
+
+At the first changed component identity, the parent's live `children` range
+stages the new suffix before disposing the previous suffix. Runtime renderable
+identity reconciliation keeps every earlier owner and its DOM in place. If no
+component identity is shared, the client uses the compiled root's
+failure-atomic `replace` operation. The initial tree keeps the same marker shape
+as server composition, so this client-only retention layer does not change the
+hydration protocol.
+
+`createComponentRenderable` is the runtime bridge used for this route-owned
+identity. It projects a reactive props object through the existing component
+spread and child-prop protocols while opting the wrapper into same-identity
+renderable reconciliation. It does not introduce a generic element-tree diff.
 
 Programmatic navigation is exposed by the `StartClient` returned from
 `hydrateStart()`. Unmatched URLs, non-Start response media, server failures, and
@@ -112,11 +158,24 @@ builds, one client and one SSR entry, followed by a host adapter.
 - A loader runs at most once during the initial server-to-client lifecycle.
 - A navigation loader runs on the server, never again while applying its client
   snapshot.
+- Equal component-bearing route prefixes retain their DOM owners, local state,
+  refs, effects, and prop bridges.
+- Retained owners observe the next loader data, parameters, request URL, and
+  child range in one route-state transaction.
+- A changed route suffix is published before the previous suffix is disposed,
+  and each removed owner is disposed exactly once.
 - Parent loaders settle before descendant loaders and expose only prior data.
 - Endpoint dispatch never runs unrelated UI loaders.
 - A loader-thrown Web `Response` preserves its status, headers, and body.
 - Query text survives the snapshot and becomes part of the hydration request URL.
 - Untrusted loader data cannot terminate the snapshot script element.
+- A document shell can publish before pending application resources settle;
+  application markers remain byte-for-byte runtime output and precede the
+  snapshot.
+- Aborting the request or cancelling its response stops pending application
+  work. Stream errors after the shell never emit a snapshot or closing suffix.
+- Document `HEAD` and navigation-snapshot requests do not construct an
+  application stream.
 - Route-module changes invalidate the virtual module and trigger a development
   reload.
 - Superseded navigation work cannot publish a route or history entry.
@@ -143,6 +202,10 @@ builds, one client and one SSR entry, followed by a host adapter.
 - **Fetch and parse a complete HTML document:** this preserves server authority
   but transfers and renders markup that failure-atomic client root replacement
   does not consume.
+- **Buffer every custom document behind `applicationHtml`:** this preserves the
+  original callback shape but prevents an early response. Keeping that callback
+  as an explicit buffered compatibility path and adding a split shell contract
+  makes the streaming choice visible.
 - **Intercept every anchor:** downloads, external targets, modifier gestures,
   hash navigation, and explicit document reloads belong to native browser
   behavior.
@@ -150,31 +213,36 @@ builds, one client and one SSR entry, followed by a host adapter.
 ## Consequences
 
 Vidact applications now have one file-route manifest and request lifecycle for
-nested layouts, typed loaders, endpoint handlers, SSR, hydration, and
-same-document navigation. Links remain progressively enhanced anchors. The Vite
-development path no longer requires application-specific Node middleware, while
-deployment hosts can keep using standard Web handlers.
+nested layouts, typed loaders, endpoint handlers, SSR, hydration, retained
+same-document navigation, and history traversal. Links remain progressively
+enhanced anchors. The Vite development path no longer requires
+application-specific Node middleware, while deployment hosts can keep using
+standard Web handlers.
 
 This release does not yet include route preloading, pending or error route
 components, middleware, mutations/actions integration, metadata merging, static
 route generation, deployment adapters, build-manifest asset hashing, scroll
-position restoration, retained shared-layout owners, or incremental boundary
-streaming. The current failure-atomic root replacement resets component-local
-state throughout the route chain. Adding retained layouts must preserve
-route-owner disposal, request cancellation, loader authority, and the existing
-framework trust boundary.
+position restoration, or application-level fallback streaming. The document
+shell streams before pending application resources, while the current framework
+runtime publishes the final marker-complete application after those resources
+settle.
 
 ## Verification
 
 - `packages/start/test/router.test.ts` covers specificity, parameters, parent
   chains, loader ordering, loader-data typing, and layout composition.
 - `packages/start/test/server.test.ts` covers nested SSR, query and navigation
-  snapshots, endpoints, `HEAD`, method negotiation, missing routes,
+  snapshots, document chunk order, custom streaming and buffered templates,
+  abort and render errors, endpoints, `HEAD`, method negotiation, missing routes,
   loader-thrown responses, and script-text safety.
 - `packages/start/test/link.test.ts` covers progressively enhanced server anchor
   output, `replace`, and `reloadDocument`.
 - `packages/start/test/vite.test.ts` covers file conventions and environment
   plugin composition.
+- `tests/browser/corpus/apps/start-navigation/StartLayoutRetention.browser.test.ts`
+  covers hydration, retained component and DOM identity, loader and parameter
+  updates, bounded mutations, suffix disposal, cancellation, failed navigation,
+  and back/forward navigation in Chromium, Firefox, and WebKit.
 - `examples/start/test/server.test.ts` imports the generated manifest and proves
   an SSR dynamic route plus a JSON endpoint.
 - `pnpm --filter @vidact/start test`

@@ -49,7 +49,7 @@ Compiled by Vidact, this builds a `<div>`, a `<button>`, and an `<output>` once,
 
 - **Small bundles.** A compiled counter is about 8 kB gzipped with the runtime included, because there is no reconciler to download.
 - **Predictable updates.** A state write runs a known list of updaters, so there are no surprise re-renders, no stale closures, and no `memo` to keep things fast.
-- **Familiar API.** `useState`, `useEffect`, `useContext`, `useRef`, and the rest work the way you expect, and most React components compile without changes.
+- **Familiar source shape.** Vidact supports the function-component, JSX, hook, DOM, SSR, and feature-gated APIs listed in the [React compatibility matrix](docs/react-compatibility.md). Compatibility is syntax- and target-specific; unsupported forms fail the build.
 - **Loud failures.** Code Vidact cannot compile fails the build at the exact source location instead of falling back to a slower path.
 - **Full stack when you want it.** [Vidact Start](packages/start) adds file-based routing, loaders, server rendering, hydration, and client navigation.
 
@@ -170,11 +170,11 @@ React source
 1. `@vidact/vite` sends untouched TSX to `@vidact/compiler`, a prebuilt native Node-API addon. Consumers never need Rust or Cargo.
 2. The Rust compiler runs a vendored React Compiler analysis, lowers a static updater graph, and rewrites state, scalar, branch, and keyed-list expressions.
 3. OXC prints the transformed module and lowers JSX through `@vidact/runtime/jsx-runtime`.
-4. At runtime the component constructs its DOM once. A state write marks a compiler-assigned source dirty; updaters are emitted in execution order with static read/write masks, so the browser never discovers dependencies or diffs a tree.
+4. At runtime the component constructs its DOM once. A state write marks a compiler-assigned source dirty. The compiler emits known updaters in execution order with static read/write masks; when runtime-owned capabilities add or remove an updater, the scope composes those declared masks into a cached order. The browser never observes reads or diffs a tree.
 
 React Compiler is an analysis dependency, not Vidact's renderer or code generator. Its internal types terminate at a narrow adapter, and the rest of Vidact uses its own stable facts and IR. The [architecture notes](docs/architecture) record these decisions and the [analysis boundary](docs/architecture/react-analysis-boundary.md) explains the integration constraints.
 
-Reachable `node_modules` packages that declare `react` as a dependency are compiled automatically, which is how published component libraries such as Base UI and shadcn components work without an allowlist.
+Reachable source-published packages that declare React in their metadata are qualified for compilation automatically. The current evidence certifies named Base UI paths at compile and SSR time, published Button behavior and DOM ownership in three browsers, and the Base UI-backed components used by the Shop example. It is not a package-wide or shadcn-registry guarantee; the [compatibility evidence](docs/react-compatibility.md#current-certification-evidence) lists each tested surface.
 
 ## Packages
 
@@ -197,7 +197,7 @@ Every example is ordinary React-shaped TSX. Run them from the repository root af
 | Example                        | Command             | Highlights                                                                                      |
 | ------------------------------ | ------------------- | ----------------------------------------------------------------------------------------------- |
 | [TodoMVC](examples/todomvc)    | `pnpm dev:todomvc`  | Array state, keyed lists, and events with no Virtual DOM                                        |
-| [Shop](examples/shop)          | `pnpm dev:shop`     | Streaming SSR, `"use client"` boundaries, Suspense, Tailwind, shadcn and Base UI from `node_modules` |
+| [Shop](examples/shop)          | `pnpm dev:shop`     | Streaming SSR, `"use client"` boundaries, Suspense, Tailwind, and local shadcn wrappers over tested Base UI paths |
 | [Start](examples/start)        | `pnpm dev:start`    | Nested layouts, typed loaders, dynamic params, route endpoints, hydration                        |
 | [Docs](examples/docs)          | `pnpm dev:docs`     | The documentation site itself, built with Vidact Start and headless Fumadocs, deployed on Nitro |
 
@@ -216,7 +216,7 @@ cargo test --workspace
 pnpm test:browser
 ```
 
-`pnpm check` runs everything CI runs: lint and format gates, type checks, the Rust suite, the cross-browser corpus, package and example verification, production size budgets, and compiler and runtime benchmarks.
+`pnpm check` runs everything CI runs: lint and format gates, type checks, the Rust suite, the cross-browser corpus, package and example verification, production size budgets, and compiler and runtime benchmarks. The [benchmark methodology](docs/benchmarking.md) records workloads, sampling, environments, and regression thresholds.
 
 > [!TIP]
 > Ordinary builds do not need Go. Only maintainers editing the checked-in Oxc patch install `git-go-patch` with `go install github.com/microsoft/go-infra/cmd/git-go-patch@v0.0.16`. See [patched Oxc submodule](docs/architecture/patched-oxc-submodule.md).

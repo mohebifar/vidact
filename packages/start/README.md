@@ -45,8 +45,8 @@ application. Route components must be named functions so the Vidact compiler
 can identify and lower them.
 
 `Link` renders an ordinary anchor during SSR. After hydration, unmodified clicks
-on same-origin Start routes request a server loader snapshot, replace the owned
-route root, and update browser history without loading another document.
+on same-origin Start routes request a server loader snapshot, update the retained
+route chain, and update browser history without loading another document.
 External URLs, downloads, modified clicks, `target` links, hash-only links, and
 links with `reloadDocument` retain native browser behavior. Use `replace` to
 replace the current history entry.
@@ -60,6 +60,21 @@ replace the current history entry.
 `hydrateStart()` returns a `StartClient` whose `navigate()` method provides the
 same behavior for programmatic navigation.
 
-This first navigation contract replaces the owned route root atomically, so
-component-local state in shared layouts resets. Retaining unchanged layout
-owners is a follow-up routing contract.
+Document HTML and client-navigation snapshots share the same route URL. Start
+marks both successful representations with `Vary: x-vidact-start-navigation`,
+so HTTP caches that honor `Vary` keep them separate. Deployments must preserve
+that response header when adding their own caching rules.
+
+The built-in document streams its opening shell as soon as loaders settle. The
+marker-complete application follows after its async resources settle, then the
+snapshot and client script close the document. `renderDocumentShell` customizes
+the strings before and after the application while preserving this behavior.
+The older `renderDocument` callback still receives one `applicationHtml` string
+and therefore buffers the application before returning a response.
+
+Start retains the longest common prefix of component-bearing route entries.
+Those components keep their DOM, local state, refs, and effects while their
+`loaderData`, `params`, `requestUrl`, and `children` props update. The first
+changed route entry and all descendants are staged as a new owned suffix, then
+the previous suffix is disposed. Routes without a component do not establish a
+DOM owner.

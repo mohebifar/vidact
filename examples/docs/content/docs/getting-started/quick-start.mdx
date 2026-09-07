@@ -1,16 +1,16 @@
 ---
 title: Quick start
-description: Create a Vidact project, write your first component, and build it for production in a few minutes.
+description: Create a client app with Vite, write a counter, and build it for a static host.
 group: Getting started
 ---
 
-This page walks you through a minimal client-side Vidact application with Vite. By the end you will have a working counter, a development server with hot reloading, and a production build you can deploy to any static host.
+Create a client-side Vidact app with Vite, then compile and run a counter. The production build contains static files.
 
 You need [Node.js](https://nodejs.org) 24 or newer and a package manager. The examples use pnpm, but npm and yarn work the same way.
 
 ## 1. Create a project
 
-The fastest way is the generator, which writes the whole project for you:
+Create a project with the generator:
 
 ```shell
 npx vidact
@@ -26,7 +26,7 @@ pnpm add @vidact/runtime
 pnpm add -D @vidact/vite @vidact/react-types @types/react typescript vite
 ```
 
-`react` and `react-dom` are missing from that list on purpose. Your source code imports from `react`, but the Vidact Vite plugin resolves those imports to the compiled runtime. React itself is never installed or shipped.
+Your source code imports from `react`. The Vidact Vite plugin resolves those imports to the Vidact runtime, so this app does not need `react` or `react-dom` installed.
 
 ## 2. Configure Vite and TypeScript
 
@@ -128,8 +128,6 @@ The `dist` folder contains static files you can serve from anywhere.
 > Vite's default HMR reloads the page when a module changes. For in-place replacement that keeps the rest of the page alive, mount with `mountHotRoot(import.meta.hot, host, Counter)` instead and add a lexical `import.meta.hot.accept()` call to the entry. See [@vidact/runtime](/docs/reference/runtime).
 
 ## Next steps
-
-You now have a working Vidact project. From here:
 
 - Read [Thinking in Vidact](/docs/learn/thinking-in-vidact) to understand what "components run once" means for the code you write.
 - Work through the [Learn](/docs/learn/components-and-props) section for state, events, lists, effects, and context.

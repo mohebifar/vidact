@@ -1,5 +1,6 @@
 import { binding, isCompiledBinding } from './compiled/core.ts'
 import type { CompiledBinding, CompiledRenderValue, CompiledScope } from './compiled/types.ts'
+import { compiledComponentSpread } from './component-spread.ts'
 import { Fragment, h, type DirectComponent } from './direct-dom.ts'
 import {
   installRenderableClone,
@@ -46,6 +47,35 @@ export function createRenderable(
     value: { identity, input, reconcile, construct } satisfies RenderableInternals,
   })
   return capability
+}
+
+export function createComponentRenderable(
+  type: DirectComponent,
+  input: RenderablePropsInput,
+  identity: unknown = type,
+): CompiledRenderable {
+  return createRenderable(
+    input,
+    (currentInput) =>
+      h(
+        type,
+        { ...renderableComponentProps(currentInput), ref: renderableRef(currentInput) },
+        renderableChildren(currentInput),
+      ),
+    identity,
+    true,
+  )
+}
+
+function renderableComponentProps(input: RenderablePropsInput): Record<string, unknown> {
+  const ordinary = projectInput<Record<string, unknown>>(input, (props) =>
+    Object.fromEntries(
+      Reflect.ownKeys(props)
+        .filter((name) => typeof name !== 'string' || !SPECIAL_PROPS.has(name))
+        .map((name) => [name, Reflect.get(props, name)]),
+    ),
+  )
+  return isCompiledBinding(ordinary) ? compiledComponentSpread(ordinary, []) : ordinary
 }
 
 export function isRenderable(value: unknown): value is CompiledRenderable {

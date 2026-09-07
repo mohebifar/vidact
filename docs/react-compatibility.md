@@ -22,6 +22,49 @@ and source-published dependencies it can qualify. Unsupported syntax or
 feature-gated API use is diagnosed rather than silently leaving a React call in
 the output.
 
+## Current certification evidence
+
+Compatibility claims are scoped to the stage that a test executes. Compilation
+does not imply SSR behavior, mounting, interaction, retained DOM ownership, or
+TypeScript compatibility. The current certified surfaces are:
+
+<!-- compatibility-evidence:start -->
+
+| Surface | Current certified claim | Executable evidence |
+| --- | --- | --- |
+| Compiler source subset | Every checked-in compatibility fixture is classified as accepted, rejected, or intentionally different, with source-located diagnostics for rejection. | [`compatibility_corpus.rs`](../crates/vidact-compiler/tests/compatibility_corpus.rs) |
+| Published dependency qualification | React-bearing package metadata, source-linked capsules, and fail-closed output are verified without a package-name allowlist. | [`dependency-qualification.test.ts`](../packages/vite-plugin/test/dependency-qualification.test.ts), [`dependency-capsule.test.ts`](../packages/vite-plugin/test/dependency-capsule.test.ts) |
+| Base UI compilation and SSR | Base UI 1.7.0 Accordion, Avatar, Button, Input, Switch, and Toggle Group produce React-free client and server bundles. SSR executes Avatar, both Button render forms, Input, Switch, and Accordion. A disabled capability reports the original published source location. | [`base-ui.integration.test.ts`](../packages/vite-plugin/test/base-ui.integration.test.ts) |
+| Base UI browser behavior and DOM ownership | Published Button, Switch, and Accordion interactions retain dependency-owned nodes, stay inside bounded mutation envelopes, and release compiled owners on disposal in Chromium, Firefox, and WebKit. | [`BaseUiDependencyApp.browser.test.ts`](../tests/browser/corpus/apps/base-ui-dependency/BaseUiDependencyApp.browser.test.ts) |
+| Local shadcn application wrappers | The Shop example exercises its local wrappers over published Base UI Button, Toggle, and Toggle Group through search, filtering, cart, checkout, retained identities, and bounded DOM mutation assertions. This is an application-path proof, not registry certification. | [`ShopApp.browser.test.ts`](../examples/shop/src/ShopApp.browser.test.ts), [`shop.server.test.ts`](../examples/shop/src/shop.server.test.ts) |
+| Vidact-native documentation UI | The current docs shell renders and updates local Vidact components. It contains no Base UI or shadcn compatibility corpus and is not evidence for either package. | [`DocsShell.browser.test.ts`](../examples/docs/src/DocsShell.browser.test.ts), [`server.test.ts`](../examples/docs/test/server.test.ts) |
+| JSX and DOM typing | `@vidact/react-types` checks Vidact-owned JSX values, native event types, intrinsic attributes, and deliberate React type differences. Published Base UI prop types still require a local boundary adapter and are not certified as directly assignable. | [`jsx-contract.tsx`](../packages/react-types/test/jsx-contract.tsx) |
+
+<!-- compatibility-evidence:end -->
+
+`pnpm test:tools` verifies that every evidence link in this table still points
+to an executable test or type-check fixture. Expanding a claim requires adding
+the corresponding test first and updating this table in the same change.
+
+### Published Base UI component inventory
+
+The inventory below separates each proof stage. A dash means that this repository does not currently certify that stage.
+
+<!-- base-ui-component-inventory:start -->
+
+| Published path | Production client/server compilation | SSR behavior | Browser interaction | Ownership and disposal | Hydration | Type boundary |
+| --- | --- | --- | --- | --- | --- | --- |
+| `@base-ui/react/accordion` | React-free bundles | Initial open item and panel content | Direct trigger open/close in three engines | Root, item, trigger, and kept-mounted panel retain identity; root disposal returns the owner count to baseline | — | Browser fixture uses a labeled `VidactNode` children adapter |
+| `@base-ui/react/avatar` | React-free bundles | Fallback content | — | — | — | — |
+| `@base-ui/react/button` | React-free bundles | Callback and element render forms | Direct click, merge logic, and render-element path in three engines | Button and rendered link retain identity; root disposal returns the owner count to baseline | — | Browser fixture uses a labeled `VidactNode` children/render adapter |
+| `@base-ui/react/input` | React-free bundles | Input attributes | — | — | — | — |
+| `@base-ui/react/switch` | React-free bundles | Initial labeled switch | Direct checked-state toggle in three engines | Root and thumb retain identity; root disposal returns the owner count to baseline | — | Browser fixture uses a labeled `VidactNode` children adapter |
+| `@base-ui/react/toggle-group` | React-free bundles | — | Only through local Shop wrappers | Local-wrapper identity and mutation proof is not upstream component certification | — | — |
+
+<!-- base-ui-component-inventory:end -->
+
+Accordion reaches Base UI's `useAnimationsFinished` helper, which calls `flushSync`. Its certified browser and production paths therefore enable Vidact's `concurrent` feature. The integration test also removes that feature and verifies an explicit source-located diagnostic. No published Base UI hydration or direct prop-type compatibility is claimed yet.
+
 ## Rendering model and component authoring
 
 | Feature | React 19.2 | Vidact | Notes |

@@ -1,12 +1,12 @@
 ---
 title: Introduction
-description: Vidact compiles the React components you already know how to write into direct DOM code, with no Virtual DOM and no React runtime.
+description: Compile function components, JSX, and hooks into JavaScript that creates and updates the DOM.
 group: Getting started
 ---
 
-Vidact is a compiler for React-shaped components. You write function components, JSX, and hooks exactly the way you would in a React application. Instead of shipping React, Vidact compiles each component into plain DOM operations: create these elements once, and when this piece of state changes, update this text node.
+Vidact compiles React function components into DOM code. You write JSX and hooks; the compiler generates the code that creates elements and updates them when their data changes. The browser runs that code with the Vidact runtime.
 
-Your component functions run **once**, when they mount. After that, only the DOM that depends on changed data is touched. There is no Virtual DOM, no reconciler, and no runtime that discovers dependencies while the page runs.
+A component runs once per mount. State updates run the generated bindings for the affected values. The compiler identifies dependencies within each component; the runtime connects them across props, context, and component boundaries.
 
 Here is a counter compiled by Vidact. Click the button and the number updates in place. The `Counter` function is never called again.
 
@@ -27,20 +27,17 @@ export function Counter() {
 
 <Preview variant="counter" />
 
-## Why Vidact?
+## How updates work
 
-React's programming model is worth keeping. Components are functions, UI describes state, and hooks compose. Its runtime model costs you something for that: every state change re-runs component functions and diffs the result to find out what changed.
+In the counter above, a click changes `count`. Vidact updates the existing text node inside `<output>`. It keeps the button, its event listener, and the rest of the component in place.
 
-Vidact keeps the programming model and replaces the runtime model. Because the compiler can see your whole component, it knows ahead of time which expressions depend on which values. It emits exactly the DOM updates that are needed, in a fixed order, and nothing else.
+Derived values work the same way. An expression such as `const total = count * price` becomes an updater when the compiler can trace its dependencies. The runtime schedules that updater before bindings that read `total`.
 
-- A compiled counter is 8 kB gzipped with the runtime included, because there is no reconciler to download.
-- A state write runs a known list of updaters, so there are no surprise re-renders, no stale closures, and no `memo` needed to keep things fast.
-- `useState`, `useEffect`, `useContext`, `useRef`, and the rest work the way you expect, and most React components compile without changes.
-- Code Vidact cannot compile fails the build at the exact source location, rather than falling back to a slower path.
+See [Reactivity](/docs/internals/reactivity) for dependency tracking and [Thinking in Vidact](/docs/learn/thinking-in-vidact) for the effects on everyday component code.
 
-## What Vidact is not
+## React compatibility
 
-Vidact is not a React renderer and it does not run React. There is no element tree to inspect, no Fiber, and no React DevTools. Class components, `React.Children`, and libraries that reach into React internals are not supported. If your application depends on those, read [React compatibility](/docs/reference/react-compatibility) before you start.
+Vidact supports a documented subset of React 19. Class components, most `Children` helpers, and React internals are unsupported. Events use native DOM objects, and some hooks have different semantics because components do not re-render. Read [React compatibility](/docs/reference/react-compatibility) before migrating an app or choosing a component library.
 
 > [!WARNING] Vidact is in beta
 >
@@ -48,7 +45,6 @@ Vidact is not a React renderer and it does not run React. There is no element tr
 
 ## Where to go next
 
-- **Try it in five minutes.** The [quick start](/docs/getting-started/quick-start) creates a project, writes a component, and builds it.
-- **Learn the model.** [Thinking in Vidact](/docs/learn/thinking-in-vidact) explains what "components run once" changes about the code you write.
-- **Build a full-stack app.** [Vidact Start](/docs/start/getting-started) adds file-based routing, server rendering, data loaders, and client navigation.
-- **Coming from React?** The [migration guide](/docs/guides/migrating-from-react) lists what changes and what does not.
+- Create and build a client app with the [quick start](/docs/getting-started/quick-start).
+- Add server rendering and routes with [Vidact Start](/docs/start/getting-started).
+- Move an existing app using the [migration guide](/docs/guides/migrating-from-react).

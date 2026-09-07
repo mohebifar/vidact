@@ -46,10 +46,13 @@ fallback.
 
 Element-valued render props use a bounded compiled-renderable capability for
 known construction sites; callback render props return ordinary compiled
-values. This supports the published Base UI Button, Input, and Toggle Group
-paths exercised by the repository, but does not provide a React element-tree
-interpreter or reconciler. Dynamic props destructured into untracked body locals
-remain unsupported and may retain their construction-time value.
+values. Repository tests compile published Base UI Button, Avatar, Input, and
+Toggle Group paths into React-free client and server bundles, while the
+cross-browser ownership proof currently covers Button. These results do not
+provide a package-wide Base UI guarantee or a React element-tree interpreter.
+Dynamic props destructured into untracked body locals remain unsupported and
+may retain their construction-time value. See the
+[current certification evidence](../../docs/react-compatibility.md#current-certification-evidence).
 
 Compile JSX emitted by an earlier Vite transform by adding its source extension. This enables
 MDX when the MDX plugin runs before Vidact and preserves JSX output:

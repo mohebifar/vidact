@@ -4,7 +4,7 @@ description: How the server target produces HTML, how the hydrate target attache
 group: Under the hood
 ---
 
-Server rendering is a third output of the same compiler, driven by the same ownership model, so it stays in step with the client automatically. There is no second renderer and no DOM shim.
+The compiler generates server and hydration output from the same component representation. Both targets use ownership markers to agree on the boundaries of components, branches, and lists.
 
 ## The server target
 
@@ -35,16 +35,18 @@ Hydration is a conversation between two programs that were compiled separately. 
 
 ## Data transfer in Vidact Start
 
-Start runs loaders on the server, renders with their results, and embeds a JSON snapshot of the results in a `<script type="application/json">`. In the browser, `hydrateStart` reads that script, decodes the snapshot, matches the same routes, and constructs the route components with the same `loaderData`. Construction is therefore deterministic by design: both sides saw the same inputs.
+Start runs loaders on the server, renders with their results, and embeds a JSON snapshot in a `<script type="application/json">`. In the browser, `hydrateStart` reads that script, matches the same routes, and constructs the components with the same `loaderData`. Other inputs, such as time or random values read in the component, still need to be made deterministic.
 
 The snapshot is a closed value model: plain data only, checked on both ends. Its checksum detects corruption and version skew. It is not a security boundary; loaders must not put secrets in it, because it is sent to the browser verbatim.
 
 ## Streaming and continuations
 
-With the `framework` feature, the server target also supports `renderToReadableStream` and `renderToPipeableStream`. Suspense boundaries emit their fallback immediately and their content later as a continuation that the client splices in. `prerender` and `resume` split rendering into a static prelude and a postponed remainder. Vidact Start uses the streaming renderer internally, buffering the result into a single document in the current release.
+With the `framework` feature, the server target supports `renderToReadableStream` and `renderToPipeableStream`. The current renderer waits for pending application resources before publishing the final application HTML; it does not stream individual Suspense fallbacks. `prerender` and `resume` provide separate APIs for a static prelude and postponed work.
+
+Vidact Start sends the opening document shell after loaders settle, then the application HTML, then the loader snapshot and client entry. Customize this with `renderDocumentShell`. The older `renderDocument` callback receives the complete application string and buffers it. See [the Start reference](/docs/reference/start) for error and cancellation behavior.
 
 These APIs share names with React's, and their observable behaviour is designed to match, but the wire format is Vidact's own. They do not consume or produce React Flight payloads.
 
 ## Why one compiler, three targets?
 
-Frameworks that render on the server by executing client code in a simulated DOM must keep the simulation faithful and pay its cost on every request. Frameworks with a separate server renderer must keep two implementations in agreement. Vidact generates all three targets from one IR, so an ownership rule or an escaping rule is implemented once, and a component that compiles for the client compiles for the server by construction.
+Generating all three targets from one IR keeps dependency and ownership analysis shared. Target-specific restrictions still apply: a client component that uses a portal or reads browser globals during construction cannot render unchanged on the server. Build and test both targets.

@@ -89,6 +89,7 @@ Returns `(request: Request) => Promise<Response>`.
 | `manifest` | required | The route manifest |
 | `clientEntry` | none | URL of the client script to include in the document |
 | `renderDocument(context)` | built-in template | Produce the full HTML document |
+| `renderDocumentShell(context)` | built-in streaming template | Produce `beforeApplication` and `afterApplication` strings around the application stream |
 | `notFound(request)` | 404 text response | Called when no route matches |
 | `rootId` | `'vidact-start-root'` | ID for the root element |
 | `snapshotId` | `'vidact-start-snapshot'` | ID for the snapshot script |
@@ -108,6 +109,23 @@ The handler serves route components on `GET` and `HEAD`, dispatches other method
 ```
 
 Your template must place `applicationHtml` inside an element with `id={rootId}`, and `snapshot` inside `<script id={snapshotId} type="application/json">`, and load `clientEntry` as a module. Do not decode or transform the snapshot.
+
+`renderDocument` is the buffered compatibility path because it receives the
+complete application string. To preserve streaming, use
+`renderDocumentShell(context)` and return:
+
+```ts
+{
+  beforeApplication: `<!doctype html><main id="${context.rootId}">`,
+  afterApplication: `</main><script id="${context.snapshotId}" type="application/json">${context.snapshot}</script>`,
+}
+```
+
+The built-in shell is sent after loaders settle and before pending application
+resources settle. The marker-complete application is streamed next, followed by
+the snapshot and client entry. A render failure after the first shell chunk
+errors the body stream because the `200` status is already committed. `HEAD` and
+navigation snapshot requests do not construct the application stream.
 
 ## @vidact/start/vite
 

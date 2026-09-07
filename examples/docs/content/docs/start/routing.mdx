@@ -4,7 +4,7 @@ description: How files in src/routes become URLs, and how layouts, parameters, a
 group: Vidact Start
 ---
 
-Vidact Start derives your routes from the file system. There is no route configuration file to maintain: add a file, get a URL.
+Vidact Start maps files in `src/routes` to URLs. File names define static paths, parameters, layouts, and catch-all routes.
 
 ## File naming
 
@@ -62,7 +62,7 @@ export function RootLayout({ children }: RouteComponentProps<undefined>) {
 export const Route = defineFileRoute({ component: RootLayout })
 ```
 
-The root layout renders inside the document's root element. The `<html>`, `<head>`, and `<body>` are produced by your `renderDocument` function on the server; see [@vidact/start](/docs/reference/start).
+The root layout renders inside the document's root element. The `<html>`, `<head>`, and `<body>` come from Start's streaming shell or your `renderDocumentShell` customization. The buffered `renderDocument` callback remains available when a template needs the complete application HTML; see [@vidact/start](/docs/reference/start).
 
 ## Parameters
 
@@ -116,6 +116,6 @@ const loader = async ({ params }: RouteLoaderContext) => {
 
 Start's router is deliberately small in its first release:
 
-- Navigating between routes replaces the whole route tree, including layouts. State in a layout component resets on navigation. Keep persistent client state in an [external store](/docs/learn/context).
+- Shared routes and layouts remain mounted during navigation. State in a route that leaves the matched tree is disposed; see [State across navigations](/docs/start/navigation#state-across-navigations).
 - There is no route preloading, middleware, or route-level code splitting configuration yet.
 - Only pathname matching is supported; search parameters are available through `requestUrl`.

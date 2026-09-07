@@ -1,10 +1,10 @@
 ---
 title: Thinking in Vidact
-description: Components run once. Everything else about writing Vidact code follows from that one idea.
+description: How state, derived values, and effects work when a component runs once per mount.
 group: Learn
 ---
 
-If you have written React, you already know how to write Vidact. The syntax is the same, the hooks are the same, and the way you break a UI into components is the same. What changes is what happens at runtime, and understanding that change up front will save you from a handful of surprises later.
+Vidact uses React function components, JSX, and hooks. A component builds its DOM when it mounts. After that, generated updaters respond to changes in state, props, context, and external stores.
 
 ## Components run once
 
@@ -35,20 +35,18 @@ React would re-run `Quantity` on every click, recompute `total`, rebuild the ele
 - Create the `<div>`, `<button>`, and `<p>` elements and attach the click listener.
 - When `quantity` changes: recompute `total`, then update the two text nodes inside `<p>`.
 
-Those two steps are the whole program. There is no tree to diff, and no work to skip, because none was ever scheduled.
-
 ## What stays the same
 
-Nearly everything you would write in a modern React function component:
+The supported subset includes:
 
 - `useState`, `useReducer`, `useRef`, `useMemo`, `useCallback`, `useId`
 - `useEffect`, `useLayoutEffect`, `useImperativeHandle`, `useEffectEvent`
 - `createContext`, `useContext`, `use(context)`, `useSyncExternalStore`
 - JSX with fragments, conditionals, `.map()` over arrays, `key`, spreads, and `ref`
-- Custom hooks that compose the hooks above
+- Custom hooks defined in the same module as their caller
 - Controlled and uncontrolled forms, portals, error boundaries
 
-Derived values keep working too. In the example above, `total` is not state, but the compiler noticed that it depends on `quantity` and recomputes it when `quantity` changes. You do not need `useMemo` to make that happen, and you do not need it for performance either. Memoization hooks are still honored where identity is observable, for example when a value is passed to an effect's dependency list, but they are no longer a tool for avoiding re-renders because there are no re-renders.
+In the example above, the compiler tracks `total` as a derived value and recomputes it when `quantity` changes. This does not require `useMemo`. Memoization hooks still preserve identity where it is observable, such as effect dependencies. See the [compatibility reference](/docs/reference/react-compatibility) for the limits of each API.
 
 ## What is different
 
@@ -64,15 +62,15 @@ In React, the closure a handler captured may hold an older value of state, which
 
 ### Props and outer variables are read-only during construction
 
-Assigning to a prop, mutating a prop object, or writing to a module-level variable inside a component body is rejected by the compiler with a `DestructiveRenderMutation` diagnostic. These patterns only ever worked in React by accident. Move the write into an event handler or an effect, or copy the value into local state.
+Assigning to a prop, mutating a prop object, or writing to a module-level variable inside a component body is rejected by the compiler with a `DestructiveRenderMutation` diagnostic. Move the write into an event handler or an effect, or copy the value into local state.
 
 ### There is no "render count" to optimize
 
-`memo`, `useMemo`, and `useCallback` are accepted for compatibility, but they do not skip work the way they do in React. If you find yourself reaching for them to fix performance, stop. The compiler has already done that job.
+`memo` does not skip component calls after mount because those calls do not occur. For performance work, measure the derived computations, effects, and DOM updates triggered by a change. Expensive calculations can still be expensive even when the component body runs once.
 
 ### Unsupported code fails at compile time
 
-Vidact never falls back to running React. If you use a class component, `React.Children`, or a feature you have not enabled, the build fails with an error pointing at the exact expression. This is deliberate: a silent fallback would mean two rendering models fighting over the same DOM. The [troubleshooting guide](/docs/guides/troubleshooting) explains how to read those errors.
+If you use a class component, a rejected `Children` helper, or a feature you have not enabled, the build fails with a diagnostic pointing at the expression. The [troubleshooting guide](/docs/guides/troubleshooting) explains how to read those errors.
 
 ## A mental model
 
@@ -82,5 +80,3 @@ When you write a Vidact component, picture it as a description of a piece of DOM
 2. **Sources.** State, props, context, and store snapshots are the values that can change.
 3. **Bindings.** Every expression in the JSX that reads a source becomes a binding the compiler keeps up to date.
 4. **Effects.** Anything that must happen *because* a source changed, outside the DOM, lives in an effect.
-
-The rest of the Learn section fills in each of those four parts.

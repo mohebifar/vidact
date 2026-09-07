@@ -4,6 +4,7 @@ import remapping, { type SourceMapInput } from '@jridgewell/remapping'
 import { originalPositionFor, TraceMap } from '@jridgewell/trace-mapping'
 import { createFilter, transformWithOxc, type FilterPattern, type Plugin } from 'vite'
 
+import { ReplacementCache } from './compilation-cache.ts'
 import {
   compileWithCompiler,
   normalizeConfiguration,
@@ -57,6 +58,20 @@ export interface CompilationCacheInput extends VidactCompilerConfiguration {
   readonly environment: string
 }
 
+type CompilationCacheSlotInput = Omit<CompilationCacheInput, 'source'>
+
+function compilationCacheSlotKey(input: CompilationCacheSlotInput): string {
+  const configuration = normalizeConfiguration(input)
+  return JSON.stringify({
+    compilerProtocol: VIDACT_COMPILE_PROTOCOL,
+    runtimeProtocol: VIDACT_RUNTIME_PROTOCOL,
+    filename: input.filename,
+    environment: input.environment,
+    target: configuration.target,
+    features: configuration.features,
+  })
+}
+
 export function compilationCacheKey(input: CompilationCacheInput): string {
   const configuration = normalizeConfiguration(input)
   return JSON.stringify({
@@ -84,10 +99,11 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
     target: options.target ?? 'client',
     features: options.features ?? [],
   })
-  const compilationCache = new Map<
-    string,
-    { code: string; sourceMap: Record<string, unknown>; analysis: VidactAnalysis }
-  >()
+  const compilationCache = new ReplacementCache<{
+    code: string
+    sourceMap: Record<string, unknown>
+    analysis: VidactAnalysis
+  }>()
   const includeDependency =
     options.includeDependencies === undefined
       ? () => false
@@ -337,13 +353,13 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
       const linkedCapsule = capsule ?? sourceCapsule
       const compilationSource = linkedCapsule?.code ?? source
 
-      const cacheKey = compilationCacheKey({
-        source: linkedCapsule?.fingerprint ?? compilationSource,
+      const sourceRevision = linkedCapsule?.fingerprint ?? compilationSource
+      const cacheSlot = compilationCacheSlotKey({
         filename,
         environment: this.environment.name,
         ...configuration,
       })
-      let compilation = compilationCache.get(cacheKey)
+      let compilation = compilationCache.get(cacheSlot, sourceRevision)
       if (compilation === undefined) {
         let result
         try {
@@ -374,7 +390,7 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
               : composeSourceMaps(result.sourceMap, linkedCapsule.sourceMap),
           analysis: result.analysis,
         }
-        compilationCache.set(cacheKey, compilation)
+        compilationCache.set(cacheSlot, sourceRevision, compilation)
       }
 
       const transformed = await transformWithOxc(

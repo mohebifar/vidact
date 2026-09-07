@@ -1,5 +1,6 @@
 import { DocsLayout } from './components/docs-layout.tsx'
 import { DocsPage } from './components/docs-page.tsx'
+import { DocsSearch, SearchButton } from './components/docs-search.tsx'
 import { CounterDemo, EnginesDemo } from './routes/index.tsx'
 
 export function DocsLayoutProof() {
@@ -58,6 +59,20 @@ export function DocsPageProof() {
             title: 'Interactive proof',
             blocks: [
               { key: 'counter', type: 'preview', variant: 'counter' },
+              { key: 'list-preview', type: 'preview', variant: 'list' },
+              {
+                key: 'code',
+                type: 'code',
+                code: 'const count = 0',
+                language: 'ts',
+                title: 'Example',
+                lines: [
+                  {
+                    key: 'line-0',
+                    tokens: [{ key: 'token-0', content: 'const count = 0', color: '#fff' }],
+                  },
+                ],
+              },
               { key: 'heading', type: 'heading', id: 'steps', text: 'Steps' },
               {
                 key: 'steps',
@@ -120,4 +135,13 @@ export function LandingCounterProof() {
 
 export function LandingEnginesProof() {
   return <EnginesDemo />
+}
+
+export function DocsSearchProof() {
+  return (
+    <>
+      <SearchButton />
+      <DocsSearch />
+    </>
+  )
 }
