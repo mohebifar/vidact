@@ -74,7 +74,8 @@ export function HomeRoute({ loaderData }: LandingProps) {
             </h2>
             <p className="mt-4 leading-7 text-muted-foreground">
               Vidact Start applies the same compiler model to SSR and hydration, then adds file
-              routes, loaders, and client navigation. This documentation site runs on it.
+              routes, loaders, and client navigation. This documentation site is compiled with
+              Vidact and runs on Vidact Start.
             </p>
             <Link
               className="decoration-muted-foreground/60 mt-6 inline-flex items-center gap-2 font-medium underline underline-offset-4 hover:decoration-current"
@@ -362,12 +363,11 @@ function Origin() {
             </h2>
           </div>
           <p className="leading-7 text-muted-foreground">
-            I started Vidact in 2020, then put it aside. Work on{' '}
+            I started Vidact in 2020, then put it aside. Building{' '}
             <a className="underline underline-offset-4" href="https://grep.codemod.com">
               grep.codemod.com
             </a>{' '}
-            gave me a reason to rebuild it with React Compiler's analysis doing much of the heavy
-            lifting.
+            gave me a reason to return to Vidact. That app now runs on Vidact in production.
           </p>
         </div>
         <div className="mt-10 grid gap-5 border-t pt-8 lg:grid-cols-2 lg:gap-16">
