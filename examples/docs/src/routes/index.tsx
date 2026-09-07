@@ -67,7 +67,7 @@ export function HomeRoute({ loaderData }: LandingProps) {
       <Origin />
 
       <section className="border-y bg-muted/30">
-        <div className="mx-auto grid max-w-6xl items-center gap-12 px-6 py-20 sm:py-24 lg:grid-cols-2">
+        <div className="mx-auto grid max-w-6xl items-center gap-12 px-6 py-10 sm:py-16 lg:grid-cols-2">
           <div>
             <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">
               Build full-stack apps
@@ -181,7 +181,7 @@ const VIDACT_PIPELINE = ['State changes', 'Run selected updater', 'Update DOM'] 
 function CompilerModel() {
   return (
     <section className="border-b">
-      <div className="mx-auto grid max-w-6xl gap-12 px-6 py-20 sm:py-24 lg:grid-cols-[0.8fr_1.2fr]">
+      <div className="mx-auto grid max-w-6xl gap-12 px-6 py-10 sm:py-16 lg:grid-cols-[0.8fr_1.2fr]">
         <div>
           <p className="font-mono text-xs text-muted-foreground">What changes</p>
           <h2 className="font-display mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
@@ -193,7 +193,7 @@ function CompilerModel() {
           </p>
           <p className="mt-5 leading-7 text-muted-foreground">
             The browser runs Vidact's small runtime. React, the Virtual DOM, the reconciler, and
-            runtime dependency tracking stay out of the bundle.
+            runtime dependency tracking <strong>stay out of the bundle</strong>.
           </p>
         </div>
         <div className="space-y-5 self-center">
@@ -243,10 +243,9 @@ function Pipeline({
   )
 }
 
-type CompilerView = 'actual' | 'readable' | 'source'
+type CompilerView = 'actual' | 'readable'
 
 const COMPILER_VIEWS: readonly { readonly key: CompilerView; readonly label: string }[] = [
-  { key: 'source', label: 'Component' },
   { key: 'readable', label: 'Readable output' },
   { key: 'actual', label: 'Actual output' },
 ]
@@ -256,53 +255,56 @@ export function CompilerDemo({ data }: { readonly data: LandingData }) {
   const [view, setView] = useState<CompilerView>('readable')
 
   return (
-    <section className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
+    <section className="mx-auto max-w-6xl px-6 py-10 sm:py-16">
       <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">
         What the compiler writes
       </h2>
       <p className="mt-4 max-w-2xl leading-7 text-muted-foreground">
-        The readable view expands Vidact's runtime helpers into ordinary DOM code. Switch to the
-        actual view to see the compiler output.
+        Compare the component with a readable expansion of its DOM operations, or switch to the
+        exact compiler output.
       </p>
-      <div className="mt-8 overflow-hidden rounded-xl border">
+      <div className="mt-8 grid overflow-hidden rounded-xl border lg:grid-cols-2">
         <div
-          aria-label="Counter code view"
-          className="flex gap-1 overflow-x-auto border-b px-3 pt-2"
-          role="tablist"
+          className="min-w-0 border-b bg-zinc-950 lg:border-r lg:border-b-0"
+          id="compiler-source"
         >
-          {COMPILER_VIEWS.map((item) => (
-            <button
-              aria-controls="compiler-code"
-              aria-selected={view === item.key}
-              className={
-                view === item.key
-                  ? '-mb-px border-b-2 border-foreground px-3 py-2 text-sm font-medium'
-                  : '-mb-px border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:text-foreground'
-              }
-              id={`compiler-tab-${item.key}`}
-              key={item.key}
-              onClick={() => setView(item.key)}
-              role="tab"
-              type="button"
-            >
-              {item.label}
-            </button>
-          ))}
+          <CompilerCode
+            filename="Counter.tsx"
+            lines={data.counter}
+            note="The component you write."
+          />
         </div>
-        <div className="grid lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="flex min-w-0 flex-col border-b bg-zinc-950 lg:border-b-0">
           <div
-            aria-label="Selected compiler code"
-            className="min-w-0 border-b bg-zinc-950 lg:border-r lg:border-b-0"
-            id="compiler-code"
+            aria-label="Generated output view"
+            className="flex gap-1 overflow-x-auto border-b px-3 pt-2"
+            role="tablist"
+          >
+            {COMPILER_VIEWS.map((item) => (
+              <button
+                aria-controls="compiler-output"
+                aria-selected={view === item.key}
+                className={
+                  view === item.key
+                    ? '-mb-px border-b-2 border-white px-3 py-2 text-sm font-medium text-white'
+                    : '-mb-px border-b-2 border-transparent px-3 py-2 text-sm text-zinc-400 hover:text-white'
+                }
+                id={`compiler-tab-${item.key}`}
+                key={item.key}
+                onClick={() => setView(item.key)}
+                role="tab"
+                type="button"
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <div
+            aria-label="Generated compiler output"
+            className="grow"
+            id="compiler-output"
             role="tabpanel"
           >
-            {view === 'source' ? (
-              <CompilerCode
-                filename="Counter.tsx"
-                lines={data.counter}
-                note="The component you write."
-              />
-            ) : null}
             {view === 'readable' ? (
               <CompilerCode
                 filename="Counter.js"
@@ -318,17 +320,17 @@ export function CompilerDemo({ data }: { readonly data: LandingData }) {
               />
             ) : null}
           </div>
-          <div className="flex flex-col bg-background">
-            <div className="border-b px-5 py-2.5 font-mono text-xs text-muted-foreground">
-              Running result
-            </div>
-            <div className="grow p-6 sm:p-8">
-              <CounterDemo />
-            </div>
-            <p className="border-t px-5 py-3 text-xs text-muted-foreground">
-              Increment updates the existing text node.
-            </p>
+        </div>
+        <div className="col-span-full flex flex-col border-t bg-background">
+          <div className="border-b px-5 py-2.5 font-mono text-xs text-muted-foreground">
+            Result preview
           </div>
+          <div className="grow p-6 sm:p-8">
+            <CounterDemo />
+          </div>
+          <p className="border-t px-5 py-3 text-xs text-muted-foreground">
+            Increment updates the existing text node.
+          </p>
         </div>
       </div>
     </section>
@@ -344,18 +346,13 @@ function CompilerCode({
   readonly lines: readonly DocCodeLine[]
   readonly note: string
 }) {
-  return (
-    <>
-      <CodePane filename={filename} lines={lines} />
-      <p className="border-t border-white/10 px-5 py-3 text-xs text-zinc-400">{note}</p>
-    </>
-  )
+  return <CodePane filename={filename} footer={note} lines={lines} />
 }
 
 function Origin() {
   return (
     <section className="border-t bg-muted/30">
-      <div className="mx-auto grid max-w-6xl gap-12 px-6 py-20 sm:py-24 lg:grid-cols-2">
+      <div className="mx-auto grid max-w-6xl gap-12 px-6 py-10 sm:py-16 lg:grid-cols-2">
         <div>
           <p className="font-mono text-xs text-muted-foreground">Why now</p>
           <h2 className="font-display mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
@@ -540,10 +537,12 @@ function ExampleWindow({
 
 function CodePane({
   filename,
+  footer,
   lines,
   rounded,
 }: {
   readonly filename: string
+  readonly footer?: string
   readonly lines: readonly DocCodeLine[]
   readonly rounded?: boolean
 }) {
@@ -552,7 +551,9 @@ function CodePane({
       className={
         rounded
           ? 'overflow-hidden rounded-xl border bg-zinc-950 text-zinc-50'
-          : 'h-full bg-zinc-950 text-zinc-50'
+          : footer
+            ? 'grid h-full grid-rows-[auto_1fr_auto] bg-zinc-950 text-zinc-50'
+            : 'h-full bg-zinc-950 text-zinc-50'
       }
     >
       <div className="border-b border-white/10 px-5 py-2.5 font-mono text-xs text-zinc-400">
@@ -565,6 +566,9 @@ function CodePane({
           ))}
         </code>
       </pre>
+      {footer ? (
+        <p className="border-t border-white/10 px-5 py-3 text-xs text-zinc-400">{footer}</p>
+      ) : null}
     </div>
   )
 }

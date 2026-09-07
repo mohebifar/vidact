@@ -21,32 +21,29 @@ afterEach(() => {
 })
 
 describe('Vidact-native documentation controls', () => {
-  it('switches compiler views without resetting the running counter', async () => {
+  it('switches output views without resetting the source or running counter', async () => {
     const host = await mount(LandingCompilerProof)
     const output = host.querySelector<HTMLOutputElement>('output')!
+    const source = host.querySelector('#compiler-source pre')!
     const increment = [...host.querySelectorAll('button')].find(
       (button) => button.textContent === 'Increment',
     )!
 
     increment.click()
     expect(output.textContent).toBe('Count: 1')
-    expect(host.querySelector('#compiler-code pre')!.textContent).toContain(
+    expect(source.textContent).toContain('useState(0)')
+    expect(host.querySelector('#compiler-output pre')!.textContent).toContain(
       "document.createElement('button')",
     )
-
-    const component = [...host.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Component',
-    )!
-    await captureMutations(host, () => component.click())
-    expect(host.querySelector('#compiler-code pre')!.textContent).toContain('useState(0)')
-    expect(host.querySelector('output')).toBe(output)
-    expect(output.textContent).toBe('Count: 1')
 
     const actual = [...host.querySelectorAll('button')].find(
       (button) => button.textContent === 'Actual output',
     )!
     await captureMutations(host, () => actual.click())
-    expect(host.querySelector('#compiler-code pre')!.textContent).toContain('createCompiledState')
+    expect(host.querySelector('#compiler-output pre')!.textContent).toContain('createCompiledState')
+    expect(host.querySelector('#compiler-source pre')).toBe(source)
+    expect(host.querySelector('output')).toBe(output)
+    expect(output.textContent).toBe('Count: 1')
     expect(actual.getAttribute('aria-selected')).toBe('true')
   })
 
