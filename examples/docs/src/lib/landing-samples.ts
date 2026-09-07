@@ -56,6 +56,7 @@ export const readableCounter = `export function Counter() {
 
   button.addEventListener('click', () => {
     count += 1
+    // Vidact batches this updater; direct call shown for clarity.
     updateCount()
   })
 
