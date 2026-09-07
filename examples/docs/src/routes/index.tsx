@@ -8,7 +8,6 @@ import { Button, ButtonLink } from '@/components/ui/button.tsx'
 import type { DocCodeLine } from '@/lib/docs-types.ts'
 import { mountHeroLogo } from '@/lib/hero-logo-mount.ts'
 import { loadLandingData } from '@/lib/landing-loader.ts'
-import { rejectionOutput } from '@/lib/landing-samples.ts'
 
 const loader = () => loadLandingData()
 
@@ -29,11 +28,11 @@ export function HomeRoute({ loaderData }: LandingProps) {
           />
           <div className="relative mx-auto max-w-6xl px-6 pt-24 pb-20 sm:pt-32 sm:pb-24">
             <h1 className="font-display max-w-3xl text-5xl font-bold tracking-tight text-balance sm:text-7xl">
-              React components, compiled to DOM
+              A compiler for React
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-8 text-zinc-400">
-              Write JSX and hooks. Vidact compiles them into JavaScript that creates your DOM and
-              updates it when state changes. Components run once per mount.
+              Write your components with JSX and hooks. Vidact compiles them into direct DOM
+              updates, so state changes don't re-run your component functions.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link
@@ -47,14 +46,13 @@ export function HomeRoute({ loaderData }: LandingProps) {
               </code>
             </div>
             <p className="mt-6 max-w-xl text-sm text-zinc-500">
-              Beta. Vidact compiles a{' '}
+              In beta.{' '}
               <Link
                 className="text-zinc-300 underline underline-offset-4"
                 href="/docs/reference/react-compatibility"
               >
-                documented subset
-              </Link>{' '}
-              of React 19. Check compatibility before migrating an existing app.
+                Check React compatibility
+              </Link>
             </p>
           </div>
         </section>
@@ -67,18 +65,17 @@ export function HomeRoute({ loaderData }: LandingProps) {
       <section className="mx-auto grid max-w-6xl items-center gap-12 px-6 py-20 sm:py-24 lg:grid-cols-2">
         <div>
           <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">
-            Routes and server rendering with Vidact Start
+            Routing and server rendering
           </h2>
           <p className="mt-4 leading-7 text-muted-foreground">
-            Add a route file, load its data on the server, and render it with a component. Vidact
-            Start handles routing, server rendering, hydration, and client navigation. Shared
-            layouts keep their state when you move between pages.
+            Vidact Start is the framework behind this site. It lets you define a page and load its
+            data in the same route file.
           </p>
           <Link
             className="decoration-muted-foreground/60 mt-6 inline-flex items-center gap-2 font-medium underline underline-offset-4 hover:decoration-current"
             href="/docs/start/getting-started"
           >
-            Read the Start guide <ArrowIcon className="size-4" />
+            Use Vidact Start <ArrowIcon className="size-4" />
           </Link>
         </div>
         <CodePane filename="src/routes/products/$productId.tsx" lines={loaderData.route} rounded />
@@ -167,45 +164,25 @@ function Measurements() {
     <section className="border-y bg-muted/30">
       <div className="mx-auto max-w-6xl px-6 py-16 sm:py-20">
         <div className="grid gap-10 sm:grid-cols-3">
-          <Measurement
-            label="A counter app, runtime included"
-            note="tests/runtime-size/fixtures/counter.tsx"
-            value="8.1 kB"
-          />
-          <Measurement
-            label="TodoMVC, runtime included"
-            note="examples/todomvc/src/TodoApp.tsx"
-            value="11.9 kB"
-          />
-          <Measurement
-            label="Component calls after mount"
-            note="the body runs once, at mount"
-            value="0"
-          />
+          <div>
+            <h2 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">
+              Bundle sizes
+            </h2>
+            <p className="mt-3 text-sm text-muted-foreground">App and runtime, gzipped.</p>
+          </div>
+          <Measurement label="Counter app" value="8.1 kB" />
+          <Measurement label="Todo app (TodoMVC)" value="11.9 kB" />
         </div>
-        <p className="mt-10 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Gzipped production bundles, including the Vidact runtime, measured September 6, 2026.
-          Reproduce with <code>pnpm size</code> after building the repository packages.
-        </p>
       </div>
     </section>
   )
 }
 
-function Measurement({
-  label,
-  note,
-  value,
-}: {
-  readonly label: string
-  readonly note: string
-  readonly value: string
-}) {
+function Measurement({ label, value }: { readonly label: string; readonly value: string }) {
   return (
     <div className="border-t pt-5">
       <p className="font-display text-4xl font-bold tracking-tight">{value}</p>
       <p className="mt-2 font-medium">{label}</p>
-      <p className="mt-1 font-mono text-xs text-muted-foreground">{note}</p>
     </div>
   )
 }
@@ -213,37 +190,19 @@ function Measurement({
 function Limits() {
   return (
     <section className="border-t bg-muted/30">
-      <div className="mx-auto grid max-w-6xl gap-12 px-6 py-20 sm:py-24 lg:grid-cols-2">
-        <div>
-          <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">
-            Check your React dependencies
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-8 px-6 py-12 sm:py-16">
+        <div className="max-w-2xl">
+          <h2 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">
+            React compatibility
           </h2>
           <p className="mt-4 leading-7 text-muted-foreground">
-            Vidact supports function components and hooks, with some differences from React. Class
-            components, <code>createRef</code>, and most <code>Children</code> helpers are
-            unsupported. React DevTools cannot inspect the compiled app.
+            Vidact supports a subset of React 19. Check the APIs and libraries your app uses before
+            migrating.
           </p>
-          <p className="mt-4 leading-7 text-muted-foreground">
-            The Vite plugin also compiles eligible dependencies, including published JSX-runtime
-            calls. Support depends on the code a package uses. The compatibility reference lists the
-            supported APIs and the library interactions covered by tests.
-          </p>
-          <ButtonLink className="mt-6" href="/docs/reference/react-compatibility" variant="outline">
-            Check compatibility <ArrowIcon className="size-4" />
-          </ButtonLink>
         </div>
-        <div className="self-start overflow-hidden rounded-xl border border-white/10 bg-zinc-950">
-          <div className="border-b border-white/10 px-5 py-2.5 font-mono text-xs text-zinc-500">
-            build output
-          </div>
-          <pre className="p-5 font-mono text-[13px] leading-6 whitespace-pre-wrap text-zinc-300">
-            {rejectionOutput.map((line) => (
-              <span className="block pb-3 last:pb-0" key={line}>
-                {line}
-              </span>
-            ))}
-          </pre>
-        </div>
+        <ButtonLink href="/docs/reference/react-compatibility" variant="outline">
+          See supported APIs <ArrowIcon className="size-4" />
+        </ButtonLink>
       </div>
     </section>
   )
@@ -266,11 +225,9 @@ function Examples({ data }: { readonly data: LandingData }) {
       aria-label="Live compiled examples"
       className="mx-auto max-w-6xl px-6 pt-16 pb-20 sm:pt-20 sm:pb-24"
     >
-      <h2 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">
-        Try the compiled components
-      </h2>
+      <h2 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">Examples</h2>
       <p className="mt-3 max-w-2xl text-muted-foreground">
-        Edit a field, reorder a list, or update the counter. These examples run on Vidact.
+        These are live examples, compiled from the code alongside them.
       </p>
       <div className="mt-8 flex gap-1 border-b" role="tablist">
         {EXAMPLES.map((example) => (
@@ -320,7 +277,7 @@ function ExamplePanel({ data, tab }: { readonly data: LandingData; readonly tab:
     case 'form':
       return (
         <ExampleWindow
-          caption="Handlers receive the native event, so event.target.value works with no cast."
+          caption="The greeting updates as you type."
           filename="Greeting.tsx"
           lines={data.form}
         >
@@ -330,7 +287,7 @@ function ExamplePanel({ data, tab }: { readonly data: LandingData; readonly tab:
     case 'list':
       return (
         <ExampleWindow
-          caption="Check a row, then reverse the list. The same DOM node moves with its checkbox state."
+          caption="Check a box, then reverse the list. It stays checked."
           filename="Engines.tsx"
           lines={data.list}
         >
@@ -340,7 +297,7 @@ function ExamplePanel({ data, tab }: { readonly data: LandingData; readonly tab:
     case 'branches':
       return (
         <ExampleWindow
-          caption="Each branch owns its DOM. Switching disposes one and constructs the other."
+          caption="The loading indicator is removed when the result appears."
           filename="Loader.tsx"
           lines={data.branch}
         >
@@ -350,7 +307,7 @@ function ExamplePanel({ data, tab }: { readonly data: LandingData; readonly tab:
     default:
       return (
         <ExampleWindow
-          caption="Click Increment to see the DOM mutation count, measured with MutationObserver."
+          caption="The counter updates without calling the component again."
           filename="Counter.tsx"
           lines={data.counter}
         >
@@ -372,7 +329,7 @@ function ExampleWindow({
   readonly lines: readonly DocCodeLine[]
 }) {
   return (
-    <div className="grid overflow-hidden rounded-xl border lg:grid-cols-2">
+    <div className="grid grid-cols-1 overflow-hidden rounded-xl border lg:grid-cols-2">
       <div className="border-b lg:border-r lg:border-b-0">
         <CodePane filename={filename} lines={lines} />
       </div>
@@ -484,10 +441,9 @@ export function CounterDemo() {
           Count: {count}
         </output>
       </div>
-      <dl className="mt-6 grid max-w-sm grid-cols-3 gap-4 border-t pt-4">
-        <Stat label="Component calls" live={false} value="1" />
+      <dl className="mt-6 grid max-w-sm grid-cols-2 gap-4 border-t pt-4">
+        <Stat label="Component runs" live={false} value="1" />
         <Stat label="DOM mutations" live={true} value={String(mutations)} />
-        <Stat label="Tree diffs" live={false} value="0" />
       </dl>
     </div>
   )
