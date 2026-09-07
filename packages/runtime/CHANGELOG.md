@@ -1,5 +1,12 @@
 # @vidact/runtime
 
+## 0.2.0-beta.7
+
+### Patch Changes
+
+- ed60a1c: Index updater dependencies by source when runtime-owned capabilities change a compiled scope.
+- 977b90f: Retain unchanged Start route owners and update their loader, parameter, URL, and child props during client navigation.
+
 ## 0.2.0-beta.6
 
 ## 0.2.0-beta.5
