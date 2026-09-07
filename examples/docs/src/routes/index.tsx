@@ -268,16 +268,15 @@ export function CompilerDemo({ data }: { readonly data: LandingData }) {
           className="min-w-0 border-b bg-zinc-950 lg:border-r lg:border-b-0"
           id="compiler-source"
         >
-          <CompilerCode
-            filename="Counter.tsx"
-            lines={data.counter}
-            note="The component you write."
-          />
+          <div className="border-b px-5 h-12 font-mono text-xs text-zinc-400 items-center flex">
+            Source
+          </div>
+          <CompilerCode className="h-155" lines={data.counter} note="The component you write." />
         </div>
         <div className="flex min-w-0 flex-col border-b bg-zinc-950 lg:border-b-0">
           <div
             aria-label="Generated output view"
-            className="flex gap-1 overflow-x-auto border-b px-3 pt-2"
+            className="flex gap-1 overflow-x-auto border-b px-3 h-12"
             role="tablist"
           >
             {COMPILER_VIEWS.map((item) => (
@@ -307,14 +306,14 @@ export function CompilerDemo({ data }: { readonly data: LandingData }) {
           >
             {view === 'readable' ? (
               <CompilerCode
-                filename="Counter.js"
                 lines={data.readable}
+                className="h-155"
                 note="Runtime scheduling and cleanup are omitted for readability."
               />
             ) : null}
             {view === 'actual' ? (
               <CompilerCode
-                filename="Counter.compiled.tsx"
+                className="h-155"
                 lines={data.compiled}
                 note="Exact output from @vidact/compiler."
               />
@@ -341,24 +340,28 @@ function CompilerCode({
   filename,
   lines,
   note,
+  className,
 }: {
-  readonly filename: string
+  readonly filename?: string
   readonly lines: readonly DocCodeLine[]
   readonly note: string
+  readonly className?: string
 }) {
-  return <CodePane filename={filename} footer={note} lines={lines} />
+  return <CodePane className={className} filename={filename} footer={note} lines={lines} />
 }
 
 function Origin() {
   return (
     <section className="border-t bg-muted/30">
-      <div className="mx-auto grid max-w-6xl gap-12 px-6 py-10 sm:py-16 lg:grid-cols-2">
-        <div>
-          <p className="font-mono text-xs text-muted-foreground">Why now</p>
-          <h2 className="font-display mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
-            I came back to a six-year-old experiment
-          </h2>
-          <p className="mt-5 leading-7 text-muted-foreground">
+      <div className="mx-auto max-w-6xl px-6 py-10 sm:py-16">
+        <div className="grid gap-8 lg:grid-cols-2 lg:items-end lg:gap-16">
+          <div>
+            <p className="font-mono text-xs text-muted-foreground">Why now</p>
+            <h2 className="font-display mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+              I came back to a six-year-old experiment
+            </h2>
+          </div>
+          <p className="leading-7 text-muted-foreground">
             I started Vidact in 2020, then put it aside. Work on{' '}
             <a className="underline underline-offset-4" href="https://grep.codemod.com">
               grep.codemod.com
@@ -367,9 +370,9 @@ function Origin() {
             lifting.
           </p>
         </div>
-        <div className="self-end border-t pt-5">
+        <div className="mt-10 grid gap-5 border-t pt-8 lg:grid-cols-2 lg:gap-16">
           <h3 className="font-display text-xl font-semibold">What Vidact reuses</h3>
-          <p className="mt-4 leading-7 text-muted-foreground">
+          <p className="leading-7 text-muted-foreground">
             The compiler is written in Rust and uses React Compiler's analysis infrastructure for
             AST, scope, HIR, CFG, SSA, and dependency information. Vidact has its own IR, DOM code
             generator, and runtime.
@@ -540,11 +543,13 @@ function CodePane({
   footer,
   lines,
   rounded,
+  className,
 }: {
-  readonly filename: string
+  readonly filename: string | undefined
   readonly footer?: string
   readonly lines: readonly DocCodeLine[]
   readonly rounded?: boolean
+  readonly className?: string | undefined
 }) {
   return (
     <div
@@ -556,10 +561,12 @@ function CodePane({
             : 'h-full bg-zinc-950 text-zinc-50'
       }
     >
-      <div className="border-b border-white/10 px-5 py-2.5 font-mono text-xs text-zinc-400">
-        {filename}
-      </div>
-      <pre className="overflow-x-auto p-5 text-[13px] leading-6">
+      {filename && (
+        <div className="border-b border-white/10 px-5 py-2.5 font-mono text-xs text-zinc-400">
+          {filename}
+        </div>
+      )}
+      <pre className={`overflow-x-auto p-5 text-[13px] leading-6 ${className ?? ''}`}>
         <code>
           {lines.map((line) => (
             <CodeLine key={line.key} line={line} />
