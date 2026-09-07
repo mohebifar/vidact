@@ -61,14 +61,13 @@ pnpm --filter @vidact/example-docs dev
 
 The development server listens on `http://127.0.0.1:5173` by default.
 
-### Landing page measurements
+### Landing page measurement
 
-The landing page shows total gzipped JavaScript for two production builds, including the runtime.
-Run `pnpm size` from the repository root after building the workspace packages to refresh them.
-The September 6, 2026 measurements were 8,143 bytes for
-`tests/runtime-size/fixtures/counter.tsx` and 11,943 bytes for `examples/todomvc/src/TodoApp.tsx`.
-The page rounds these to decimal kB. Keep measurement dates, source paths, and reproduction
-instructions here rather than in visitor-facing copy.
+The counter demo shows the total gzipped JavaScript for its production build, including the runtime.
+Run `pnpm size` from the repository root after building the workspace packages to refresh it. The
+September 6, 2026 measurement was 8,143 bytes for `tests/runtime-size/fixtures/counter.tsx`; the page
+rounds this to 8.1 kB. Keep measurement dates, source paths, and reproduction instructions here rather
+than in visitor-facing copy.
 
 ## Vercel deployment
 

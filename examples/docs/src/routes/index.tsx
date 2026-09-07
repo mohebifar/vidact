@@ -28,11 +28,11 @@ export function HomeRoute({ loaderData }: LandingProps) {
           />
           <div className="relative mx-auto max-w-6xl px-6 pt-24 pb-20 sm:pt-32 sm:pb-24">
             <h1 className="font-display max-w-3xl text-5xl font-bold tracking-tight text-balance sm:text-7xl">
-              A compiler for React
+              Write React. Ship direct DOM.
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-8 text-zinc-400">
-              Write your components with JSX and hooks. Vidact compiles them into direct DOM
-              updates, so state changes don't re-run your component functions.
+              Vidact compiles function components, JSX, and hooks into DOM updates. Your component
+              runs once when it mounts.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link
@@ -60,25 +60,29 @@ export function HomeRoute({ loaderData }: LandingProps) {
 
       <Examples data={loaderData} />
 
-      <Measurements />
-
-      <section className="mx-auto grid max-w-6xl items-center gap-12 px-6 py-20 sm:py-24 lg:grid-cols-2">
-        <div>
-          <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">
-            Routing and server rendering
-          </h2>
-          <p className="mt-4 leading-7 text-muted-foreground">
-            Vidact Start is the framework behind this site. It lets you define a page and load its
-            data in the same route file.
-          </p>
-          <Link
-            className="decoration-muted-foreground/60 mt-6 inline-flex items-center gap-2 font-medium underline underline-offset-4 hover:decoration-current"
-            href="/docs/start/getting-started"
-          >
-            Use Vidact Start <ArrowIcon className="size-4" />
-          </Link>
+      <section className="border-y bg-muted/30">
+        <div className="mx-auto grid max-w-6xl items-center gap-12 px-6 py-20 sm:py-24 lg:grid-cols-2">
+          <div>
+            <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">
+              Build full-stack apps
+            </h2>
+            <p className="mt-4 leading-7 text-muted-foreground">
+              Vidact Start adds file routes, server loaders, SSR, hydration, and client navigation.
+              The route below loads and renders a product in one file.
+            </p>
+            <Link
+              className="decoration-muted-foreground/60 mt-6 inline-flex items-center gap-2 font-medium underline underline-offset-4 hover:decoration-current"
+              href="/docs/start/getting-started"
+            >
+              Read the Start guide <ArrowIcon className="size-4" />
+            </Link>
+          </div>
+          <CodePane
+            filename="src/routes/products/$productId.tsx"
+            lines={loaderData.route}
+            rounded
+          />
         </div>
-        <CodePane filename="src/routes/products/$productId.tsx" lines={loaderData.route} rounded />
       </section>
 
       <Limits />
@@ -159,45 +163,17 @@ function SiteHeader() {
   )
 }
 
-function Measurements() {
-  return (
-    <section className="border-y bg-muted/30">
-      <div className="mx-auto max-w-6xl px-6 py-16 sm:py-20">
-        <div className="grid gap-10 sm:grid-cols-3">
-          <div>
-            <h2 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">
-              Bundle sizes
-            </h2>
-            <p className="mt-3 text-sm text-muted-foreground">App and runtime, gzipped.</p>
-          </div>
-          <Measurement label="Counter app" value="8.1 kB" />
-          <Measurement label="Todo app (TodoMVC)" value="11.9 kB" />
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function Measurement({ label, value }: { readonly label: string; readonly value: string }) {
-  return (
-    <div className="border-t pt-5">
-      <p className="font-display text-4xl font-bold tracking-tight">{value}</p>
-      <p className="mt-2 font-medium">{label}</p>
-    </div>
-  )
-}
-
 function Limits() {
   return (
-    <section className="border-t bg-muted/30">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-8 px-6 py-12 sm:py-16">
+    <section>
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-8 px-6 py-16 sm:py-20">
         <div className="max-w-2xl">
           <h2 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">
-            React compatibility
+            Bringing an existing React app?
           </h2>
           <p className="mt-4 leading-7 text-muted-foreground">
-            Vidact supports a subset of React 19. Check the APIs and libraries your app uses before
-            migrating.
+            Vidact supports a growing subset of React 19. Check the APIs and libraries your app uses
+            before you migrate.
           </p>
         </div>
         <ButtonLink href="/docs/reference/react-compatibility" variant="outline">
@@ -225,9 +201,9 @@ function Examples({ data }: { readonly data: LandingData }) {
       aria-label="Live compiled examples"
       className="mx-auto max-w-6xl px-6 pt-16 pb-20 sm:pt-20 sm:pb-24"
     >
-      <h2 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">Examples</h2>
+      <h2 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">See it run</h2>
       <p className="mt-3 max-w-2xl text-muted-foreground">
-        These are live examples, compiled from the code alongside them.
+        The code on the left is running on the right. Try the controls.
       </p>
       <div className="mt-8 flex gap-1 border-b" role="tablist">
         {EXAMPLES.map((example) => (
@@ -277,7 +253,7 @@ function ExamplePanel({ data, tab }: { readonly data: LandingData; readonly tab:
     case 'form':
       return (
         <ExampleWindow
-          caption="The greeting updates as you type."
+          caption="Typing updates the existing greeting."
           filename="Greeting.tsx"
           lines={data.form}
         >
@@ -287,7 +263,7 @@ function ExamplePanel({ data, tab }: { readonly data: LandingData; readonly tab:
     case 'list':
       return (
         <ExampleWindow
-          caption="Check a box, then reverse the list. It stays checked."
+          caption="Check a row, then reverse. The checked row moves with its DOM node."
           filename="Engines.tsx"
           lines={data.list}
         >
@@ -297,7 +273,7 @@ function ExamplePanel({ data, tab }: { readonly data: LandingData; readonly tab:
     case 'branches':
       return (
         <ExampleWindow
-          caption="The loading indicator is removed when the result appears."
+          caption="Changing state removes one branch and inserts the next."
           filename="Loader.tsx"
           lines={data.branch}
         >
@@ -307,7 +283,7 @@ function ExamplePanel({ data, tab }: { readonly data: LandingData; readonly tab:
     default:
       return (
         <ExampleWindow
-          caption="The counter updates without calling the component again."
+          caption="Increment updates the existing text node."
           filename="Counter.tsx"
           lines={data.counter}
         >
@@ -441,10 +417,12 @@ export function CounterDemo() {
           Count: {count}
         </output>
       </div>
-      <dl className="mt-6 grid max-w-sm grid-cols-2 gap-4 border-t pt-4">
+      <dl className="mt-6 grid max-w-md grid-cols-3 gap-4 border-t pt-4">
         <Stat label="Component runs" live={false} value="1" />
         <Stat label="DOM mutations" live={true} value={String(mutations)} />
+        <Stat label="Production bundle" live={false} value="8.1 kB" />
       </dl>
+      <p className="mt-3 text-xs text-muted-foreground">Gzipped, including the runtime.</p>
     </div>
   )
 }

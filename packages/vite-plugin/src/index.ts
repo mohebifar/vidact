@@ -4,6 +4,7 @@ import remapping, { type SourceMapInput } from '@jridgewell/remapping'
 import { originalPositionFor, TraceMap } from '@jridgewell/trace-mapping'
 import { createFilter, transformWithOxc, type FilterPattern, type Plugin } from 'vite'
 
+import { ReplacementCache } from './compilation-cache.ts'
 import {
   compileWithCompiler,
   normalizeConfiguration,
@@ -24,7 +25,6 @@ import {
   type SourceDependencyCapsule,
 } from './dependency-capsule.ts'
 import { createDependencyQualifier, isDependencyModuleId } from './dependency-qualification.ts'
-import { ReplacementCache } from './compilation-cache.ts'
 
 const REACT_MODULE = '\0vidact:react'
 const REACT_JSX_RUNTIME_MODULE = '\0vidact:react-jsx-runtime'
@@ -99,9 +99,11 @@ export function vidact(options: VidactPluginOptions = {}): Plugin {
     target: options.target ?? 'client',
     features: options.features ?? [],
   })
-  const compilationCache = new ReplacementCache<
-    { code: string; sourceMap: Record<string, unknown>; analysis: VidactAnalysis }
-  >()
+  const compilationCache = new ReplacementCache<{
+    code: string
+    sourceMap: Record<string, unknown>
+    analysis: VidactAnalysis
+  }>()
   const includeDependency =
     options.includeDependencies === undefined
       ? () => false
