@@ -1,3 +1,4 @@
+// oxlint-disable no-await-in-loop -- Server polling and local-package resolution are intentionally sequential.
 import { spawn } from 'node:child_process'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
@@ -11,6 +12,9 @@ const frameworkRoot = join(benchmarkRoot, 'frameworks/keyed/vidact')
 const webdriverRoot = join(benchmarkRoot, 'webdriver-ts')
 const resultsRoot = join(webdriverRoot, 'results')
 const runtimeRoot = join(repoRoot, 'packages/runtime')
+const compilerRoot = join(repoRoot, 'packages/compiler')
+const viteRoot = join(repoRoot, 'packages/vite-plugin')
+const reactTypesRoot = join(repoRoot, 'packages/react-types')
 const smoke = process.argv.includes('--smoke')
 
 const cpuBenchmarks = smoke
@@ -137,19 +141,39 @@ async function main() {
   let keyedPassed = 0
   let runtimeTestsPassed = 0
   try {
+    await run('pnpm', ['--filter', '@vidact/compiler', 'build'])
     await run('pnpm', ['--filter', '@vidact/runtime', 'build'])
-    await run('npm', ['install', '--no-save', '--package-lock=false', runtimeRoot], {
-      cwd: frameworkRoot,
-    })
-    const resolvedRuntime = (
-      await run(
-        'node',
-        ['--input-type=module', '-e', "console.log(import.meta.resolve('@vidact/runtime'))"],
-        { cwd: frameworkRoot },
-      )
-    ).trim()
-    if (!resolvedRuntime.startsWith(`file://${runtimeRoot}/`)) {
-      throw new Error(`benchmark resolved a non-local runtime: ${resolvedRuntime}`)
+    await run('pnpm', ['--filter', '@vidact/vite', 'build'])
+    await run(
+      'npm',
+      [
+        'install',
+        '--no-save',
+        '--package-lock=false',
+        runtimeRoot,
+        compilerRoot,
+        viteRoot,
+        reactTypesRoot,
+      ],
+      {
+        cwd: frameworkRoot,
+      },
+    )
+    for (const [packageName, packageRoot] of [
+      ['@vidact/runtime', runtimeRoot],
+      ['@vidact/compiler', compilerRoot],
+      ['@vidact/vite', viteRoot],
+    ]) {
+      const resolved = (
+        await run(
+          'node',
+          ['--input-type=module', '-e', `console.log(import.meta.resolve('${packageName}'))`],
+          { cwd: frameworkRoot },
+        )
+      ).trim()
+      if (!resolved.startsWith(`file://${packageRoot}/`)) {
+        throw new Error(`benchmark resolved a non-local ${packageName}: ${resolved}`)
+      }
     }
     await run('npm', ['run', 'build-prod'], { cwd: frameworkRoot })
     await run('pnpm', [

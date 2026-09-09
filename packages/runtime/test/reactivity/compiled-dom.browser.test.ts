@@ -40,6 +40,7 @@ import {
   source,
   when,
 } from '../../src/index.ts'
+import { installStateWriteInterceptor } from '../../src/state-slot.ts'
 
 interface Item {
   readonly id: number
@@ -47,6 +48,54 @@ interface Item {
 }
 
 describe('compiled DOM corpus', () => {
+  it('does not write retained keyed item slots when values and indexes are unchanged', () => {
+    const itemsSource = source(0)
+    const initialItems = [
+      { id: 1, label: 'one' },
+      { id: 2, label: 'two' },
+    ] as const
+    let setItems!: ReturnType<typeof createCompiledState<readonly Item[]>>['set']
+    const host = document.createElement('div')
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const items = createCompiledState<readonly Item[]>(scope, itemsSource, initialItems)
+      setItems = items.set
+      return compiledRoot(scope, () =>
+        h(
+          'ul',
+          null,
+          keyed(
+            scope,
+            itemsSource,
+            items.get,
+            (item) => item.id,
+            (item, _index, itemScope) =>
+              h(
+                'li',
+                null,
+                binding(itemScope, source(0), () => item.get().label),
+              ),
+          ),
+        ),
+      )
+    }, host)
+    let writes = 0
+    installStateWriteInterceptor(() => {
+      writes += 1
+      return false
+    })
+
+    try {
+      setItems([...initialItems])
+
+      expect(writes).toBe(1)
+      expect(host.textContent).toBe('onetwo')
+    } finally {
+      installStateWriteInterceptor(() => false)
+      mounted.dispose()
+    }
+  })
+
   it('reconciles repeated portal descriptors without replacing the portal owner', async () => {
     const logicalHost = document.createElement('div')
     const portalHost = document.createElement('div')

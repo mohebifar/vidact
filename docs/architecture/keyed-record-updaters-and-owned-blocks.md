@@ -11,7 +11,7 @@ React Compiler analysis can identify component-level reactive inputs, but it doe
 
 ## Decision
 
-A compiled keyed record is identified only by its key. Each record owns its DOM nodes, cleanup owner, item updater scope, current-item slot, and current-index slot. When the same key receives a new object or position, `keyed` writes the new values into those slots and generated bindings update the retained DOM. A changed or removed key disposes the old record.
+A compiled keyed record is identified only by its key. Each record owns its DOM nodes, cleanup owner, compact item updater scope, current-item cell, and a current-index cell only when the callback declares an index parameter. When the same key receives a new object or tracked position, `keyed` writes the new values into those cells and generated bindings update the retained DOM. A changed or removed key disposes the old record.
 
 The OXC lowering uses semantic `SymbolId`s for keyed callback parameters. It rewrites item and index references to slot reads and classifies each JSX binding into a component-source mask, an item-source mask, or both. The runtime statically registers the emitted updater against those masks. It does not discover dependencies while evaluating the expression, so these slots are Vidact-style updaters rather than signals.
 
@@ -27,6 +27,14 @@ slot, and each leaf reference becomes a static property path from
 property selector, so key calculation still does not allocate slots before
 reconciliation. Nested/default/rest/array row patterns remain diagnosed until
 their key and default contracts are explicit.
+
+The compiler emits an index-tracking boolean in the private `keyed` call ABI.
+Compiler-managed item and index inputs use read-only cells: they expose the
+generated `.get()` shape and invalidate their fixed source mask on replacement,
+without allocating public state setters. Their item scope uses a compact narrow
+scheduler and omits removable updater closures when the updater has the same
+lifetime as that row owner. Manually authored runtime calls keep the full
+`StateSlot` and general scope contract.
 
 `binding`, `when`, `keyed`, and `indexed` accept their component scope/mask
 plus an optional item scope/mask. A nested list whose collection reads its outer
@@ -47,7 +55,8 @@ Owned blocks carry their update ownership from their producer. Passing one into 
 ## Invariants
 
 - A retained key preserves its record owner and exact DOM nodes across object replacement and reorder.
-- Item-, index-, component-, and mixed-dependency bindings observe their current values.
+- Item-, tracked-index, component-, and mixed-dependency bindings observe their current values.
+- A callback that does not declare an index parameter allocates no index cell or index invalidation path.
 - A nested list collection observes replacement of its retained outer item and
   reconciles its own records without replacing the outer record.
 - Key extraction receives raw collection values; identifier and destructured
@@ -70,8 +79,8 @@ Immutable updates to list records are surgical for supported keyed callbacks,
 and compiled arrays can be composed through prop boundaries. Explicit unkeyed
 maps and direct `for...of` accumulators use the same record engine with position
 keys; see [Compiler-owned iterative JSX](compiler-owned-iterative-jsx.md). Each
-mounted record pays for a small scope and two state slots, and mixed bindings
-register in two scopes. Nested collections derived from an outer item and
+compiler-managed record pays for one compact scope, one read-only item cell,
+and an index cell only when used; mixed bindings register in two scopes. Nested collections derived from an outer item and
 direct/aliased/nested object leaf reads in map callback parameters are supported,
 while direct outer-row captures remain diagnosed. Row-pattern
 defaults/rest/arrays, broader imperative accumulator grammars, and arbitrary

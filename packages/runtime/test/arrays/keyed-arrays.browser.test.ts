@@ -109,6 +109,68 @@ describe('keyed array corpus', () => {
     expect(records).toEqual([])
   })
 
+  it('moves only displaced records for a sparse keyed swap', async () => {
+    const host = document.createElement('div')
+    const list = createKeyedList<Todo, number>(host, {
+      key: (todo) => todo.id,
+      render: (todo) => {
+        const node = document.createElement('span')
+        node.dataset.key = String(todo.id)
+        return node
+      },
+    })
+    const values = Array.from({ length: 10 }, (_, id) => ({ id, label: String(id) }))
+    list.update(values)
+    const originalNodes = new Map(
+      [...host.querySelectorAll<HTMLElement>('span')].map((node) => [node.dataset.key, node]),
+    )
+    const swapped = [...values]
+    ;[swapped[1], swapped[8]] = [swapped[8]!, swapped[1]!]
+
+    const mutations = await captureMutations(host, () => list.update(swapped))
+    const childListMutations = mutations.records.filter((record) => record.type === 'childList')
+
+    expect([...host.querySelectorAll<HTMLElement>('span')].map((node) => node.dataset.key)).toEqual(
+      ['0', '8', '2', '3', '4', '5', '6', '7', '1', '9'],
+    )
+    expect(
+      [...host.querySelectorAll<HTMLElement>('span')].every(
+        (node) => originalNodes.get(node.dataset.key) === node,
+      ),
+    ).toBe(true)
+    expect(childListMutations.length).toBeLessThanOrEqual(4)
+  })
+
+  it('inserts an appended keyed suffix in one DOM batch', async () => {
+    const host = document.createElement('div')
+    const list = createKeyedList<Todo, number>(host, {
+      key: (todo) => todo.id,
+      render: (todo) => {
+        const node = document.createElement('span')
+        node.dataset.key = String(todo.id)
+        return node
+      },
+    })
+    const first = { id: 1, label: 'one' }
+    list.update([first])
+    const firstNode = host.querySelector('[data-key="1"]')
+
+    const mutations = await captureMutations(host, () =>
+      list.update([
+        first,
+        { id: 2, label: 'two' },
+        { id: 3, label: 'three' },
+        { id: 4, label: 'four' },
+      ]),
+    )
+
+    expect(host.querySelector('[data-key="1"]')).toBe(firstNode)
+    expect([...host.querySelectorAll<HTMLElement>('span')].map((node) => node.dataset.key)).toEqual(
+      ['1', '2', '3', '4'],
+    )
+    expect(mutations.records.filter((record) => record.type === 'childList')).toHaveLength(1)
+  })
+
   it('finishes removing and disposing records before rethrowing cleanup errors', () => {
     const host = document.createElement('div')
     const disposed: number[] = []

@@ -158,6 +158,9 @@ export function SynchronousFlowApp(): JSX.Element {
       <button data-noop onClick={() => setValues((current) => current)}>
         noop
       </button>
+      <button data-clone-rows onClick={() => setRows((current) => [...current])}>
+        clone rows
+      </button>
       <button
         data-prepend-row
         onClick={() => setRows((current) => [{ id: 'new', label: 'New' }, ...current])}

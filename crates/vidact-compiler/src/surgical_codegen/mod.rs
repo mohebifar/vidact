@@ -53,6 +53,7 @@ const ACTION_FORM: &str = "__vidactActionForm";
 const BINDING: &str = "__vidactBinding";
 const COMBINE_SOURCES: &str = "__vidactCombineSources";
 const COMPILED_EVENT: &str = "__vidactEvent";
+const COMPILED_INLINE_EVENT: &str = "__vidactInlineEvent";
 const COMPILED_COMPONENT_SPREAD: &str = "__vidactComponentSpread";
 const COMPILED_EFFECT: &str = "__vidactEffect";
 const COMPILED_IMPERATIVE_HANDLE: &str = "__vidactImperativeHandle";
@@ -730,6 +731,7 @@ fn transform_program<'a>(
         BINDING,
         COMBINE_SOURCES,
         COMPILED_EVENT,
+        COMPILED_INLINE_EVENT,
         COMPILED_COMPONENT_SPREAD,
         COMPILED_EFFECT,
         COMPILED_IMPERATIVE_HANDLE,
@@ -4160,8 +4162,15 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
                 );
                 let handler = expression.clone_in_with_semantic_ids(self.ast.allocator());
                 if reads.is_empty() || inline_handler {
-                    *expression =
-                        call_name(self.ast, COMPILED_EVENT, [ident(self.ast, SCOPE), handler]);
+                    *expression = call_name(
+                        self.ast,
+                        if inline_handler && name.name == "onClick" {
+                            COMPILED_INLINE_EVENT
+                        } else {
+                            COMPILED_EVENT
+                        },
+                        [ident(self.ast, SCOPE), handler],
+                    );
                 } else {
                     let mut arguments = vec![
                         ident(self.ast, SCOPE),
@@ -4343,7 +4352,9 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             return;
         }
 
-        if let Some((collection, key, mut render)) = jsx_map(expression, self.ast, self.scoping) {
+        if let Some((collection, key, mut render, track_index)) =
+            jsx_map(expression, self.ast, self.scoping)
+        {
             let reads = dependencies(
                 &collection,
                 self.scoping,
@@ -4370,6 +4381,7 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             if let Some(key) = key {
                 arguments.push(key);
                 arguments.push(render);
+                arguments.push(Expression::new_boolean_literal(SPAN, track_index, self.ast));
                 append_item_dependency(self.ast, &mut arguments, &reads);
                 *expression = call_name(self.ast, KEYED, arguments);
             } else {
@@ -5201,7 +5213,7 @@ fn jsx_map<'a>(
     expression: &Expression<'a>,
     ast: &AstBuilder<'a>,
     scoping: &Scoping,
-) -> Option<(Expression<'a>, Option<Expression<'a>>, Expression<'a>)> {
+) -> Option<(Expression<'a>, Option<Expression<'a>>, Expression<'a>, bool)> {
     let Expression::CallExpression(call) = expression.without_parentheses() else {
         return None;
     };
@@ -5275,6 +5287,7 @@ fn jsx_map<'a>(
         )),
         (None, _) => None,
     };
+    let track_index = render.params.items.len() == 2;
     let mut render = render.clone_in_with_semantic_ids(ast.allocator());
     if matches!(
         render.params.items[0].pattern,
@@ -5291,6 +5304,7 @@ fn jsx_map<'a>(
         member.object.clone_in_with_semantic_ids(ast.allocator()),
         key,
         Expression::ArrowFunctionExpression(render),
+        track_index,
     ))
 }
 
@@ -5841,6 +5855,7 @@ fn runtime_imports<'a>(
         ("compiledComponentSpread", COMPILED_COMPONENT_SPREAD),
         ("compiledEffect", COMPILED_EFFECT),
         ("compiledEvent", COMPILED_EVENT),
+        ("compiledInlineEvent", COMPILED_INLINE_EVENT),
         ("compiledImperativeHandle", COMPILED_IMPERATIVE_HANDLE),
         ("compiledInsertionEffect", COMPILED_INSERTION_EFFECT),
         ("compiledLayoutEffect", COMPILED_LAYOUT_EFFECT),

@@ -65,7 +65,10 @@ fn imports_only_dom_capabilities_reached_by_intrinsic_jsx() {
         "#,
     })
     .expect("counter should compile");
-    assert!(counter.contains("onClick={__vidactEvent"), "{counter}");
+    assert!(
+        counter.contains("onClick={__vidactInlineEvent"),
+        "{counter}"
+    );
     assert!(!counter.contains("onClick={__vidactBinding"), "{counter}");
     assert!(!counter.contains("@vidact/runtime/dom/forms"), "{counter}");
     assert!(
@@ -1014,6 +1017,7 @@ fn compiles_keyed_item_and_parent_reads_into_separate_static_domains() {
     assert!(output.contains("item.get().id"), "{output}");
     assert!(output.contains("index.get()"), "{output}");
     assert!(output.contains("__vidactItemScope, 1"), "{output}");
+    assert!(output.contains(", true"), "{output}");
 }
 
 #[test]
@@ -1094,6 +1098,7 @@ fn compiles_top_level_destructured_keys_against_raw_rows() {
         "{output}"
     );
     assert!(output.contains("__vidactItem.get()[\"label\"]"), "{output}");
+    assert!(output.contains(", false"), "{output}");
 }
 
 #[test]

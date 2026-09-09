@@ -31,14 +31,21 @@ applications do not import an HTML-template runtime or assign compiler-generated
 markup to `template.innerHTML`. The only supported HTML-string sink remains the
 explicit, separately validated `dangerouslySetInnerHTML` contract.
 
+The direct backend may reuse bounded, detached shallow shells for clone-safe
+standard HTML elements. A shell contains only primitive static attributes from
+the existing DOM-property policy. Each authored element is still a distinct DOM
+node; reactive props, events, refs, children, controlled-form behavior, metadata,
+and ownership are applied after cloning. The cache does not contain application
+children, reactive values, custom elements, SVG/MathML nodes, or parsed HTML.
+
 Future static-tree work must improve this single backend or demonstrate an
 application-level win large enough to justify reopening the decision. It must
 not silently introduce a second semantic path per subtree.
 
 ## Invariants
 
-- Every accepted intrinsic is created through the namespace-aware direct-DOM
-  policy.
+- Every accepted intrinsic is created or shallow-cloned through the
+  namespace-aware direct-DOM policy.
 - There is no template-mode configuration, HTML-template code generator, marker
   ABI, or template-instantiation runtime.
 - Components construct once; state writes run static updaters against retained
@@ -47,6 +54,8 @@ not silently introduce a second semantic path per subtree.
   and production builds.
 - Static optimization cannot bypass DOM property, event, form, style, ref,
   namespace, raw-HTML, ownership, or rollback semantics.
+- Shallow shell reuse is bounded, never shares authored nodes, and caches only
+  primitive attributes whose normal property policy has already run.
 
 ## Alternatives considered
 
@@ -64,6 +73,9 @@ not silently introduce a second semantic path per subtree.
 The compiler and runtime return to one construction ABI. This removes template
 parsing, clone traversal, marker discovery, parser-normalization diagnostics,
 dual-mode configuration, and parity-suite duplication.
+
+Repeated standard HTML elements can avoid rebuilding identical primitive
+attribute shells while retaining the same direct construction and update path.
 
 Very static applications give up the large compression win observed in the
 discarded experiment. Vidact instead optimizes for ordinary interactive
