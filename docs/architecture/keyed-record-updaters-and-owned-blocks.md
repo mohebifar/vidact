@@ -15,6 +15,13 @@ A compiled keyed record is identified only by its key. Each record owns its DOM 
 
 The OXC lowering uses semantic `SymbolId`s for keyed callback parameters. It rewrites item and index references to slot reads and classifies each JSX binding into a component-source mask, an item-source mask, or both. The runtime statically registers the emitted updater against those masks. It does not discover dependencies while evaluating the expression, so these slots are Vidact-style updaters rather than signals.
 
+An exact item identity or direct property path used as the row key is invariant
+for that record owner's lifetime. When the same semantic item reference appears
+again inside the keyed callback, including a scalar structural-choice branch,
+the compiler emits its slot read without a binding or item-scope subscription.
+If that key value changes, keyed reconciliation removes the old owner and mounts
+a new record before an in-place item update could be observed.
+
 A keyed or conditional structural result is an owned block. The block may pass through props and be rendered as a child, including the compiled form of `<div>{props.arrayOfJsx}</div>`, but it may mount only once. This supports arrays produced by Vidact compilation; it does not make arbitrary external `ReactElement[]` values renderable.
 
 ## Compiler and runtime contract
@@ -27,6 +34,12 @@ slot, and each leaf reference becomes a static property path from
 property selector, so key calculation still does not allocate slots before
 reconciliation. Nested/default/rest/array row patterns remain diagnosed until
 their key and default contracts are explicit.
+
+Invariant-key matching uses the same `KeyPath::Identity` and
+`KeyPath::Property` boundary as keyed-list analysis plus semantic `SymbolId`
+equality. It applies to exact repeated item references and direct properties,
+including supported destructured key leaves. Composite, computed, nested, and
+mixed parent/item expressions keep their normal reactive bindings.
 
 The compiler emits an index-tracking boolean in the private `keyed` call ABI.
 Compiler-managed item and index inputs use read-only cells: they expose the
@@ -61,6 +74,8 @@ Owned blocks carry their update ownership from their producer. Passing one into 
   reconciles its own records without replacing the outer record.
 - Key extraction receives raw collection values; identifier and destructured
   row rendering receives slots and compiler-owned property paths.
+- An exact repeated key path allocates no item updater; changing the path's
+  value changes record identity and therefore replaces the record owner.
 - Duplicate keys fail before the current DOM is changed.
 - Removing or changing a key disposes the old record exactly once.
 - One owned block has one legal mount.
@@ -72,6 +87,9 @@ Owned blocks carry their update ownership from their producer. Passing one into 
 - **Runtime signals per item:** Would update correctly, but adds dynamic dependency discovery and a more general reactive runtime than Vidact needs. Static semantic analysis already knows the relevant item reads.
 - **Diff arbitrary React element arrays:** Requires interpreting element objects and maintaining a runtime tree/diff contract, which conflicts with the React-to-direct-DOM goal.
 - **Generate fully imperative row-specific updater functions immediately:** Likely produces the smallest mature ABI, but requires a larger JSX-to-DOM codegen step. Item scopes provide the same identity and static-update semantics while the current direct JSX runtime remains in place.
+- **Retain a binding and skip equal values at runtime:** Preserves the same DOM
+  result but keeps an evaluator, binding state, subscription, and updater record
+  per row for a value that cannot change without replacing that row.
 
 ## Consequences
 
@@ -80,7 +98,8 @@ and compiled arrays can be composed through prop boundaries. Explicit unkeyed
 maps and direct `for...of` accumulators use the same record engine with position
 keys; see [Compiler-owned iterative JSX](compiler-owned-iterative-jsx.md). Each
 compiler-managed record pays for one compact scope, one read-only item cell,
-and an index cell only when used; mixed bindings register in two scopes. Nested collections derived from an outer item and
+and an index cell only when used; exact repeated key paths add no updater, while
+mixed bindings register in two scopes. Nested collections derived from an outer item and
 direct/aliased/nested object leaf reads in map callback parameters are supported,
 while direct outer-row captures remain diagnosed. Row-pattern
 defaults/rest/arrays, broader imperative accumulator grammars, and arbitrary
@@ -93,6 +112,6 @@ external JSX arrays remain outside the accepted contract.
 - `tests/browser/corpus/apps/control-flow/ControlFlowApp.browser.test.ts` proves
   a nested keyed list reconciles from a retained outer item while preserving
   both levels of DOM identity.
-- `crates/vidact-compiler/tests/surgical_codegen.rs` checks separate item/component domains, slot reads, raw key selectors, and generated callback shape.
+- `crates/vidact-compiler/tests/surgical_codegen.rs` checks separate item/component domains, invariant direct and destructured key reads, nested key-context restoration, structural branches, raw key selectors, and generated callback shape.
 - `examples/todomvc/src/TodoApp.browser.test.ts` verifies a changed todo retains its exact `li` while rows are passed through `TodoList` as a prop.
 - Run `cargo test --workspace`, `pnpm test:runtime`, `pnpm test:browser`, `pnpm test:examples`, and `pnpm typecheck`.

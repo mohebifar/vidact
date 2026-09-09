@@ -21,7 +21,7 @@ use oxc_syntax::{operator::LogicalOperator, scope::ScopeFlags, symbol::SymbolId}
 
 use crate::{
     Diagnostic, DiagnosticCode, SourceSpan,
-    analysis::{ModuleInput, SourceId, SourceKind},
+    analysis::{KeyPath, ModuleInput, SourceId, SourceKind},
     ast_utils::{
         OBJECT_REST, component_function_parts_mut, is_event_attribute,
         is_supported_react_event_attribute, normalize_compiler_hook_inputs,
@@ -36,6 +36,7 @@ use crate::{
     oxc_react::analyze_program,
     react_bindings::{
         ActionHook, ConcurrentHook, ContextHook, EffectHook, MemoHook, ReactBindings, StateHook,
+        reference_symbol,
     },
 };
 
@@ -1879,6 +1880,7 @@ fn transform_component<'a>(
         options,
         react: &react,
         renderable_depth: 0,
+        invariant_item_key: None,
         reactive_spread_overrides: BTreeMap::new(),
         diagnostic: None,
     };
@@ -3057,8 +3059,22 @@ struct JsxBindingTransformer<'a, 'b, 's> {
     options: &'s CompilationOptions,
     react: &'s ReactBindings<'s>,
     renderable_depth: usize,
+    invariant_item_key: Option<ItemReadPath>,
     reactive_spread_overrides: BTreeMap<u32, (ReactiveSpreadKind, Vec<String>)>,
     diagnostic: Option<Diagnostic>,
+}
+
+struct ItemReadPath {
+    symbol: SymbolId,
+    key: KeyPath,
+}
+
+struct JsxMap<'a> {
+    collection: Expression<'a>,
+    key: Option<Expression<'a>>,
+    render: Expression<'a>,
+    track_index: bool,
+    invariant_item_key: Option<ItemReadPath>,
 }
 
 #[derive(Clone, Copy)]
@@ -3196,6 +3212,18 @@ fn coalesce_props_before_reactive_spread<'a>(
 }
 
 impl<'a> JsxBindingTransformer<'a, '_, '_> {
+    fn is_invariant_item_key_read(
+        &self,
+        expression: &Expression<'_>,
+        reads: &DependencyReads,
+    ) -> bool {
+        !reads.item.is_empty()
+            && self
+                .invariant_item_key
+                .as_ref()
+                .is_some_and(|key| item_read_path_matches(expression, self.scoping, key))
+    }
+
     fn lower_renderable_attribute(
         &mut self,
         mut element: oxc_allocator::Box<'a, JSXElement<'a>>,
@@ -3244,8 +3272,9 @@ impl<'a> JsxBindingTransformer<'a, '_, '_> {
             self.source_symbols,
             self.item_source_symbols,
         );
+        let invariant_key_read = self.is_invariant_item_key_read(expression, &reads);
         self.visit_expression(expression);
-        if reads.is_empty() {
+        if reads.is_empty() || invariant_key_read {
             return;
         }
         let evaluate = expression.clone_in_with_semantic_ids(self.ast.allocator());
@@ -4352,8 +4381,13 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             return;
         }
 
-        if let Some((collection, key, mut render, track_index)) =
-            jsx_map(expression, self.ast, self.scoping)
+        if let Some(JsxMap {
+            collection,
+            key,
+            mut render,
+            track_index,
+            invariant_item_key,
+        }) = jsx_map(expression, self.ast, self.scoping)
         {
             let reads = dependencies(
                 &collection,
@@ -4372,7 +4406,10 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
                 );
                 return;
             }
+            let previous_item_key =
+                std::mem::replace(&mut self.invariant_item_key, invariant_item_key);
             self.visit_expression(&mut render);
+            self.invariant_item_key = previous_item_key;
             let mut arguments = vec![
                 ident(self.ast, SCOPE),
                 dependency_mask(self.ast, &reads.parent),
@@ -4398,9 +4435,10 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             self.source_symbols,
             self.item_source_symbols,
         );
+        let invariant_key_read = self.is_invariant_item_key_read(expression, &reads);
         let contains_reactive_jsx = contains_jsx(expression);
         self.visit_expression(expression);
-        if reads.is_empty() {
+        if reads.is_empty() || invariant_key_read {
             return;
         }
         if contains_reactive_jsx {
@@ -5213,7 +5251,7 @@ fn jsx_map<'a>(
     expression: &Expression<'a>,
     ast: &AstBuilder<'a>,
     scoping: &Scoping,
-) -> Option<(Expression<'a>, Option<Expression<'a>>, Expression<'a>, bool)> {
+) -> Option<JsxMap<'a>> {
     let Expression::CallExpression(call) = expression.without_parentheses() else {
         return None;
     };
@@ -5239,6 +5277,10 @@ fn jsx_map<'a>(
         return None;
     }
     let key_expression = key_expression(render);
+    let item_symbol = match &render.params.items[0].pattern {
+        BindingPattern::BindingIdentifier(identifier) => identifier.symbol_id.get(),
+        _ => None,
+    };
     let destructured = match &render.params.items[0].pattern {
         BindingPattern::BindingIdentifier(_) => None,
         pattern @ BindingPattern::ObjectPattern(_) => Some(item_pattern_bindings(pattern)?),
@@ -5288,6 +5330,18 @@ fn jsx_map<'a>(
         (None, _) => None,
     };
     let track_index = render.params.items.len() == 2;
+    let invariant_item_key = match (key_expression, destructured.as_ref()) {
+        (Some(Expression::Identifier(identifier)), Some(_)) => {
+            reference_symbol(identifier, scoping).map(|symbol| ItemReadPath {
+                symbol,
+                key: KeyPath::Identity,
+            })
+        }
+        (Some(expression), None) => {
+            item_read_path(expression, scoping).filter(|path| Some(path.symbol) == item_symbol)
+        }
+        _ => None,
+    };
     let mut render = render.clone_in_with_semantic_ids(ast.allocator());
     if matches!(
         render.params.items[0].pattern,
@@ -5300,12 +5354,13 @@ fn jsx_map<'a>(
         append_arrow_parameter(ast, &mut render, ITEM_INDEX);
     }
     append_arrow_parameter(ast, &mut render, ITEM_SCOPE);
-    Some((
-        member.object.clone_in_with_semantic_ids(ast.allocator()),
+    Some(JsxMap {
+        collection: member.object.clone_in_with_semantic_ids(ast.allocator()),
         key,
-        Expression::ArrowFunctionExpression(render),
+        render: Expression::ArrowFunctionExpression(render),
         track_index,
-    ))
+        invariant_item_key,
+    })
 }
 
 fn item_pattern_bindings(pattern: &BindingPattern<'_>) -> Option<Vec<(SymbolId, Vec<String>)>> {
@@ -5360,6 +5415,50 @@ fn key_expression<'a>(render: &'a ArrowFunctionExpression<'a>) -> Option<&'a Exp
         };
         container.expression.as_expression()
     })
+}
+
+fn item_read_path(expression: &Expression<'_>, scoping: &Scoping) -> Option<ItemReadPath> {
+    match expression.without_parentheses() {
+        Expression::Identifier(identifier) => Some(ItemReadPath {
+            symbol: reference_symbol(identifier, scoping)?,
+            key: KeyPath::Identity,
+        }),
+        Expression::StaticMemberExpression(member) => {
+            let identifier = member
+                .object
+                .without_parentheses()
+                .get_identifier_reference()?;
+            Some(ItemReadPath {
+                symbol: reference_symbol(identifier, scoping)?,
+                key: KeyPath::Property(member.property.name.to_string()),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn item_read_path_matches(
+    expression: &Expression<'_>,
+    scoping: &Scoping,
+    expected: &ItemReadPath,
+) -> bool {
+    let identifier = match (expression.without_parentheses(), &expected.key) {
+        (Expression::Identifier(identifier), KeyPath::Identity) => identifier,
+        (Expression::StaticMemberExpression(member), KeyPath::Property(property))
+            if member.property.name == property.as_str() =>
+        {
+            let Some(identifier) = member
+                .object
+                .without_parentheses()
+                .get_identifier_reference()
+            else {
+                return false;
+            };
+            identifier
+        }
+        _ => return false,
+    };
+    reference_symbol(identifier, scoping) == Some(expected.symbol)
 }
 
 #[derive(Default)]

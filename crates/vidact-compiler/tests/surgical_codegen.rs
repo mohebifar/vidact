@@ -1021,6 +1021,40 @@ fn compiles_keyed_item_and_parent_reads_into_separate_static_domains() {
 }
 
 #[test]
+fn treats_repeated_key_reads_as_invariant_within_a_keyed_row() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "InvariantKeyRead.tsx",
+        source: r#"
+            import { useState } from 'react';
+            export function InvariantKeyRead(): Node {
+                const [items, setItems] = useState([{ id: 1, label: 'one' }]);
+                const [showKey, setShowKey] = useState(false);
+                return <table><tbody>{items.map((item) => (
+                    <tr key={item.id}>
+                        <td>{item.id}</td>
+                        <td>{showKey ? <b>key</b> : item.id}</td>
+                        <td>{item.label}</td>
+                    </tr>
+                ))}</tbody></table>;
+            }
+        "#,
+    })
+    .expect("key reads remain stable for the lifetime of a keyed row");
+
+    assert!(output.contains("<td>{item.get().id}</td>"), "{output}");
+    assert!(
+        !output.contains("__vidactBinding(__vidactScope, 0, () => item.get().id"),
+        "{output}"
+    );
+    assert!(
+        output.contains(
+            "__vidactBinding(__vidactScope, 0, () => item.get().label, __vidactItemScope, 1)"
+        ),
+        "{output}"
+    );
+}
+
+#[test]
 fn compiles_unkeyed_jsx_maps_into_explicit_indexed_owners() {
     let output = compile_surgical_module(ModuleInput {
         filename: "IndexedItems.tsx",
@@ -1085,7 +1119,7 @@ fn compiles_top_level_destructured_keys_against_raw_rows() {
             export function DestructuredKey(): Node {
                 const [items, setItems] = useState([{ id: 1, label: 'one' }]);
                 return <ul>{items.map(({ id, label }) => (
-                    <li key={id}>{label}</li>
+                    <li key={id}>{id}:{label}</li>
                 ))}</ul>;
             }
         "#,
@@ -1095,6 +1129,14 @@ fn compiles_top_level_destructured_keys_against_raw_rows() {
     assert!(output.contains("keyed as __vidactKeyed"), "{output}");
     assert!(
         output.contains("(__vidactItem) => __vidactItem[\"id\"]"),
+        "{output}"
+    );
+    assert!(
+        output.contains(">{__vidactItem.get()[\"id\"]}:{__vidactBinding"),
+        "{output}"
+    );
+    assert!(
+        !output.contains("() => __vidactItem.get()[\"id\"]"),
         "{output}"
     );
     assert!(output.contains("__vidactItem.get()[\"label\"]"), "{output}");
@@ -1113,9 +1155,11 @@ fn compiles_nested_keyed_maps_that_read_an_outer_item_collection() {
                 ]);
                 return <main>{groups.map((group) => (
                     <section key={group.id}>
+                        <i>{group.id}</i>
                         {group.items.map((item) => (
-                            <span key={item.id}>{item.label}</span>
+                            <span key={item.id}>{item.id}:{item.label}</span>
                         ))}
+                        <b>{group.id}</b>
                     </section>
                 ))}</main>;
             }
@@ -1126,6 +1170,14 @@ fn compiles_nested_keyed_maps_that_read_an_outer_item_collection() {
     assert_eq!(output.matches("__vidactKeyed(").count(), 2, "{output}");
     assert!(output.contains("() => group.get().items"), "{output}");
     assert!(output.contains("__vidactItemScope, 1"), "{output}");
+    assert!(
+        !output.contains("__vidactBinding(__vidactScope, 0, () => group.get().id"),
+        "{output}"
+    );
+    assert!(
+        !output.contains("__vidactBinding(__vidactScope, 0, () => item.get().id"),
+        "{output}"
+    );
 }
 
 #[test]
