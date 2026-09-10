@@ -44,10 +44,20 @@ mixed parent/item expressions keep their normal reactive bindings.
 The compiler emits an index-tracking boolean in the private `keyed` call ABI.
 Compiler-managed item and index inputs use read-only cells: they expose the
 generated `.get()` shape and invalidate their fixed source mask on replacement,
-without allocating public state setters. Their item scope uses a compact narrow
-scheduler and omits removable updater closures when the updater has the same
-lifetime as that row owner. Manually authored runtime calls keep the full
+without allocating public state setters. Those cells share one prototype-free
+getter, use the cell itself as transition identity, and allocate revision
+bookkeeping only if an intercepted write is staged. Their item scope uses a compact narrow scheduler whose
+invalidation and disposal methods are shared across rows, and omits removable
+updater closures when the updater has the same lifetime as that row owner.
+Internal keyed disposal accepts that scope directly so records do not retain a
+row-specific wrapper closure. Manually authored runtime calls keep the full
 `StateSlot` and general scope contract.
+
+Compiler-generated inline row events retain only their logical owner and the
+shared delegated invocation entrypoint. Delegated invocation establishes that
+owner and the global compiled transaction; it does not retain the row scope as
+separate event metadata. Row state writes still schedule their owning scope and
+flush once the transaction ends.
 
 `binding`, `when`, `keyed`, and `indexed` accept their component scope/mask
 plus an optional item scope/mask. A nested list whose collection reads its outer
@@ -70,6 +80,10 @@ Owned blocks carry their update ownership from their producer. Passing one into 
 - A retained key preserves its record owner and exact DOM nodes across object replacement and reorder.
 - Item-, tracked-index, component-, and mixed-dependency bindings observe their current values.
 - A callback that does not declare an index parameter allocates no index cell or index invalidation path.
+- Compiler-managed row cells and scopes share stateless callables; ordinary
+  writes allocate no transition token or revision bookkeeping.
+- Compiled inline row events remain delegated and owner-scoped without retaining
+  a second reference to their item scope.
 - A nested list collection observes replacement of its retained outer item and
   reconciles its own records without replacing the outer record.
 - Key extraction receives raw collection values; identifier and destructured
@@ -99,15 +113,20 @@ maps and direct `for...of` accumulators use the same record engine with position
 keys; see [Compiler-owned iterative JSX](compiler-owned-iterative-jsx.md). Each
 compiler-managed record pays for one compact scope, one read-only item cell,
 and an index cell only when used; exact repeated key paths add no updater, while
-mixed bindings register in two scopes. Nested collections derived from an outer item and
-direct/aliased/nested object leaf reads in map callback parameters are supported,
-while direct outer-row captures remain diagnosed. Row-pattern
+mixed bindings register in two scopes. Scope methods, read-only getters, and
+delegated event invocation are shared rather than allocated per record, while
+transition-only cell fields remain lazy. Nested collections derived from an outer
+item and direct/aliased/nested object leaf reads in map callback parameters are
+supported, while direct outer-row captures remain diagnosed. Row-pattern
 defaults/rest/arrays, broader imperative accumulator grammars, and arbitrary
 external JSX arrays remain outside the accepted contract.
 
 ## Verification
 
 - `packages/runtime/test/reactivity/compiled-dom.browser.test.ts` covers same-key object replacement, reorder, index updates, mixed component/item bindings, prop transport, and the single-mount rule.
+- `packages/runtime/test/performance/runtime-budgets.browser.test.ts` checks that
+  compiler-managed row callables and getters are shared, transition bookkeeping
+  remains lazy, and compact inline events remain delegated.
 - `tests/browser/corpus/apps/roster/RosterApp.browser.test.ts` proves same-key updates, reorder, append, and JSX-array prop transport through compiled TSX.
 - `tests/browser/corpus/apps/control-flow/ControlFlowApp.browser.test.ts` proves
   a nested keyed list reconciles from a retained outer item while preserving

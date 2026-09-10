@@ -1,7 +1,13 @@
+export interface KeyedDisposeTarget {
+  readonly [3]: () => void
+}
+
+export type KeyedDisposer = (() => void) | KeyedDisposeTarget
+
 export type KeyedItem<T> = readonly [
   nodes: readonly Node[],
   update?: ((value: T, index: number) => void) | undefined,
-  dispose?: (() => void) | undefined,
+  dispose?: KeyedDisposer | undefined,
 ]
 
 export type KeyedRenderResult<T> = Node | readonly Node[] | KeyedItem<T>
@@ -21,7 +27,7 @@ type RecordState<T, K> = readonly [
   key: K,
   nodes: readonly Node[],
   update: ((value: T, index: number) => void) | undefined,
-  dispose: (() => void) | undefined,
+  dispose: KeyedDisposer | undefined,
 ]
 
 const DEV = typeof __VIDACT_DEV__ === 'undefined' || __VIDACT_DEV__
@@ -330,7 +336,7 @@ function disposeRecords<T, K>(
   for (const record of records) {
     removeNodes(parent, record[1])
     try {
-      record[3]?.()
+      disposeRecord(record[3])
     } catch (error) {
       if (!failed) firstError = error
       failed = true
@@ -346,13 +352,18 @@ function disposeRecordOwners<T, K>(
   let failed = false
   for (const record of records) {
     try {
-      record[3]?.()
+      disposeRecord(record[3])
     } catch (error) {
       if (!failed) firstError = error
       failed = true
     }
   }
   return [firstError, failed]
+}
+
+function disposeRecord(disposer: KeyedDisposer | undefined): void {
+  if (typeof disposer === 'function') disposer()
+  else disposer?.[3]()
 }
 
 function deleteRangeContents(start: Node, end: Node): void {

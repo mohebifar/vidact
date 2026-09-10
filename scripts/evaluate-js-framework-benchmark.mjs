@@ -11,11 +11,13 @@ const benchmarkRoot = resolve(
 const frameworkRoot = join(benchmarkRoot, 'frameworks/keyed/vidact')
 const webdriverRoot = join(benchmarkRoot, 'webdriver-ts')
 const resultsRoot = join(webdriverRoot, 'results')
-const runtimeRoot = join(repoRoot, 'packages/runtime')
+const runtimeRoot = resolve(process.env.VIDACT_RUNTIME_ROOT ?? join(repoRoot, 'packages/runtime'))
 const compilerRoot = join(repoRoot, 'packages/compiler')
 const viteRoot = join(repoRoot, 'packages/vite-plugin')
 const reactTypesRoot = join(repoRoot, 'packages/react-types')
 const smoke = process.argv.includes('--smoke')
+const benchmarkPort = Number(process.env.VIDACT_JS_BENCH_PORT ?? 8080)
+const benchmarkEnvironment = { HOST: '[::1]', BENCHMARK_PORT: String(benchmarkPort) }
 
 const cpuBenchmarks = smoke
   ? ['01_run1k', '05_swap1k', '09_clear1k_x8']
@@ -79,7 +81,9 @@ async function waitForServer(server) {
       throw new Error(`benchmark server exited with code ${server.exitCode}`)
     }
     try {
-      const response = await fetch('http://[::1]:8080/frameworks/keyed/vidact/index.html')
+      const response = await fetch(
+        `http://[::1]:${benchmarkPort}/frameworks/keyed/vidact/index.html`,
+      )
       if (response.ok) return
     } catch {
       // The server is still starting.
@@ -171,7 +175,11 @@ async function main() {
           { cwd: frameworkRoot },
         )
       ).trim()
-      if (!resolved.startsWith(`file://${packageRoot}/`)) {
+      const installedRuntimeCopy =
+        packageName === '@vidact/runtime' &&
+        process.env.VIDACT_RUNTIME_ROOT !== undefined &&
+        resolved.startsWith(`file://${frameworkRoot}/node_modules/@vidact/runtime/`)
+      if (!resolved.startsWith(`file://${packageRoot}/`) && !installedRuntimeCopy) {
         throw new Error(`benchmark resolved a non-local ${packageName}: ${resolved}`)
       }
     }
@@ -192,11 +200,11 @@ async function main() {
       join(benchmarkRoot, 'server/node_modules/.bin/tsx'),
       [
         '-e',
-        "import { buildServer } from './app.ts'; void (async () => { const server = buildServer(); await server.listen({ port: 8080, host: '::1' }); console.log('ready'); })();",
+        "import { buildServer } from './app.ts'; void (async () => { const server = buildServer(); await server.listen({ port: Number(process.env.BENCHMARK_PORT), host: '::1' }); console.log('ready'); })();",
       ],
       {
         cwd: join(benchmarkRoot, 'server'),
-        env: process.env,
+        env: { ...process.env, ...benchmarkEnvironment },
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     )
@@ -225,7 +233,7 @@ async function main() {
         '--benchmark',
         ...cpuBenchmarks,
       ],
-      { cwd: webdriverRoot, env: { HOST: '[::1]' } },
+      { cwd: webdriverRoot, env: benchmarkEnvironment },
     )
     if (auxiliaryRequests.length > 0) {
       await run(
@@ -243,13 +251,14 @@ async function main() {
           '--benchmark',
           ...auxiliaryRequests,
         ],
-        { cwd: webdriverRoot },
+        { cwd: webdriverRoot, env: benchmarkEnvironment },
       )
     }
     benchmarkPassed = 1
 
     await run('node', ['dist/isKeyed.js', '--headless', 'true', '--framework', 'keyed/vidact'], {
       cwd: webdriverRoot,
+      env: benchmarkEnvironment,
     })
     keyedPassed = 1
 

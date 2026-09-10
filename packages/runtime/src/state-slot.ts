@@ -24,41 +24,47 @@ export interface StateSlot<T> {
   readonly replace: (value: T) => void
 }
 
+export interface ReadOnlyStateInvalidationTarget {
+  readonly [1]: (sources: SourceMask) => void
+}
+
 export interface ReadOnlyStateCell<T> extends Pick<StateSlot<T>, 'get'> {
   value: T
-  revision: number
-  token: object | undefined
-  readonly invalidate: (sources: SourceMask) => void
+  revision?: number
+  readonly invalidationTarget: ReadOnlyStateInvalidationTarget
   readonly source: SourceMask
 }
 
 export function createReadOnlyStateSlot<T>(
-  invalidate: (sources: SourceMask) => void,
+  invalidationTarget: ReadOnlyStateInvalidationTarget,
   source: SourceMask,
   initialValue: T,
 ): ReadOnlyStateCell<T> {
-  const cell: ReadOnlyStateCell<T> = {
+  return {
     value: initialValue,
-    revision: 0,
-    token: undefined,
-    invalidate,
+    invalidationTarget,
     source,
-    get: () => cell.value,
+    get: readReadOnlyState,
   }
-  return cell
+}
+
+function readReadOnlyState<T>(this: ReadOnlyStateCell<T>): T {
+  return this.value
 }
 
 export function replaceReadOnlyStateSlot<T>(cell: ReadOnlyStateCell<T>, replacement: T): void {
   if (Object.is(cell.value, replacement)) return
+  const revision = cell.revision ?? 0
   if (
     stateWriteInterceptor?.({
-      slot: (cell.token ??= {}),
-      revision: cell.revision,
+      slot: cell,
+      revision,
       update: replacement,
       commit: (pending) => applyReadOnlyState(cell, pending as T),
-      currentRevision: () => cell.revision,
+      currentRevision: () => cell.revision ?? 0,
     })
   ) {
+    cell.revision ??= revision
     return
   }
   applyReadOnlyState(cell, replacement)
@@ -67,8 +73,8 @@ export function replaceReadOnlyStateSlot<T>(cell: ReadOnlyStateCell<T>, replacem
 function applyReadOnlyState<T>(cell: ReadOnlyStateCell<T>, next: T): void {
   if (Object.is(cell.value, next)) return
   cell.value = next
-  cell.revision += 1
-  cell.invalidate(cell.source)
+  if (cell.revision !== undefined) cell.revision += 1
+  cell.invalidationTarget[1](cell.source)
 }
 
 export function createStateSlot<T>(

@@ -90,7 +90,6 @@ let createdSchedulerPlanCount = 0
 const noop = (): void => {}
 const COMPILED_EVENT_HANDLER = Symbol('vidact.compiled-event')
 const COMPILED_INLINE_EVENT_OWNER = Symbol('vidact.compiled-event.owner')
-const COMPILED_INLINE_EVENT_SCOPE = Symbol('vidact.compiled-event.scope')
 const UNSET_BINDING = Symbol(DEV ? 'Vidact.UnsetBinding' : undefined)
 
 type CompiledEventHandler = ((...arguments_: never[]) => void) & {
@@ -99,12 +98,15 @@ type CompiledEventHandler = ((...arguments_: never[]) => void) & {
 
 type CompiledInlineEventHandler<Arguments extends unknown[]> = ((
   ...arguments_: Arguments
-) => void) &
-  CompiledEventHandler & {
-    [COMPILED_INLINE_EVENT_OWNER]: Owner
-    [COMPILED_INLINE_EVENT_SCOPE]: CompiledScope
-    [COMPILED_DELEGATED_EVENT_INVOKE]: (...arguments_: Arguments) => void
-  }
+) => void) & {
+  [COMPILED_INLINE_EVENT_OWNER]: Owner
+  [COMPILED_DELEGATED_EVENT_INVOKE]: (...arguments_: Arguments) => void
+}
+
+type CompiledEventMetadata = {
+  [COMPILED_EVENT_HANDLER]?: true
+  [COMPILED_DELEGATED_EVENT_INVOKE]?: (...arguments_: never[]) => void
+}
 
 type ContextFrame = {
   readonly context: CompiledContext<unknown>
@@ -171,11 +173,13 @@ type RetainedResource = {
   readonly phase: number
 }
 
+type FlushTask = (() => void) | { readonly [1]: (sources?: SourceMask) => void }
+
 type RetainedConnection = {
   readonly parent: RetainedConnection | null
   readonly children: Set<RetainedConnection>
   readonly resources: Set<RetainedResource>
-  readonly deferredFlushes: Map<() => void, CancelScheduledTask>
+  readonly deferredFlushes: Map<FlushTask, CancelScheduledTask>
   readonly afterFlush: Set<() => void>
   visible: boolean
   connected: boolean
@@ -936,7 +940,7 @@ let transactionDepth = 0
 let disposalCascadeDepth = 0
 let drainingFlushes = false
 let activePublication: PublicationOperation[] | null = null
-const scheduledFlushes = new Set<() => void>()
+const scheduledFlushes = new Set<FlushTask>()
 const disposalCascadeOwners = new Set<Owner>()
 const scopeOwners = new WeakMap<CompiledScope, Owner>()
 const scopeNamespaces = new WeakMap<CompiledScope, IntrinsicNamespace>()
@@ -988,20 +992,21 @@ class CompilerKeyedScope {
   batchDepth = 0
   flushing = false
   hasWriter = false
-  cachedUpdaterOrder: number[] | undefined
+  cachedUpdaterOrder: number[] | undefined;
 
-  readonly [1] = (sources?: SourceMask): void => {
+  [1](sources?: SourceMask): void {
     if (this.owner[0]) return
     if (sources === undefined) {
       this.flush()
       return
     }
     if (narrowSourceOperations[0](sources)) return
+    const wasIdle = narrowSourceOperations[0](this.pending)
     this.pending = narrowSourceOperations[2](this.pending, sources)
-    if (this.batchDepth === 0) this.schedule()
+    if (wasIdle && this.batchDepth === 0) this.schedule()
   }
 
-  readonly [3] = (): void => {
+  [3](): void {
     if (this.owner[0]) return
     try {
       disposeOwner(this.owner)
@@ -1066,8 +1071,8 @@ class CompilerKeyedScope {
   }
 
   private schedule(): void {
-    if (retainedUiEnabled) scheduleOwnerFlush(this.owner, this[1])
-    else scheduleFlush(this[1])
+    if (retainedUiEnabled) scheduleOwnerFlush(this.owner, this)
+    else scheduleFlush(this)
   }
 
   private flush(): void {
@@ -1249,8 +1254,9 @@ function createScope(operations: SourceOperations): CompiledScope {
     },
     (sources) => {
       if (owner[0] || operations[0](sources)) return
+      const wasIdle = operations[0](pending)
       pending = operations[2](pending, sources)
-      if (batchDepth === 0) {
+      if (wasIdle && batchDepth === 0) {
         if (retainedUiEnabled) scheduleOwnerFlush(owner, flush)
         else scheduleFlush(flush)
       }
@@ -1855,9 +1861,7 @@ export function compiledInlineEvent<Arguments extends unknown[]>(
     throw new Error(DEV ? 'compiledInlineEvent received an unknown scope' : 'V003')
   }
   const listener = handler as unknown as CompiledInlineEventHandler<Arguments>
-  listener[COMPILED_EVENT_HANDLER] = true
   listener[COMPILED_INLINE_EVENT_OWNER] = activeOwner ?? owner
-  listener[COMPILED_INLINE_EVENT_SCOPE] = scope
   listener[COMPILED_DELEGATED_EVENT_INVOKE] = invokeCompiledInlineEvent
   return listener
 }
@@ -1868,13 +1872,17 @@ function invokeCompiledInlineEvent<Arguments extends unknown[]>(
 ): void {
   const owner = this[COMPILED_INLINE_EVENT_OWNER]
   if (owner[0]) return
-  const scope = this[COMPILED_INLINE_EVENT_SCOPE]
-  return runOwnerTask(owner, () => withOwner(owner, () => scope[2](() => this(...arguments_))))
+  return runOwnerTask(owner, () =>
+    withOwner(owner, () => runCompiledTransaction(() => this(...arguments_))),
+  )
 }
 
 export function isCompiledEventHandler(value: unknown): value is EventListener {
+  if (typeof value !== 'function') return false
+  const handler = value as typeof value & CompiledEventMetadata
   return (
-    typeof value === 'function' && (value as CompiledEventHandler)[COMPILED_EVENT_HANDLER] === true
+    handler[COMPILED_EVENT_HANDLER] === true ||
+    typeof handler[COMPILED_DELEGATED_EVENT_INVOKE] === 'function'
   )
 }
 
@@ -2141,11 +2149,11 @@ export function keyed<T, K>(
               : createNarrowCompiledScope()
             const owner = scopeOwners.get(itemScope)!
             const valueSlot = compilerManaged
-              ? createReadOnlyStateSlot(itemScope[1], itemSource, value)
+              ? createReadOnlyStateSlot(itemScope, itemSource, value)
               : createCompiledState(itemScope, itemSource, value)
             const indexSlot = trackIndex
               ? compilerManaged
-                ? createReadOnlyStateSlot(itemScope[1], indexSource, index)
+                ? createReadOnlyStateSlot(itemScope, indexSource, index)
                 : createCompiledState(itemScope, indexSource, index)
               : undefined
             try {
@@ -2182,7 +2190,7 @@ export function keyed<T, K>(
                     }
                   })
                 },
-                itemScope[3],
+                itemScope,
               ] as const
             } catch (error) {
               itemScope[3]()
@@ -4336,12 +4344,12 @@ function attachRef<T>(value: RefValue<T>, target: T): () => void {
   }
 }
 
-function scheduleFlush(flush: () => void): void {
+function scheduleFlush(flush: FlushTask): void {
   scheduledFlushes.add(flush)
   if (transactionDepth === 0) drainFlushes()
 }
 
-function scheduleOwnerFlush(owner: Owner, flush: () => void): void {
+function scheduleOwnerFlush(owner: Owner, flush: FlushTask): void {
   const connection = owner[5]
   if (connection === null || connection === undefined || connection.connected) {
     scheduleFlush(flush)
@@ -4360,7 +4368,7 @@ function drainFlushes(): void {
   drainingFlushes = true
   const publication: PublicationOperation[] = []
   activePublication = publication
-  const runs = new Map<() => void, number>()
+  const runs = new Map<FlushTask, number>()
   let committing = false
   let failure: unknown
   let failed = false
@@ -4375,7 +4383,8 @@ function drainFlushes(): void {
         throw new Error(DEV ? 'Vidact compiled scopes did not stabilize' : 'V011')
       }
       runs.set(flush, runCount)
-      flush()
+      if (typeof flush === 'function') flush()
+      else flush[1]()
     }
     activePublication = null
     committing = true

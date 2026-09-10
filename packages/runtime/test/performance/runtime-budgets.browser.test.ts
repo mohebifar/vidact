@@ -2,17 +2,24 @@ import { describe, expect, it } from 'vitest'
 
 import {
   binding,
+  compiledInlineEvent,
   compiledRoot,
   createCompiledScope,
   createCompiledState,
+  isCompiledEventHandler,
   keyed,
   mountCompiled,
   readCompiledPublicationMetrics,
 } from '../../src/compiled/core.ts'
+import type { CompiledScope } from '../../src/compiled/types.ts'
 import { h } from '../../src/direct-dom.ts'
+import { COMPILED_DELEGATED_EVENT_INVOKE } from '../../src/dom/events.ts'
 import { createKeyedList } from '../../src/keyed-list.ts'
 import { source } from '../../src/source-mask.ts'
+import { installStateWriteInterceptor } from '../../src/state-slot.ts'
 import { readCompiledOwnerMetrics } from '../../src/testing.ts'
+
+type KeyedItemCell = { readonly get: () => unknown }
 
 describe('runtime performance and retention budgets', () => {
   it('does not allocate subscriptions for empty dependency masks', () => {
@@ -129,6 +136,144 @@ describe('runtime performance and retention budgets', () => {
 
     mounted.dispose()
     expect(readCompiledOwnerMetrics().active).toBe(baseline.active)
+  })
+
+  it('shares compiler-keyed row callables across rows', () => {
+    const host = document.createElement('div')
+    const rowsSource = source(0)
+    const rowScopes: CompiledScope[] = []
+    const rowCells: KeyedItemCell[] = []
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const rows = createCompiledState(scope, rowsSource, [
+        { id: 1, label: 'one' },
+        { id: 2, label: 'two' },
+      ])
+      return compiledRoot(scope, () =>
+        h(
+          'ul',
+          null,
+          keyed(
+            scope,
+            rowsSource,
+            rows.get,
+            (row) => row.id,
+            (row, _index, itemScope) => {
+              rowScopes.push(itemScope)
+              rowCells.push(row)
+              return h(
+                'li',
+                null,
+                binding(itemScope, source(0), () => row.get().label),
+              )
+            },
+            false,
+          ),
+        ),
+      )
+    }, host)
+
+    expect(rowScopes[0]![1]).toBe(rowScopes[1]![1])
+    expect(rowScopes[0]![3]).toBe(rowScopes[1]![3])
+    expect(rowCells[0]!.get).toBe(rowCells[1]!.get)
+
+    mounted.dispose()
+  })
+
+  it('allocates read-only concurrency bookkeeping only when intercepted', () => {
+    const host = document.createElement('div')
+    const rowsSource = source(0)
+    let rowCell!: KeyedItemCell
+    let replaceRows!: (rows: { id: number; label: string }[]) => void
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      const rows = createCompiledState(scope, rowsSource, [{ id: 1, label: 'one' }])
+      replaceRows = rows.replace
+      return compiledRoot(scope, () =>
+        h(
+          'ul',
+          null,
+          keyed(
+            scope,
+            rowsSource,
+            rows.get,
+            (row) => row.id,
+            (row, _index, itemScope) => {
+              rowCell = row
+              return h(
+                'li',
+                null,
+                binding(itemScope, source(0), () => row.get().label),
+              )
+            },
+            false,
+          ),
+        ),
+      )
+    }, host)
+
+    expect(Object.hasOwn(rowCell, 'token')).toBe(false)
+    expect(Object.hasOwn(rowCell, 'revision')).toBe(false)
+    installStateWriteInterceptor(() => false)
+    replaceRows([{ id: 1, label: 'updated' }])
+    expect(host.textContent).toBe('updated')
+    expect(Object.hasOwn(rowCell, 'token')).toBe(false)
+    expect(Object.hasOwn(rowCell, 'revision')).toBe(false)
+
+    mounted.dispose()
+  })
+
+  it('retains only essential metadata on owner-scoped batched inline events', () => {
+    const host = document.createElement('div')
+    const countSource = source(0)
+    const errors: unknown[] = []
+    let evaluations = 0
+    let handler!: (() => void) & {
+      [COMPILED_DELEGATED_EVENT_INVOKE]: (event: Event) => void
+    }
+    const mounted = mountCompiled(
+      () => {
+        const scope = createCompiledScope()
+        const count = createCompiledState(scope, countSource, 0)
+        return compiledRoot(scope, () => {
+          handler = compiledInlineEvent(scope, () => {
+            count.set((value) => value + 1)
+            count.set((value) => value + 1)
+          }) as typeof handler
+          const fail = compiledInlineEvent(scope, () => {
+            throw new Error('inline event failed')
+          })
+          return h(
+            'div',
+            null,
+            h('button', { onClick: handler }, 'increment'),
+            h('button', { onClick: fail }, 'fail'),
+            h(
+              'output',
+              null,
+              binding(scope, countSource, () => {
+                evaluations += 1
+                return count.get()
+              }),
+            ),
+          )
+        })
+      },
+      host,
+      { onUncaughtError: (error) => errors.push(error) },
+    )
+
+    expect(Object.getOwnPropertySymbols(handler)).toHaveLength(2)
+    expect(isCompiledEventHandler(handler)).toBe(true)
+    host.querySelectorAll('button')[0]!.click()
+    expect(host.querySelector('output')!.textContent).toBe('2')
+    expect(evaluations).toBe(2)
+    host.querySelectorAll('button')[1]!.click()
+    expect(errors.map((error) => (error as Error).message)).toEqual(['inline event failed'])
+
+    mounted.dispose()
+    Reflect.apply(handler[COMPILED_DELEGATED_EVENT_INVOKE], handler, [new MouseEvent('click')])
+    expect(evaluations).toBe(2)
   })
 
   it('bounds mount/update time, owner allocations, and retained owners', () => {

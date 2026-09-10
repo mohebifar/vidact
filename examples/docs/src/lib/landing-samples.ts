@@ -21,12 +21,12 @@ export function Counter() {
   )
 }`
 
-export const compiledCounter = `import { binding as __vidactBinding, compiledEvent as __vidactEvent, compiledRoot as __vidactCompiledRoot, createNarrowCompiledScope as __vidactCreateNarrowScope, createCompiledState as __vidactCreateState } from "@vidact/runtime";
+export const compiledCounter = `import { binding as __vidactBinding, compiledInlineEvent as __vidactInlineEvent, compiledRoot as __vidactCompiledRoot, createNarrowCompiledScope as __vidactCreateNarrowScope, createCompiledState as __vidactCreateState } from "@vidact/runtime";
 export function Counter() {
 	const __vidactScope = __vidactCreateNarrowScope();
 	const count = __vidactCreateState(__vidactScope, 1, 0);
 	return __vidactCompiledRoot(__vidactScope, () => <div>
-      <button onClick={__vidactEvent(__vidactScope, () => count.set(count.get() + 1))}>
+      <button onClick={__vidactInlineEvent(__vidactScope, () => count.set(count.get() + 1))}>
         Increment
       </button>
       <output>Count: {__vidactBinding(__vidactScope, 1, () => count.get())}</output>
