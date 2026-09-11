@@ -1,5 +1,11 @@
 # @vidact/compiler
 
+## 0.2.0-beta.8
+
+### Patch Changes
+
+- a61e08a: Avoid emitting reactive bindings for exact item paths already used as a keyed row's identity.
+
 ## 0.2.0-beta.7
 
 ## 0.2.0-beta.6
