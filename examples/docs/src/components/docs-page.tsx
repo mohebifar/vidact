@@ -1,4 +1,5 @@
 import { Link } from '@vidact/start'
+import { ArrowRightIcon } from 'lucide-react'
 import { useLayoutEffect, useRef, useState } from 'react'
 
 import { classes } from '@/lib/classes.ts'
@@ -11,7 +12,6 @@ import type {
   PreviewVariant,
 } from '@/lib/docs-types.ts'
 
-import { ArrowIcon } from './icons.tsx'
 import { Button } from './ui/button.tsx'
 
 type DocsPageProps = { readonly page: LoadedDocPage }
@@ -420,11 +420,11 @@ function PageLink({
       <span className="text-xs text-muted-foreground">{direction}</span>
       <span className="mt-1 flex items-center gap-2 font-medium">
         {direction === 'Previous' ? (
-          <ArrowIcon className="size-4 rotate-180 transition-transform group-hover:-translate-x-0.5" />
+          <ArrowRightIcon className="size-4 rotate-180 transition-transform group-hover:-translate-x-0.5" />
         ) : null}
         {item.title}
         {direction === 'Next' ? (
-          <ArrowIcon className="size-4 transition-transform group-hover:translate-x-0.5" />
+          <ArrowRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" />
         ) : null}
       </span>
     </Link>

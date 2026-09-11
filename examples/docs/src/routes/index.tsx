@@ -1,9 +1,9 @@
 import type { VidactNode } from '@vidact/react-types'
 import { defineFileRoute, Link, type RouteComponentProps } from '@vidact/start'
+import { ArrowRightIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { SearchButton } from '@/components/docs-search.tsx'
-import { ArrowIcon } from '@/components/icons.tsx'
 import { Button, ButtonLink } from '@/components/ui/button.tsx'
 import type { DocCodeLine } from '@/lib/docs-types.ts'
 import { mountHeroLogo } from '@/lib/hero-logo-mount.ts'
@@ -39,7 +39,7 @@ export function HomeRoute({ loaderData }: LandingProps) {
                 className="inline-flex h-10 items-center gap-2 rounded-md bg-white px-5 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-200"
                 href="/docs/getting-started/quick-start"
               >
-                Get started <ArrowIcon className="size-4" />
+                Get started <ArrowRightIcon className="size-4" />
               </Link>
               <code className="inline-flex h-10 items-center rounded-md border border-white/15 px-4 font-mono text-sm text-zinc-300">
                 npx vidact my-app
@@ -74,13 +74,14 @@ export function HomeRoute({ loaderData }: LandingProps) {
             </h2>
             <p className="mt-4 leading-7 text-muted-foreground">
               Vidact Start applies the same compiler model to SSR and hydration, then adds file
-              routes, loaders, and client navigation. This documentation site runs on it.
+              routes, loaders, and client navigation. This documentation site is compiled with
+              Vidact and runs on Vidact Start.
             </p>
             <Link
               className="decoration-muted-foreground/60 mt-6 inline-flex items-center gap-2 font-medium underline underline-offset-4 hover:decoration-current"
               href="/docs/start/getting-started"
             >
-              Read the Start guide <ArrowIcon className="size-4" />
+              Read the Start guide <ArrowRightIcon className="size-4" />
             </Link>
           </div>
           <CodePane
@@ -183,7 +184,6 @@ function CompilerModel() {
     <section className="border-b">
       <div className="mx-auto grid max-w-6xl gap-12 px-6 py-10 sm:py-16 lg:grid-cols-[0.8fr_1.2fr]">
         <div>
-          <p className="font-mono text-xs text-muted-foreground">What changes</p>
           <h2 className="font-display mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
             State goes straight to the DOM
           </h2>
@@ -196,7 +196,7 @@ function CompilerModel() {
             runtime dependency tracking <strong>stay out of the bundle</strong>.
           </p>
         </div>
-        <div className="space-y-5 self-center">
+        <div className="divide-y self-center">
           <Pipeline label="React runtime" steps={REACT_PIPELINE} />
           <Pipeline label="Vidact" signal steps={VIDACT_PIPELINE} />
         </div>
@@ -215,27 +215,13 @@ function Pipeline({
   readonly steps: readonly string[]
 }) {
   return (
-    <div
-      className={
-        signal ? 'border-signal/40 rounded-xl border bg-signal/5 p-5' : 'rounded-xl border p-5'
-      }
-    >
-      <p
-        className={
-          signal ? 'text-signal font-mono text-xs' : 'font-mono text-xs text-muted-foreground'
-        }
-      >
-        {label}
-      </p>
-      <ol className="mt-4 flex flex-wrap items-center gap-2 text-sm">
+    <div className="py-6 first:pt-0 last:pb-0">
+      <p className={signal ? 'text-signal text-sm' : 'text-sm text-muted-foreground'}>{label}</p>
+      <ol className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
         {steps.map((step, index) => (
-          <li className="flex items-center gap-2" key={step}>
-            <span className="rounded-md bg-muted px-2.5 py-1.5 font-medium">{step}</span>
-            {index === steps.length - 1 ? null : (
-              <span aria-hidden="true" className="text-muted-foreground">
-                →
-              </span>
-            )}
+          <li className="flex items-center gap-3" key={step}>
+            {index === 0 ? null : <span aria-hidden="true" className="h-3.5 w-px bg-border" />}
+            <span className={signal ? 'font-medium' : 'text-muted-foreground'}>{step}</span>
           </li>
         ))}
       </ol>
@@ -362,12 +348,11 @@ function Origin() {
             </h2>
           </div>
           <p className="leading-7 text-muted-foreground">
-            I started Vidact in 2020, then put it aside. Work on{' '}
+            I started Vidact in 2020, then put it aside. Building{' '}
             <a className="underline underline-offset-4" href="https://grep.codemod.com">
               grep.codemod.com
             </a>{' '}
-            gave me a reason to rebuild it with React Compiler's analysis doing much of the heavy
-            lifting.
+            gave me a reason to return to Vidact. That app now runs on Vidact in production.
           </p>
         </div>
         <div className="mt-10 grid gap-5 border-t pt-8 lg:grid-cols-2 lg:gap-16">
@@ -406,7 +391,7 @@ function Limits() {
           </p>
         </div>
         <ButtonLink href="/docs/reference/react-compatibility" variant="outline">
-          See supported APIs <ArrowIcon className="size-4" />
+          See supported APIs <ArrowRightIcon className="size-4" />
         </ButtonLink>
       </div>
     </section>
@@ -427,7 +412,7 @@ function Examples({ data }: { readonly data: LandingData }) {
   return (
     <section
       aria-label="Live compiled examples"
-      className="mx-auto max-w-6xl px-6 pt-16 pb-20 sm:pt-20 sm:pb-24"
+      className="mx-auto max-w-6xl px-6 pt-8 pb-10 sm:pt-10 sm:pb-8"
     >
       <h2 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">
         More compiled behavior

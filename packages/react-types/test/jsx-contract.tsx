@@ -10,7 +10,10 @@ import {
   use,
   useActionState,
   useOptimistic,
+  type ForwardRefExoticComponent,
+  type NamedExoticComponent,
   type ReactElement,
+  type RefAttributes,
 } from 'react'
 import {
   createPortal,
@@ -138,6 +141,19 @@ const asyncBoundary = (
     <LazyMessage />
   </Suspense>
 )
+// `SuspenseProps` and `ProviderProps` are satisfied structurally by ordinary exotic components,
+// so the Suspense and context branches of `LibraryManagedAttributes` must not claim them. These
+// mirror the shapes published by typed component libraries (lucide-react icons, for instance).
+declare const ExoticIcon: ForwardRefExoticComponent<
+  { className?: string; title?: string } & RefAttributes<SVGSVGElement>
+>
+const exoticComponentKeepsItsProps = <ExoticIcon className="size-4" title="icon" />
+declare const MemoizedBox: NamedExoticComponent<{ className?: string }>
+const memoComponentKeepsItsProps = <MemoizedBox className="box" />
+declare const RequiredValueField: ForwardRefExoticComponent<
+  { value: string; className?: string } & RefAttributes<HTMLInputElement>
+>
+const requiredValuePropIsNotAContext = <RequiredValueField className="field" value="typed" />
 const retainedBoundary = (
   <Activity mode="hidden">
     <strong>retained</strong>
@@ -174,6 +190,9 @@ const staticString: string = renderToStaticMarkup('server')
 const prerendered = prerender('server')
 const resumed = resume('continuation')
 
+void exoticComponentKeepsItsProps
+void memoComponentKeepsItsProps
+void requiredValuePropIsNotAContext
 void nativeElements
 void customElement
 void captureHandler

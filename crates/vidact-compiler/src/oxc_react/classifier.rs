@@ -128,6 +128,39 @@ pub(super) fn classify_component<'a>(
                 sources.insert(name, state);
                 continue;
             }
+            if let BindingPattern::ArrayPattern(pattern) = &declarator.id {
+                // Array destructuring of a plain (non-hook) call behaves like any
+                // other derived const: each element becomes a derived local.
+                for element in pattern.elements.iter().flatten() {
+                    let identifier = match element {
+                        BindingPattern::BindingIdentifier(identifier) => identifier,
+                        BindingPattern::AssignmentPattern(assignment) => {
+                            let BindingPattern::BindingIdentifier(identifier) = &assignment.left
+                            else {
+                                continue;
+                            };
+                            identifier
+                        }
+                        _ => continue,
+                    };
+                    let Some(symbol) = identifier.symbol_id.get() else {
+                        continue;
+                    };
+                    let name = identifier.name.to_string();
+                    let source = SourceSyntax {
+                        kind: SourceKind::Derived,
+                        symbol,
+                        declaration_start: identifier.span.start,
+                    };
+                    locals.insert(name.clone(), source.clone());
+                    if declaration.kind == VariableDeclarationKind::Const
+                        && declarator.init.is_some()
+                    {
+                        candidates.insert(name, source);
+                    }
+                }
+                continue;
+            }
             let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
                 continue;
             };
@@ -314,6 +347,20 @@ pub(super) fn render_updaters(
     }
 }
 
+fn callee_looks_like_hook(call: &CallExpression<'_>) -> bool {
+    let name = match call.callee.without_parentheses() {
+        Expression::Identifier(identifier) => identifier.name.as_str(),
+        Expression::StaticMemberExpression(member) => member.property.name.as_str(),
+        // Unknown callee shapes keep the conservative error.
+        _ => return true,
+    };
+    name.starts_with("use")
+        && name[3..]
+            .chars()
+            .next()
+            .is_none_or(|next| next.is_ascii_uppercase())
+}
+
 fn state_source(
     declarator: &VariableDeclarator<'_>,
     react: &ReactBindings<'_>,
@@ -332,11 +379,15 @@ fn state_source(
         react.action_hook_call(call)
     {
         hook.name()
-    } else {
+    } else if callee_looks_like_hook(call) {
         return Err(unsupported_at(
             "array-destructured calls are unsupported unless the callee resolves to React useState, useReducer, useTransition, useActionState, or useOptimistic",
             call.span,
         ));
+    } else {
+        // A surviving non-hook call is plain data flow: custom hooks were
+        // already inlined, so its destructured elements are ordinary locals.
+        return Ok(None);
     };
     let Some(Some(BindingPattern::BindingIdentifier(identifier))) = pattern.elements.first() else {
         return Err(unsupported_at(
@@ -539,36 +590,83 @@ fn jsx_map<'a>(
         _ => return None,
     };
     let rendered = render.body.as_expression()?.without_parentheses();
-    let Expression::JSXElement(element) = rendered else {
-        return matches!(rendered, Expression::JSXFragment(_))
-            .then_some((&member.object, ListIdentity::Indexed));
-    };
-    let key_attribute = element
-        .opening_element
-        .attributes
-        .iter()
-        .find_map(|attribute| {
-            let JSXAttributeItem::Attribute(attribute) = attribute else {
-                return None;
-            };
-            let JSXAttributeName::Identifier(name) = &attribute.name else {
-                return None;
-            };
-            if name.name != "key" {
-                return None;
-            }
-            Some(attribute)
-        });
-    let Some(key_attribute) = key_attribute else {
+    if matches!(rendered, Expression::JSXFragment(_)) {
         return Some((&member.object, ListIdentity::Indexed));
-    };
-    let Some(JSXAttributeValue::ExpressionContainer(container)) = &key_attribute.value else {
+    }
+    let mut key_expressions = Vec::new();
+    if !collect_render_key_expressions(rendered, &mut key_expressions) {
+        return None;
+    }
+    if key_expressions.iter().all(Option::is_none) {
+        return Some((&member.object, ListIdentity::Indexed));
+    }
+    if key_expressions.iter().any(Option::is_none) {
+        return Some((&member.object, ListIdentity::InvalidKey));
+    }
+    let mut keys = key_expressions.into_iter().map(|expression| {
+        map_key_path(
+            expression.expect("all branch keys were checked"),
+            item_symbol,
+            &destructured_keys,
+            scoping,
+        )
+    });
+    let Some(key) = keys.next().flatten() else {
         return Some((&member.object, ListIdentity::InvalidKey));
     };
-    let Some(expression) = container.expression.as_expression() else {
+    if keys.any(|candidate| candidate.as_ref() != Some(&key)) {
         return Some((&member.object, ListIdentity::InvalidKey));
-    };
-    let key = match expression.without_parentheses() {
+    }
+    Some((&member.object, ListIdentity::Keyed(key)))
+}
+
+fn collect_render_key_expressions<'a>(
+    expression: &'a Expression<'a>,
+    keys: &mut Vec<Option<&'a Expression<'a>>>,
+) -> bool {
+    match expression.without_parentheses() {
+        Expression::JSXElement(element) => {
+            let key = element
+                .opening_element
+                .attributes
+                .iter()
+                .find_map(|attribute| {
+                    let JSXAttributeItem::Attribute(attribute) = attribute else {
+                        return None;
+                    };
+                    let JSXAttributeName::Identifier(name) = &attribute.name else {
+                        return None;
+                    };
+                    (name.name == "key").then_some(attribute)
+                });
+            let Some(attribute) = key else {
+                keys.push(None);
+                return true;
+            };
+            let Some(JSXAttributeValue::ExpressionContainer(container)) = &attribute.value else {
+                return false;
+            };
+            let Some(expression) = container.expression.as_expression() else {
+                return false;
+            };
+            keys.push(Some(expression));
+            true
+        }
+        Expression::ConditionalExpression(conditional) => {
+            collect_render_key_expressions(&conditional.consequent, keys)
+                && collect_render_key_expressions(&conditional.alternate, keys)
+        }
+        _ => false,
+    }
+}
+
+fn map_key_path(
+    expression: &Expression<'_>,
+    item_symbol: Option<SymbolId>,
+    destructured_keys: &BTreeMap<SymbolId, String>,
+    scoping: &Scoping,
+) -> Option<KeyPath> {
+    match expression.without_parentheses() {
         Expression::Identifier(identifier)
             if item_symbol.is_some() && reference_symbol(identifier, scoping) == item_symbol =>
         {
@@ -590,11 +688,7 @@ fn jsx_map<'a>(
             Some(KeyPath::Property(key.property.name.to_string()))
         }
         _ => None,
-    };
-    Some((
-        &member.object,
-        key.map_or(ListIdentity::InvalidKey, ListIdentity::Keyed),
-    ))
+    }
 }
 
 fn semantic_reads(

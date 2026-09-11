@@ -21,7 +21,7 @@ use oxc_syntax::{operator::LogicalOperator, scope::ScopeFlags, symbol::SymbolId}
 
 use crate::{
     Diagnostic, DiagnosticCode, SourceSpan,
-    analysis::{ModuleInput, SourceId, SourceKind},
+    analysis::{KeyPath, ModuleInput, SourceId, SourceKind},
     ast_utils::{
         OBJECT_REST, component_function_parts_mut, is_event_attribute,
         is_supported_react_event_attribute, normalize_compiler_hook_inputs,
@@ -36,6 +36,7 @@ use crate::{
     oxc_react::analyze_program,
     react_bindings::{
         ActionHook, ConcurrentHook, ContextHook, EffectHook, MemoHook, ReactBindings, StateHook,
+        reference_symbol,
     },
 };
 
@@ -53,6 +54,7 @@ const ACTION_FORM: &str = "__vidactActionForm";
 const BINDING: &str = "__vidactBinding";
 const COMBINE_SOURCES: &str = "__vidactCombineSources";
 const COMPILED_EVENT: &str = "__vidactEvent";
+const COMPILED_INLINE_EVENT: &str = "__vidactInlineEvent";
 const COMPILED_COMPONENT_SPREAD: &str = "__vidactComponentSpread";
 const COMPILED_EFFECT: &str = "__vidactEffect";
 const COMPILED_IMPERATIVE_HANDLE: &str = "__vidactImperativeHandle";
@@ -86,6 +88,7 @@ const CREATE_OPTIMISTIC: &str = "__vidactCreateOptimistic";
 const DEFERRED: &str = "__vidactDeferred";
 const DISPATCH: &str = "__vidactDispatch";
 const DYNAMIC_INTRINSIC_COMPONENT: &str = "__vidactDynamicIntrinsicComponent";
+const CREATE_REACT_ELEMENT: &str = "__vidactCreateReactElement";
 const KEYED_FRAGMENT_COMPONENT: &str = "__vidactKeyedFragmentComponent";
 const ENABLE_FRAMEWORK_METADATA: &str = "__vidactEnableFrameworkMetadata";
 const ENABLE_DOM_FORMS: &str = "__vidactEnableDomForms";
@@ -730,6 +733,7 @@ fn transform_program<'a>(
         BINDING,
         COMBINE_SOURCES,
         COMPILED_EVENT,
+        COMPILED_INLINE_EVENT,
         COMPILED_COMPONENT_SPREAD,
         COMPILED_EFFECT,
         COMPILED_IMPERATIVE_HANDLE,
@@ -1563,23 +1567,46 @@ fn transform_component<'a>(
             )?;
             transform_effect_event_declarator(&ast, declarator, &react)?;
             transform_id_declarator(&ast, declarator, &react)?;
+            let is_active_derived = |name: &str| {
+                ir.sources.iter().any(|source| {
+                    source.kind == SourceKind::Derived
+                        && source.name == name
+                        && !memo_sources.contains(&source.id)
+                        && !concurrent_sources.contains(&source.id)
+                        && !action_sources.contains(&source.id)
+                        && !context_sources.contains(&source.id)
+                        && !external_sources.contains(&source.id)
+                        && !effect_event_sources.contains(&source.id)
+                        && !id_sources.contains(&source.id)
+                })
+            };
             if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
                 && (identifier
                     .symbol_id
                     .get()
                     .is_some_and(|symbol| synthetic_symbols.contains(&symbol))
-                    || ir.sources.iter().any(|source| {
-                        source.kind == SourceKind::Derived
-                            && source.name == identifier.name.as_str()
-                            && !memo_sources.contains(&source.id)
-                            && !concurrent_sources.contains(&source.id)
-                            && !action_sources.contains(&source.id)
-                            && !context_sources.contains(&source.id)
-                            && !external_sources.contains(&source.id)
-                            && !effect_event_sources.contains(&source.id)
-                            && !id_sources.contains(&source.id)
-                    }))
+                    || is_active_derived(identifier.name.as_str()))
             {
+                declarator.kind = VariableDeclarationKind::Let;
+                contains_derived = true;
+            }
+            if let BindingPattern::ArrayPattern(pattern) = &declarator.id
+                && pattern.elements.iter().flatten().any(|element| {
+                    let identifier = match element {
+                        BindingPattern::BindingIdentifier(identifier) => identifier,
+                        BindingPattern::AssignmentPattern(assignment) => {
+                            let BindingPattern::BindingIdentifier(identifier) = &assignment.left
+                            else {
+                                return false;
+                            };
+                            identifier
+                        }
+                        _ => return false,
+                    };
+                    is_active_derived(identifier.name.as_str())
+                })
+            {
+                // Element updaters reassign the destructured locals.
                 declarator.kind = VariableDeclarationKind::Let;
                 contains_derived = true;
             }
@@ -1877,6 +1904,8 @@ fn transform_component<'a>(
         options,
         react: &react,
         renderable_depth: 0,
+        invariant_item_key: None,
+        keyed_map_render: false,
         reactive_spread_overrides: BTreeMap::new(),
         diagnostic: None,
     };
@@ -3025,12 +3054,64 @@ fn derived_expressions<'a>(
         .filter(|source| source.kind == SourceKind::Derived)
         .map(|source| source.name.as_str())
         .collect::<Vec<_>>();
+    let ast = AstBuilder::new(allocator);
     let mut expressions = BTreeMap::new();
     for statement in &body.statements {
         let Statement::VariableDeclaration(declaration) = statement else {
             continue;
         };
         for declarator in &declaration.declarations {
+            if let BindingPattern::ArrayPattern(pattern) = &declarator.id {
+                // Array-destructured derived locals recompute as an indexed read
+                // of the reevaluated initializer. A destructuring default maps to
+                // `?? default`; that diverges from destructuring semantics only
+                // for a deliberately null element.
+                let Some(init) = &declarator.init else {
+                    continue;
+                };
+                for (index, element) in pattern.elements.iter().enumerate() {
+                    let (identifier, default) = match element {
+                        Some(BindingPattern::BindingIdentifier(identifier)) => (identifier, None),
+                        Some(BindingPattern::AssignmentPattern(assignment)) => {
+                            let BindingPattern::BindingIdentifier(identifier) = &assignment.left
+                            else {
+                                continue;
+                            };
+                            (identifier, Some(&assignment.right))
+                        }
+                        _ => continue,
+                    };
+                    if !derived.contains(&identifier.name.as_str()) {
+                        continue;
+                    }
+                    let span = identifier.span;
+                    let mut expression =
+                        Expression::from(MemberExpression::new_computed_member_expression(
+                            span,
+                            init.clone_in_with_semantic_ids(allocator),
+                            Expression::new_numeric_literal(
+                                span,
+                                index as f64,
+                                None,
+                                NumberBase::Decimal,
+                                &ast,
+                            ),
+                            false,
+                            &ast,
+                        ));
+                    if let Some(default) = default {
+                        expression = Expression::new_logical_expression(
+                            span,
+                            expression,
+                            LogicalOperator::Coalesce,
+                            default.clone_in_with_semantic_ids(allocator),
+                            &ast,
+                        );
+                    }
+                    expressions.insert(allocator.alloc_str(identifier.name.as_str()), expression);
+                }
+                continue;
+            }
             let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
                 continue;
             };
@@ -3055,8 +3136,23 @@ struct JsxBindingTransformer<'a, 'b, 's> {
     options: &'s CompilationOptions,
     react: &'s ReactBindings<'s>,
     renderable_depth: usize,
+    invariant_item_key: Option<ItemReadPath>,
+    keyed_map_render: bool,
     reactive_spread_overrides: BTreeMap<u32, (ReactiveSpreadKind, Vec<String>)>,
     diagnostic: Option<Diagnostic>,
+}
+
+struct ItemReadPath {
+    symbol: SymbolId,
+    key: KeyPath,
+}
+
+struct JsxMap<'a> {
+    collection: Expression<'a>,
+    key: Option<Expression<'a>>,
+    render: Expression<'a>,
+    track_index: bool,
+    invariant_item_key: Option<ItemReadPath>,
 }
 
 #[derive(Clone, Copy)]
@@ -3194,6 +3290,18 @@ fn coalesce_props_before_reactive_spread<'a>(
 }
 
 impl<'a> JsxBindingTransformer<'a, '_, '_> {
+    fn is_invariant_item_key_read(
+        &self,
+        expression: &Expression<'_>,
+        reads: &DependencyReads,
+    ) -> bool {
+        !reads.item.is_empty()
+            && self
+                .invariant_item_key
+                .as_ref()
+                .is_some_and(|key| item_read_path_matches(expression, self.scoping, key))
+    }
+
     fn lower_renderable_attribute(
         &mut self,
         mut element: oxc_allocator::Box<'a, JSXElement<'a>>,
@@ -3242,8 +3350,9 @@ impl<'a> JsxBindingTransformer<'a, '_, '_> {
             self.source_symbols,
             self.item_source_symbols,
         );
+        let invariant_key_read = self.is_invariant_item_key_read(expression, &reads);
         self.visit_expression(expression);
-        if reads.is_empty() {
+        if reads.is_empty() || invariant_key_read {
             return;
         }
         let evaluate = expression.clone_in_with_semantic_ids(self.ast.allocator());
@@ -3276,12 +3385,22 @@ impl<'a> JsxBindingTransformer<'a, '_, '_> {
             self.lower_choice_branch(&mut conditional.alternate);
             return true;
         }
-        match render::align_render_alternatives(
-            self.ast,
-            &conditional.test,
-            &conditional.consequent,
-            &conditional.alternate,
-        ) {
+        let aligned = if self.keyed_map_render {
+            render::align_keyed_map_render_alternatives(
+                self.ast,
+                &conditional.test,
+                &conditional.consequent,
+                &conditional.alternate,
+            )
+        } else {
+            render::align_render_alternatives(
+                self.ast,
+                &conditional.test,
+                &conditional.consequent,
+                &conditional.alternate,
+            )
+        };
+        match aligned {
             Ok(Some(aligned)) => {
                 *expression = aligned;
                 self.visit_expression(expression);
@@ -4160,8 +4279,15 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
                 );
                 let handler = expression.clone_in_with_semantic_ids(self.ast.allocator());
                 if reads.is_empty() || inline_handler {
-                    *expression =
-                        call_name(self.ast, COMPILED_EVENT, [ident(self.ast, SCOPE), handler]);
+                    *expression = call_name(
+                        self.ast,
+                        if inline_handler && name.name == "onClick" {
+                            COMPILED_INLINE_EVENT
+                        } else {
+                            COMPILED_EVENT
+                        },
+                        [ident(self.ast, SCOPE), handler],
+                    );
                 } else {
                     let mut arguments = vec![
                         ident(self.ast, SCOPE),
@@ -4343,7 +4469,14 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             return;
         }
 
-        if let Some((collection, key, mut render)) = jsx_map(expression, self.ast, self.scoping) {
+        if let Some(JsxMap {
+            collection,
+            key,
+            mut render,
+            track_index,
+            invariant_item_key,
+        }) = jsx_map(expression, self.ast, self.scoping)
+        {
             let reads = dependencies(
                 &collection,
                 self.scoping,
@@ -4361,7 +4494,23 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
                 );
                 return;
             }
-            self.visit_expression(&mut render);
+            let previous_keyed_map_render =
+                std::mem::replace(&mut self.keyed_map_render, key.is_some());
+            let previous_item_key =
+                std::mem::replace(&mut self.invariant_item_key, invariant_item_key);
+            let lowered_conditional = if let Expression::ArrowFunctionExpression(render) =
+                &mut render
+                && let Some(expression) = render.body.as_expression_mut()
+            {
+                self.lower_structural_conditional(expression)
+            } else {
+                false
+            };
+            if !lowered_conditional {
+                self.visit_expression(&mut render);
+            }
+            self.invariant_item_key = previous_item_key;
+            self.keyed_map_render = previous_keyed_map_render;
             let mut arguments = vec![
                 ident(self.ast, SCOPE),
                 dependency_mask(self.ast, &reads.parent),
@@ -4370,6 +4519,7 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             if let Some(key) = key {
                 arguments.push(key);
                 arguments.push(render);
+                arguments.push(Expression::new_boolean_literal(SPAN, track_index, self.ast));
                 append_item_dependency(self.ast, &mut arguments, &reads);
                 *expression = call_name(self.ast, KEYED, arguments);
             } else {
@@ -4386,9 +4536,10 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
             self.source_symbols,
             self.item_source_symbols,
         );
+        let invariant_key_read = self.is_invariant_item_key_read(expression, &reads);
         let contains_reactive_jsx = contains_jsx(expression);
         self.visit_expression(expression);
-        if reads.is_empty() {
+        if reads.is_empty() || invariant_key_read {
             return;
         }
         if contains_reactive_jsx {
@@ -5201,7 +5352,7 @@ fn jsx_map<'a>(
     expression: &Expression<'a>,
     ast: &AstBuilder<'a>,
     scoping: &Scoping,
-) -> Option<(Expression<'a>, Option<Expression<'a>>, Expression<'a>)> {
+) -> Option<JsxMap<'a>> {
     let Expression::CallExpression(call) = expression.without_parentheses() else {
         return None;
     };
@@ -5220,13 +5371,14 @@ fn jsx_map<'a>(
     if !(1..=2).contains(&render.params.items.len()) {
         return None;
     }
-    if !matches!(
-        render.body.as_expression()?.without_parentheses(),
-        Expression::JSXElement(_) | Expression::JSXFragment(_)
-    ) {
+    if !is_supported_map_render(render.body.as_expression()?.without_parentheses()) {
         return None;
     }
     let key_expression = key_expression(render);
+    let item_symbol = match &render.params.items[0].pattern {
+        BindingPattern::BindingIdentifier(identifier) => identifier.symbol_id.get(),
+        _ => None,
+    };
     let destructured = match &render.params.items[0].pattern {
         BindingPattern::BindingIdentifier(_) => None,
         pattern @ BindingPattern::ObjectPattern(_) => Some(item_pattern_bindings(pattern)?),
@@ -5275,6 +5427,19 @@ fn jsx_map<'a>(
         )),
         (None, _) => None,
     };
+    let track_index = render.params.items.len() == 2;
+    let invariant_item_key = match (key_expression, destructured.as_ref()) {
+        (Some(Expression::Identifier(identifier)), Some(_)) => {
+            reference_symbol(identifier, scoping).map(|symbol| ItemReadPath {
+                symbol,
+                key: KeyPath::Identity,
+            })
+        }
+        (Some(expression), None) => {
+            item_read_path(expression, scoping).filter(|path| Some(path.symbol) == item_symbol)
+        }
+        _ => None,
+    };
     let mut render = render.clone_in_with_semantic_ids(ast.allocator());
     if matches!(
         render.params.items[0].pattern,
@@ -5287,11 +5452,13 @@ fn jsx_map<'a>(
         append_arrow_parameter(ast, &mut render, ITEM_INDEX);
     }
     append_arrow_parameter(ast, &mut render, ITEM_SCOPE);
-    Some((
-        member.object.clone_in_with_semantic_ids(ast.allocator()),
+    Some(JsxMap {
+        collection: member.object.clone_in_with_semantic_ids(ast.allocator()),
         key,
-        Expression::ArrowFunctionExpression(render),
-    ))
+        render: Expression::ArrowFunctionExpression(render),
+        track_index,
+        invariant_item_key,
+    })
 }
 
 fn item_pattern_bindings(pattern: &BindingPattern<'_>) -> Option<Vec<(SymbolId, Vec<String>)>> {
@@ -5327,25 +5494,96 @@ fn item_pattern_bindings(pattern: &BindingPattern<'_>) -> Option<Vec<(SymbolId, 
 }
 
 fn key_expression<'a>(render: &'a ArrowFunctionExpression<'a>) -> Option<&'a Expression<'a>> {
-    let expression = render.body.as_expression()?;
-    let Expression::JSXElement(element) = expression.without_parentheses() else {
-        return None;
-    };
-    element.opening_element.attributes.iter().find_map(|item| {
-        let JSXAttributeItem::Attribute(attribute) = item else {
-            return None;
-        };
-        let JSXAttributeName::Identifier(name) = &attribute.name else {
-            return None;
-        };
-        if name.name != "key" {
-            return None;
+    let mut keys = Vec::new();
+    collect_map_render_keys(render.body.as_expression()?, &mut keys);
+    keys.first().copied().flatten()
+}
+
+fn is_supported_map_render(expression: &Expression<'_>) -> bool {
+    match expression.without_parentheses() {
+        Expression::JSXElement(_) | Expression::JSXFragment(_) => true,
+        Expression::ConditionalExpression(conditional) => {
+            is_supported_map_render(&conditional.consequent)
+                && is_supported_map_render(&conditional.alternate)
         }
-        let Some(JSXAttributeValue::ExpressionContainer(container)) = &attribute.value else {
-            return None;
-        };
-        container.expression.as_expression()
-    })
+        _ => false,
+    }
+}
+
+fn collect_map_render_keys<'a>(
+    expression: &'a Expression<'a>,
+    keys: &mut Vec<Option<&'a Expression<'a>>>,
+) {
+    match expression.without_parentheses() {
+        Expression::JSXElement(element) => {
+            keys.push(element.opening_element.attributes.iter().find_map(|item| {
+                let JSXAttributeItem::Attribute(attribute) = item else {
+                    return None;
+                };
+                let JSXAttributeName::Identifier(name) = &attribute.name else {
+                    return None;
+                };
+                if name.name != "key" {
+                    return None;
+                }
+                let JSXAttributeValue::ExpressionContainer(container) = attribute.value.as_ref()?
+                else {
+                    return None;
+                };
+                container.expression.as_expression()
+            }));
+        }
+        Expression::ConditionalExpression(conditional) => {
+            collect_map_render_keys(&conditional.consequent, keys);
+            collect_map_render_keys(&conditional.alternate, keys);
+        }
+        Expression::JSXFragment(_) => keys.push(None),
+        _ => {}
+    }
+}
+
+fn item_read_path(expression: &Expression<'_>, scoping: &Scoping) -> Option<ItemReadPath> {
+    match expression.without_parentheses() {
+        Expression::Identifier(identifier) => Some(ItemReadPath {
+            symbol: reference_symbol(identifier, scoping)?,
+            key: KeyPath::Identity,
+        }),
+        Expression::StaticMemberExpression(member) => {
+            let identifier = member
+                .object
+                .without_parentheses()
+                .get_identifier_reference()?;
+            Some(ItemReadPath {
+                symbol: reference_symbol(identifier, scoping)?,
+                key: KeyPath::Property(member.property.name.to_string()),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn item_read_path_matches(
+    expression: &Expression<'_>,
+    scoping: &Scoping,
+    expected: &ItemReadPath,
+) -> bool {
+    let identifier = match (expression.without_parentheses(), &expected.key) {
+        (Expression::Identifier(identifier), KeyPath::Identity) => identifier,
+        (Expression::StaticMemberExpression(member), KeyPath::Property(property))
+            if member.property.name == property.as_str() =>
+        {
+            let Some(identifier) = member
+                .object
+                .without_parentheses()
+                .get_identifier_reference()
+            else {
+                return false;
+            };
+            identifier
+        }
+        _ => return false,
+    };
+    reference_symbol(identifier, scoping) == Some(expected.symbol)
 }
 
 #[derive(Default)]
@@ -5669,12 +5907,10 @@ impl<'a> Visit<'a> for ItemParameterCollector<'a, '_> {
             && let [argument] = call.arguments.as_slice()
             && let Some(Expression::ArrowFunctionExpression(render)) = argument.as_expression()
             && (1..=2).contains(&render.params.items.len())
-            && render.body.as_expression().is_some_and(|expression| {
-                matches!(
-                    expression.without_parentheses(),
-                    Expression::JSXElement(_) | Expression::JSXFragment(_)
-                )
-            })
+            && render
+                .body
+                .as_expression()
+                .is_some_and(is_supported_map_render)
         {
             for (index, parameter) in render.params.items.iter().take(2).enumerate() {
                 let Some(bindings) = item_pattern_bindings(&parameter.pattern) else {
@@ -5841,6 +6077,7 @@ fn runtime_imports<'a>(
         ("compiledComponentSpread", COMPILED_COMPONENT_SPREAD),
         ("compiledEffect", COMPILED_EFFECT),
         ("compiledEvent", COMPILED_EVENT),
+        ("compiledInlineEvent", COMPILED_INLINE_EVENT),
         ("compiledImperativeHandle", COMPILED_IMPERATIVE_HANDLE),
         ("compiledInsertionEffect", COMPILED_INSERTION_EFFECT),
         ("compiledLayoutEffect", COMPILED_LAYOUT_EFFECT),
@@ -5866,6 +6103,7 @@ fn runtime_imports<'a>(
         ("createCompiledState", CREATE_STATE),
         ("createCompiledTransition", CREATE_TRANSITION),
         ("createRenderable", CREATE_RENDERABLE),
+        ("createElement", CREATE_REACT_ELEMENT),
         ("runWithCompiledContext", RUN_WITH_CONTEXT),
         ("deferred", DEFERRED),
         ("dispatch", DISPATCH),

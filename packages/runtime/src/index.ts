@@ -5,6 +5,7 @@ export {
   binding,
   choose,
   compiledEvent,
+  compiledInlineEvent,
   compiledEffect,
   compiledImperativeHandle,
   compiledInsertionEffect,

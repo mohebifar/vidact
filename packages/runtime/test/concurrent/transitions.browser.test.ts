@@ -12,6 +12,7 @@ import {
   combineSources,
   source,
 } from '../../src/index.ts'
+import { createReadOnlyStateSlot, replaceReadOnlyStateSlot } from '../../src/state-slot.ts'
 import { flushScheduledTasks } from '../../src/testing.ts'
 
 describe('concurrent scheduling', () => {
@@ -53,6 +54,22 @@ describe('concurrent scheduling', () => {
     flushScheduledTasks()
 
     expect(value.get()).toBe('urgent')
+  })
+
+  it('rejects stale transitioned read-only writes and commits fresh ones', () => {
+    const valueSource = source(0)
+    const cell = createReadOnlyStateSlot({ 1: () => {} }, valueSource, 'initial')
+
+    startTransition(() => replaceReadOnlyStateSlot(cell, 'stale'))
+    replaceReadOnlyStateSlot(cell, 'urgent')
+    flushScheduledTasks()
+
+    expect(cell.get()).toBe('urgent')
+
+    startTransition(() => replaceReadOnlyStateSlot(cell, 'committed'))
+    flushScheduledTasks()
+
+    expect(cell.get()).toBe('committed')
   })
 
   it('lets the newest transition on a lane supersede older work', () => {

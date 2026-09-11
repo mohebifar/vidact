@@ -1,5 +1,7 @@
 import {
   binding,
+  compiledEvent,
+  compiledRoot,
   createRenderable,
   createReactElement,
   createCompiledScope,
@@ -8,14 +10,36 @@ import {
   Fragment,
   h,
   isRenderable,
+  mountCompiled,
   renderableChildren,
   renderableProps,
   source,
 } from '@vidact/runtime'
 import { jsx, jsxs } from '@vidact/runtime/jsx-runtime'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 describe('direct DOM construction', () => {
+  it('clones repeated static intrinsic shells instead of rebuilding their props', () => {
+    const className = `cached-shell-${crypto.randomUUID()}`
+    const createElementSpy = vi.spyOn(document, 'createElement')
+    try {
+      const first = h('section', { className })
+      const callsAfterFirst = createElementSpy.mock.calls.filter(
+        ([tag]) => tag === 'section',
+      ).length
+      const second = h('section', { className })
+
+      expect(first).not.toBe(second)
+      expect(first.outerHTML).toBe(`<section class="${className}"></section>`)
+      expect(second.outerHTML).toBe(first.outerHTML)
+      expect(createElementSpy.mock.calls.filter(([tag]) => tag === 'section')).toHaveLength(
+        callsAfterFirst,
+      )
+    } finally {
+      createElementSpy.mockRestore()
+    }
+  })
+
   it('constructs compiled renderable capabilities used as residual JSX element types', () => {
     const component = createRenderable({ className: 'base', children: 'Base' }, (input) =>
       h('button', renderableProps(input), renderableChildren(input)),
@@ -130,6 +154,70 @@ describe('direct DOM construction', () => {
     button.click()
 
     expect(received?.nativeEvent).toBe(received)
+  })
+
+  it('avoids native click listener allocation for compiled handlers', () => {
+    const originalAddEventListener = EventTarget.prototype.addEventListener
+    let elementClickRegistrations = 0
+    EventTarget.prototype.addEventListener = function (
+      type: string,
+      listener: EventListenerOrEventListenerObject | null,
+      options?: boolean | AddEventListenerOptions,
+    ): void {
+      if (type === 'click' && this instanceof Element) elementClickRegistrations += 1
+      originalAddEventListener.call(this, type, listener, options)
+    }
+
+    const scope = createCompiledScope()
+    const clickSource = source(0)
+    try {
+      for (let index = 0; index < 20; index += 1) {
+        h('button', { onClick: binding(scope, clickSource, () => () => index) })
+      }
+      h('button', { onClick: compiledEvent(scope, () => 21) })
+    } finally {
+      EventTarget.prototype.addEventListener = originalAddEventListener
+      scope[3]()
+    }
+
+    expect(elementClickRegistrations).toBe(0)
+  })
+
+  it('preserves currentTarget and disposal for delegated compiled clicks', () => {
+    const host = document.body.appendChild(document.createElement('div'))
+    let currentTarget: EventTarget | null = null
+    let calls = 0
+    const mounted = mountCompiled(() => {
+      const scope = createCompiledScope()
+      return compiledRoot(scope, () =>
+        h('button', {
+          onClick: compiledEvent(scope, (event: Event) => {
+            currentTarget = event.currentTarget
+            calls += 1
+          }),
+        }),
+      )
+    }, host)
+    const button = host.querySelector('button')!
+
+    button.click()
+    expect(currentTarget).toBe(button)
+    expect(calls).toBe(1)
+
+    mounted.dispose()
+    button.click()
+    expect(calls).toBe(1)
+
+    const replacement = mountCompiled(() => {
+      const scope = createCompiledScope()
+      return compiledRoot(scope, () => h('div', null))
+    }, host)
+    host.append(button)
+    button.click()
+    expect(calls).toBe(1)
+
+    replacement.dispose()
+    host.remove()
   })
 
   it.each([

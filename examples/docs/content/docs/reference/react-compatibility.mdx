@@ -28,9 +28,9 @@ Vidact compiles a subset of React 19. This page summarizes what is in that subse
 | JSX, fragments, arrays, conditionals | Supported | |
 | `key` | Supported | Must be a primitive; duplicates throw |
 | `ref` as a prop | Supported | |
-| `forwardRef` | Adapted | Inline `(props, ref)` form only, as a migration aid |
+| `forwardRef` | Adapted | Inline component functions only, as a migration aid |
 | `memo` | Adapted | Accepted; no custom comparator; not a performance tool |
-| `createElement` | Adapted | Only when the type and props are statically known |
+| `createElement` | Adapted | Statically known elements compile; a runtime element type renders through the runtime |
 | `createPortal` | Adapted | Client only; events bubble through the physical DOM |
 | `lazy`, `Suspense` | Opt-in `async` | |
 | `Activity` | Opt-in `retained-ui` | |

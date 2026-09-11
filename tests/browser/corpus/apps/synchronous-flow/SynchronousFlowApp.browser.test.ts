@@ -224,6 +224,15 @@ describe('compiled synchronous regions', () => {
     adaInput.value = 'key owner state'
     adaInput.focus()
 
+    const clone = await captureMutations(list, () =>
+      host.querySelector<HTMLButtonElement>('[data-clone-rows]')!.click(),
+    )
+
+    expect(list.querySelector('[data-keyed-row-id="ada"]')).toBe(ada)
+    expect(list.querySelector('[data-keyed-row-id="grace"]')).toBe(grace)
+    expect(document.activeElement).toBe(adaInput)
+    expect(clone.records).toEqual([])
+
     const prepend = await captureMutations(list, () =>
       host.querySelector<HTMLButtonElement>('[data-prepend-row]')!.click(),
     )

@@ -1,5 +1,6 @@
 import {
   isCompiledBinding,
+  isCompiledEventHandler,
   isStructuralBinding,
   adoptCompiledRoot,
   constructCompiledComponent,
@@ -17,11 +18,13 @@ import type {
   StructuralBinding,
 } from './compiled/types.ts'
 import { hasInvalidChild } from './compiled/validation.ts'
-import { attachEventProp, isEventProp } from './dom/events.ts'
+import { attachCompiledEventProp, attachEventProp, isEventProp } from './dom/events.ts'
 import {
+  type IntrinsicNamespace,
   INTERNAL_NAMESPACE_PROP,
   createComponentProps,
   createIntrinsicElement,
+  currentIntrinsicNamespace,
   intrinsicChildrenNamespace,
   readIntrinsicNamespace,
   resolveIntrinsicNamespace,
@@ -71,6 +74,37 @@ export type DirectComponent = (props: Record<string, unknown>) => CompiledRender
 
 export const Fragment: symbol = Symbol.for('vidact.v1.Fragment')
 let frameworkMetadataHandler: ((element: Element, props: DirectProps) => Node) | undefined
+const staticIntrinsicShells = new Map<string, Element>()
+const cloneSafeHtmlTags = new Set([
+  'a',
+  'article',
+  'aside',
+  'button',
+  'div',
+  'footer',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'header',
+  'li',
+  'main',
+  'nav',
+  'ol',
+  'p',
+  'section',
+  'span',
+  'table',
+  'tbody',
+  'td',
+  'tfoot',
+  'th',
+  'thead',
+  'tr',
+  'ul',
+])
 
 /** @internal */
 export function installFrameworkMetadata(
@@ -134,19 +168,82 @@ export function h(
 
   const namespace = resolveIntrinsicNamespace(type, readIntrinsicNamespace(props))
   const namespaceUrl = intrinsicNamespaceUrl(namespace)
-  const element =
-    claimHydrationElement(type, namespaceUrl, (candidate) =>
-      matchesHydrationElement(candidate, props, children),
-    ) ?? createIntrinsicElement(document, type, namespace)
-  const restoreAfterChildren = applyProps(element, props, children)
-  withIntrinsicNamespace(intrinsicChildrenNamespace(type, namespace), () =>
-    appendChildren(element, children),
+  const hydratedElement = claimHydrationElement(type, namespaceUrl, (candidate) =>
+    matchesHydrationElement(candidate, props, children),
   )
+  const shellKey =
+    hydratedElement === undefined ? staticIntrinsicShellKey(type, namespace, props) : undefined
+  let shell = shellKey === undefined ? undefined : staticIntrinsicShells.get(shellKey)
+  if (shellKey !== undefined && shell === undefined) {
+    shell = createIntrinsicElement(document, type, namespace)
+    applyStaticShellProps(shell, props)
+    if (staticIntrinsicShells.size >= 128) staticIntrinsicShells.clear()
+    staticIntrinsicShells.set(shellKey, shell)
+  }
+  const element =
+    hydratedElement ??
+    (shell?.cloneNode(false) as Element | undefined) ??
+    createIntrinsicElement(document, type, namespace)
+  const restoreAfterChildren = applyProps(element, props, children, shell !== undefined)
+  const childrenNamespace = intrinsicChildrenNamespace(type, namespace)
+  if (currentIntrinsicNamespace() === childrenNamespace) appendChildren(element, children)
+  else withIntrinsicNamespace(childrenNamespace, () => appendChildren(element, children))
   if (restoreAfterChildren) restoreControlledFormState(element)
   if (frameworkMetadataHandler !== undefined && namespace === 'html') {
     return frameworkMetadataHandler(element, props)
   }
   return element
+}
+
+function staticIntrinsicShellKey(
+  type: string,
+  namespace: IntrinsicNamespace,
+  props: DirectProps,
+): string | undefined {
+  if (namespace !== 'html' || !cloneSafeHtmlTags.has(type)) return undefined
+  let key = type
+  if (props === null) return key
+  for (const name in props) {
+    if (!Object.hasOwn(props, name)) continue
+    if (name === 'key' || name === 'children' || name === INTERNAL_NAMESPACE_PROP) continue
+    const value = props[name]
+    if (!isStaticShellProp(name, value)) continue
+    key += `\0${name}\0${typeof value}\0${String(value)}`
+  }
+  return key
+}
+
+function isStaticShellProp(name: string, value: unknown): boolean {
+  if (
+    name !== 'className' &&
+    name !== 'id' &&
+    name !== 'href' &&
+    name !== 'rel' &&
+    name !== 'role' &&
+    name !== 'target' &&
+    name !== 'title' &&
+    name !== 'type' &&
+    !name.startsWith('aria-') &&
+    !name.startsWith('data-')
+  ) {
+    return false
+  }
+  return (
+    value === null ||
+    value === undefined ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  )
+}
+
+function applyStaticShellProps(element: Element, props: DirectProps): void {
+  if (props === null) return
+  for (const name in props) {
+    if (!Object.hasOwn(props, name)) continue
+    const value = props[name]
+    if (isStaticShellProp(name, value)) applyDomProp(element, name, value)
+  }
 }
 
 export function createElement(
@@ -231,6 +328,7 @@ function applyProps(
   element: Element,
   props: DirectProps,
   children: readonly DirectChild[],
+  skipStaticShellProps = false,
 ): boolean {
   if (props === null) return false
   const rawHtml = props.dangerouslySetInnerHTML
@@ -245,6 +343,7 @@ function applyProps(
     }
     if (name === 'key' || name === 'children' || name === INTERNAL_NAMESPACE_PROP) continue
     if (name === 'dangerouslySetInnerHTML') continue
+    if (skipStaticShellProps && isStaticShellProp(name, value)) continue
     if (!hasControlledRestoration && isControlledFormProp(element, name)) {
       registerCompiledCleanup(ensureControlledFormRestoration(element))
       hasControlledRestoration = true
@@ -264,7 +363,7 @@ function applyProps(
     }
     if (isCompiledBinding(value)) {
       if (isEventProp(name)) {
-        mountCompiledProp(value, (next) => attachEventProp(element, name, next))
+        mountCompiledProp(value, (next) => attachCompiledEventProp(element, name, next))
         continue
       }
       if (element instanceof HTMLSelectElement && name === 'multiple') {
@@ -286,10 +385,14 @@ function applyProps(
         )
         continue
       }
-      mountCompiledProp(value, (next) => applyDomProp(element, name, next))
+      mountCompiledProp(value, applyDomProp, element, name)
       continue
     }
     if (isEventProp(name)) {
+      if (isCompiledEventHandler(value)) {
+        attachCompiledEventProp(element, name, value)
+        continue
+      }
       registerCompiledCleanup(attachEventProp(element, name, value))
       continue
     }
@@ -311,6 +414,29 @@ function applyProps(
 }
 
 function appendChildren(parent: Node, children: readonly DirectChild[]): void {
+  if (!isHydrating()) {
+    if (children.length === 0) return
+    if (children.length === 1) {
+      const child = children[0]
+      if (child === null || child === undefined || typeof child === 'boolean') return
+      if (child instanceof Node) {
+        parent.appendChild(child)
+        return
+      }
+      if (typeof child === 'string' || typeof child === 'number' || typeof child === 'bigint') {
+        parent.appendChild(document.createTextNode(String(child)))
+        return
+      }
+    }
+    if (
+      children.length > 1 &&
+      parent instanceof Element &&
+      children.every((child): child is Node => child instanceof Node)
+    ) {
+      parent.append(...children)
+      return
+    }
+  }
   if (hasInvalidChild(children)) {
     throw new TypeError(
       DEV ? 'unsupported direct child value; expected a DOM node or owned block' : 'V103',
