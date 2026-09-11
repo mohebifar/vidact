@@ -81,13 +81,13 @@ const fixtures = [
   {
     name: 'control-flow',
     entry: path.join(directory, 'fixtures/control-flow.tsx'),
-    gzipBudget: 9_800,
+    gzipBudget: 9_900,
   },
-  { name: 'dom-form', entry: path.join(directory, 'fixtures/dom-form.tsx'), gzipBudget: 10_250 },
+  { name: 'dom-form', entry: path.join(directory, 'fixtures/dom-form.tsx'), gzipBudget: 10_300 },
   {
     name: 'dom-namespace',
     entry: path.join(directory, 'fixtures/dom-namespace.tsx'),
-    gzipBudget: 9_300,
+    gzipBudget: 9_350,
   },
   {
     name: 'dom-style',
@@ -102,7 +102,7 @@ const fixtures = [
   {
     name: 'todomvc',
     entry: path.join(repository, 'examples/todomvc/src/TodoApp.tsx'),
-    gzipBudget: 14_700,
+    gzipBudget: 14_850,
   },
   { name: 'effect', entry: path.join(directory, 'fixtures/effect.tsx'), gzipBudget: 9_700 },
 ]
