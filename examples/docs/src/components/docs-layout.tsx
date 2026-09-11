@@ -1,12 +1,12 @@
 import type { VidactNode } from '@vidact/react-types'
 import { Link } from '@vidact/start'
+import { MenuIcon, MoonIcon, SunIcon } from 'lucide-react'
 import { useState } from 'react'
 
 import { classes } from '@/lib/classes.ts'
 import type { NavigationGroup } from '@/lib/docs-types.ts'
 
 import { SearchButton } from './docs-search.tsx'
-import { MenuIcon, MoonIcon, SunIcon } from './icons.tsx'
 
 type DocsLayoutProps = {
   readonly children: VidactNode

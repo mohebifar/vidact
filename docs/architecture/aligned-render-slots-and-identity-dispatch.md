@@ -2,6 +2,7 @@
 
 - Decision state: Accepted
 - Decided: 2026-08-22
+- Updated: 2026-09-10
 
 ## Context
 
@@ -33,6 +34,10 @@ use one owned `choose` range, and unequal aligned child tails become nested
 owned choices. JSX-free scalar branches remain ordinary live bindings. Each
 JSX-producing branch must be a direct JSX value or another supported
 conditional so the compiler can see and assign every owner statically.
+Inside a keyed map callback, identical direct item keys on every conditional
+branch belong to the outer keyed record rather than to a nested identity
+decision. That narrow case lowers to an item-scope choice; ordinary reactive
+keys outside this map-owned invariant still require identity dispatch.
 
 Alternatives that do not align compile to an owned `choose` range. A JSX
 position with a reactive key compiles to the narrower `dispatch` range. The
@@ -68,7 +73,8 @@ callable is not invoked until that render factory runs.
 - A nested conditional has one selector owner; inactive branch bindings are
   disposed and cannot publish after selection changes.
 - Nested conditional branches with reactive keys fail closed until nested
-  identity dispatch is available.
+  identity dispatch is available, except when every keyed-map branch repeats
+  the same validated outer record key.
 - Event replacement and removal leave at most one active listener, and owner
   disposal detaches static and reactive listeners.
 - Ref replacement transfers cleanup without replacing the host; a failed next
@@ -100,8 +106,10 @@ mutation. True identity changes pay for one small pair of range markers and one
 feature-level dispatcher. The compiler must keep expanding explicit DOM reset
 semantics rather than treating arbitrary JSX objects as reconcilable values.
 Calls or other opaque expressions that may return JSX remain unsupported in a
-nested conditional branch, as do reactive nested keys; both boundaries are
-reported at compile time rather than approximated with remounting behavior.
+nested conditional branch. Reactive nested keys remain unsupported unless they
+are the identical direct item key already owned by an enclosing keyed map; all
+other boundaries are reported at compile time rather than approximated with
+remounting behavior.
 
 ## Verification
 
@@ -116,5 +124,8 @@ reported at compile time rather than approximated with remounting behavior.
   focus, nested keyed-row identity, dynamic key remounting, terminal switch
   selection, disposed-listener inactivity, and MutationObserver envelopes
   through the Vite compiler path.
+- `tests/browser/corpus/apps/conditional-events/` proves a reactive event
+  expression retains its host and a same-key conditional map swaps only the
+  selected component branch and handler.
 - Run `cargo test -p vidact-compiler`, `pnpm test:runtime`,
   `pnpm test:browser`, and `pnpm typecheck`.

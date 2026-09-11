@@ -144,6 +144,32 @@ fn constructs_reactive_event_expressions_once() {
 }
 
 #[test]
+fn lowers_keyed_conditional_component_maps_with_one_shared_key() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "KeyedConditionalComponents.tsx",
+        source: r#"
+            import { useState } from 'react';
+            function A({ onClick }) { return <button onClick={onClick}>A</button>; }
+            function B({ onClick }) { return <button onClick={onClick}>B</button>; }
+            export function Rows({ handler1, handler2 }) {
+                const [rows, setRows] = useState([{ id: 'one', type: 'a' }]);
+                return <section>{rows.map(row =>
+                    row.type === 'a'
+                        ? <A key={row.id} onClick={handler1} />
+                        : <B key={row.id} onClick={handler2} />
+                )}</section>;
+            }
+        "#,
+    })
+    .expect("matching keys on conditional map branches should compile as one keyed list");
+
+    assert!(output.contains("__vidactKeyed("), "{output}");
+    assert!(output.contains("(row) => row.id"), "{output}");
+    assert!(output.contains("__vidactChoose("), "{output}");
+    assert!(output.contains("row.get().type === \"a\""), "{output}");
+}
+
+#[test]
 fn gates_framework_resource_hints_and_server_only_cache_apis() {
     let hints = ModuleInput {
         filename: "FrameworkHints.tsx",

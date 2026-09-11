@@ -12,6 +12,16 @@ export type VidactNode = import('@vidact/runtime').CompiledRenderValue
 
 type ReactIntrinsicElements = ReactJSX.IntrinsicElements
 
+/**
+ * Exact type identity. `Component extends typeof Suspense` is not usable as a test for "this is
+ * Suspense": `SuspenseProps` is entirely optional, so every exotic component with optional props
+ * (any `forwardRef` component from a typed library) satisfies it structurally and would be typed
+ * as a Suspense boundary. The context branch below has the same hazard, and guards on its
+ * required `value` prop instead, matching the Activity and Profiler branches.
+ */
+type IsExactly<Left, Right> =
+  (<T>() => T extends Left ? 1 : 2) extends <T>() => T extends Right ? 1 : 2 ? true : false
+
 type EventName<Property extends string> = Property extends `on${infer Name}Capture`
   ? Name
   : Property extends `on${infer Name}`
@@ -130,6 +140,10 @@ export namespace JSX {
     | keyof IntrinsicElements
     // Component props are checked from the component's own signature.
     | ((props: never) => VidactNode)
+    // `memo` and `forwardRef` results, and the equivalents published by typed component
+    // libraries. Their call signatures return React's `ReactNode`, so they do not match the
+    // plain function form above.
+    | import('react').ExoticComponent<never>
     | typeof import('react').Activity
     | typeof import('react').Profiler
     | Context<never>
@@ -160,11 +174,13 @@ export namespace JSX {
       ? Component extends typeof import('react').Profiler
         ? Omit<Props, 'children'> & { children?: VidactNode }
         : ReactJSX.LibraryManagedAttributes<Component, Props>
-      : Component extends typeof import('react').Suspense
-        ? Component extends { readonly _result: unknown }
-          ? ReactJSX.LibraryManagedAttributes<Component, Props>
-          : { children?: VidactNode; fallback: VidactNode }
-        : Component extends Context<infer Value> | Provider<infer Value>
-          ? { children?: VidactNode; value: Value }
+      : IsExactly<Component, typeof import('react').Suspense> extends true
+        ? { children?: VidactNode; fallback: VidactNode }
+        : Props extends { value: infer Value }
+          ? [Exclude<keyof Props, 'value' | 'children'>] extends [never]
+            ? Component extends Context<Value> | Provider<Value>
+              ? { children?: VidactNode; value: Value }
+              : ReactJSX.LibraryManagedAttributes<Component, Props>
+            : ReactJSX.LibraryManagedAttributes<Component, Props>
           : ReactJSX.LibraryManagedAttributes<Component, Props>
 }

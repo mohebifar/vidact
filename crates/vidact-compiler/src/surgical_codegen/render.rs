@@ -228,7 +228,11 @@ impl<'a> RenderLowerer<'a, '_> {
             };
             matches!(&attribute.name, JSXAttributeName::Identifier(name) if name.name == "key")
         });
-        let key_identity = AlignedRenderLowerer { ast: self.ast }.attribute_expression(key)?;
+        let key_identity = AlignedRenderLowerer {
+            ast: self.ast,
+            allow_invariant_dynamic_key: false,
+        }
+        .attribute_expression(key)?;
         let mut reads = dependencies(
             &type_identity,
             self.scoping,
@@ -346,11 +350,35 @@ pub(super) fn align_render_alternatives<'a>(
     consequent: &Expression<'a>,
     alternate: &Expression<'a>,
 ) -> Result<Option<Expression<'a>>, Diagnostic> {
-    AlignedRenderLowerer { ast }.merge_aligned(test, consequent, alternate)
+    align_render_alternatives_with_key_mode(ast, test, consequent, alternate, false)
+}
+
+pub(super) fn align_keyed_map_render_alternatives<'a>(
+    ast: &AstBuilder<'a>,
+    test: &Expression<'a>,
+    consequent: &Expression<'a>,
+    alternate: &Expression<'a>,
+) -> Result<Option<Expression<'a>>, Diagnostic> {
+    align_render_alternatives_with_key_mode(ast, test, consequent, alternate, true)
+}
+
+fn align_render_alternatives_with_key_mode<'a>(
+    ast: &AstBuilder<'a>,
+    test: &Expression<'a>,
+    consequent: &Expression<'a>,
+    alternate: &Expression<'a>,
+    allow_invariant_dynamic_key: bool,
+) -> Result<Option<Expression<'a>>, Diagnostic> {
+    AlignedRenderLowerer {
+        ast,
+        allow_invariant_dynamic_key,
+    }
+    .merge_aligned(test, consequent, alternate)
 }
 
 struct AlignedRenderLowerer<'a, 's> {
     ast: &'s AstBuilder<'a>,
+    allow_invariant_dynamic_key: bool,
 }
 
 impl<'a> AlignedRenderLowerer<'a, '_> {
@@ -366,9 +394,9 @@ impl<'a> AlignedRenderLowerer<'a, '_> {
         ) else {
             return Ok(None);
         };
-        if matches!(static_key(&consequent.opening_element), StaticKey::Dynamic)
-            || matches!(static_key(&alternate.opening_element), StaticKey::Dynamic)
-        {
+        let dynamic_key = matches!(static_key(&consequent.opening_element), StaticKey::Dynamic)
+            || matches!(static_key(&alternate.opening_element), StaticKey::Dynamic);
+        if dynamic_key && !self.allow_invariant_dynamic_key {
             return Err(super::unsupported(
                 "reactive keys in conditional JSX alternatives require nested identity dispatch",
             )

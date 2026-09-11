@@ -2,6 +2,7 @@
 
 - Decision state: Accepted
 - Decided: 2026-08-23
+- Updated: 2026-09-10
 
 ## Context
 
@@ -52,9 +53,14 @@ deferred values, and direct arrays are claimed without introducing wrapper DOM.
 Function error boundaries adopt a server child slot as their live recovery range;
 post-hydration failures replace only that owned range. Portals remain an explicit
 server-target diagnostic because their destination is a client DOM container.
-Matching content preserves node identity
-and performs no initial DOM insert, removal, attribute write, or text
-replacement. After claiming, the same static source-mask updaters used by a
+Matching content preserves authored element and component identity. Most claims
+perform no initial DOM insertion or removal. A client-only conditional nested
+inside a server array has no separate server slot because the server evaluates
+the selected branch before serialization; the hydrate runtime claims that
+branch in place, then inserts an internal start/end comment pair around it for
+future updates. Adjacent scalar claims may also split one parser-merged text
+node. Neither operation replaces authored elements or component output. After
+claiming, the same static source-mask updaters used by a
 client-only root own all subsequent updates, keyed movement, and disposal.
 
 Root identity uses the same `:${identifierPrefix}r${ordinal}:` allocation on the
@@ -78,9 +84,11 @@ does not affect neighboring DOM outside it. Application errors continue through
 the ordinary caught/uncaught error channels and are not mislabeled as hydration
 mismatches.
 
-Every structural kind requires a symmetric server emitter and hydrate claimant.
-Encountering an unrecognized structural kind recovers at the root boundary
-rather than partially adopting its DOM.
+Every server-visible structural kind requires a symmetric server emitter and
+hydrate claimant. Client-only choice ownership may be reconstructed inside an
+already claimed server array by placing local anchors around the branch it
+successfully claims. Encountering any other unrecognized structural kind
+recovers at the root boundary rather than partially adopting its DOM.
 
 Automatic JSX entry points preserve that symmetry: `jsx` represents one child
 position, while `jsxs` and development JSX with static children pass sibling
@@ -104,9 +112,10 @@ fallback without mutation. The complete ownership contract is recorded in
 - Hydratable and static markup are distinct APIs.
 - Marker versions participate in compiler/runtime compatibility and cannot be
   accepted optimistically across unknown versions.
-- A successful hydration retains existing node identity and leaves updater,
-  owner, cleanup, context, error, ref, and ID behavior on the ordinary compiled
-  runtime path.
+- A successful hydration retains existing authored element and component node
+  identity and leaves updater, owner, cleanup, context, error, ref, and ID
+  behavior on the ordinary compiled runtime path. Server-elided choices may add
+  only their internal comment anchors; scalar boundary recovery may split text.
 - A failed claim disposes partial owners before whole-root recovery.
 - Client-only builds do not import server serialization or hydrate claiming
   entry points.
@@ -162,3 +171,12 @@ before the claimant is enabled.
   runtime output through a TSX application compiled by the hydrate Vite target,
   proving zero-churn adoption, ID parity, retained keyed rows, and a surgical
   post-hydration reorder.
+- `tests/browser/corpus/hydration/ArrayConditionalHydrationApp.browser.test.ts`
+  proves that conditional array items claim their selected server branch,
+  retain element/component identity, and add only bounded comment/text
+  boundaries.
+- `tests/browser/corpus/hydration/ForwardedConditionalHydrationApp.browser.test.ts`,
+  `EmptyRenderableChildHydrationApp.browser.test.ts`, and
+  `StartLinkHydrationApp.browser.test.ts` cover nested forwarded choices,
+  dependency renderables with empty children, and target-specific Start Link
+  component-range claiming.

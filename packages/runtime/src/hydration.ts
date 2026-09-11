@@ -21,7 +21,7 @@ interface HydrationState {
 }
 
 let activeHydration: HydrationState | undefined
-let activeInsertionPoint: readonly [parent: Node, before: Node] | undefined
+let activeInsertionPoint: readonly [parent: Node, before: Node | null] | undefined
 const hydrationFragments = new WeakMap<DocumentFragment, readonly unknown[]>()
 
 export function beginHydration(host: ParentNode): () => void {
@@ -400,7 +400,7 @@ export function withoutHydration<Result>(operation: () => Result): Result {
 
 export function withHydrationInsertion<Result>(
   parent: Node,
-  before: Node,
+  before: Node | null,
   operation: () => Result,
 ): Result {
   if (activeHydration === undefined) return operation()
@@ -413,7 +413,9 @@ export function withHydrationInsertion<Result>(
   }
 }
 
-export function hydrationInsertionPoint(): readonly [parent: Node, before: Node] | undefined {
+export function hydrationInsertionPoint():
+  | readonly [parent: Node, before: Node | null]
+  | undefined {
   return activeInsertionPoint
 }
 

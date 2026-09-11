@@ -7,8 +7,8 @@ use oxc_ast::{
         AssignmentExpression, AssignmentTarget, BindingPattern, CallExpression, Declaration,
         ExportDefaultDeclarationKind, Expression, FormalParameterKind, FormalParameters, Function,
         FunctionBody, JSXAttributeItem, JSXAttributeName, JSXAttributeValue, JSXChild, JSXElement,
-        JSXElementName, JSXFragment, JSXMemberExpressionObject, MemberExpression, Program,
-        Statement, VariableDeclaration, VariableDeclarator,
+        JSXElementName, JSXFragment, JSXMemberExpressionObject, MemberExpression,
+        ObjectPropertyKind, Program, Statement, VariableDeclaration, VariableDeclarator,
     },
     builder::AstBuilder,
 };
@@ -1334,6 +1334,22 @@ pub(crate) fn component_function_parts<'a>(
     name: &str,
     span: Option<SourceSpan>,
 ) -> Option<(&'a FormalParameters<'a>, &'a FunctionBody<'a>)> {
+    top_level_function_parts(program, name, span).or_else(|| {
+        // Anonymous components (e.g. one returned from a factory) have no
+        // top-level binding; locate them by their exact source span instead.
+        let span = span?;
+        program
+            .body
+            .iter()
+            .find_map(|statement| nested_parts_in_statement(statement, span))
+    })
+}
+
+fn top_level_function_parts<'a>(
+    program: &'a Program<'a>,
+    name: &str,
+    span: Option<SourceSpan>,
+) -> Option<(&'a FormalParameters<'a>, &'a FunctionBody<'a>)> {
     program.body.iter().find_map(|statement| match statement {
         Statement::FunctionDeclaration(function)
             if function.id.as_ref().is_some_and(|id| id.name == name)
@@ -1365,11 +1381,137 @@ pub(crate) fn component_function_parts<'a>(
     })
 }
 
+fn matches_exact(node: oxc_span::Span, span: SourceSpan) -> bool {
+    node.start == span.start && node.end == span.end
+}
+
+fn nested_parts_in_statement<'a>(
+    statement: &'a Statement<'a>,
+    span: SourceSpan,
+) -> Option<(&'a FormalParameters<'a>, &'a FunctionBody<'a>)> {
+    match statement {
+        Statement::VariableDeclaration(declaration) => declaration
+            .declarations
+            .iter()
+            .find_map(|declarator| nested_parts_in_expression(declarator.init.as_ref()?, span)),
+        Statement::FunctionDeclaration(function) => function
+            .body
+            .as_deref()?
+            .statements
+            .iter()
+            .find_map(|statement| nested_parts_in_statement(statement, span)),
+        Statement::ExpressionStatement(statement) => {
+            nested_parts_in_expression(&statement.expression, span)
+        }
+        Statement::ReturnStatement(statement) => {
+            nested_parts_in_expression(statement.argument.as_ref()?, span)
+        }
+        Statement::ExportDeclaration(export) => match &export.declaration {
+            Declaration::VariableDeclaration(declaration) => declaration
+                .declarations
+                .iter()
+                .find_map(|declarator| nested_parts_in_expression(declarator.init.as_ref()?, span)),
+            Declaration::FunctionDeclaration(function) => function
+                .body
+                .as_deref()?
+                .statements
+                .iter()
+                .find_map(|statement| nested_parts_in_statement(statement, span)),
+            _ => None,
+        },
+        Statement::ExportDefaultDeclaration(export) => {
+            nested_parts_in_expression(export.declaration.as_expression()?, span)
+        }
+        Statement::BlockStatement(block) => block
+            .body
+            .iter()
+            .find_map(|statement| nested_parts_in_statement(statement, span)),
+        Statement::IfStatement(statement) => nested_parts_in_statement(&statement.consequent, span)
+            .or_else(|| nested_parts_in_statement(statement.alternate.as_ref()?, span)),
+        _ => None,
+    }
+}
+
+fn nested_parts_in_expression<'a>(
+    expression: &'a Expression<'a>,
+    span: SourceSpan,
+) -> Option<(&'a FormalParameters<'a>, &'a FunctionBody<'a>)> {
+    match expression {
+        Expression::ArrowFunctionExpression(function) => {
+            if matches_exact(function.span, span) {
+                return Some((function.params.as_ref(), function.body.as_function_body()?));
+            }
+            function
+                .body
+                .as_function_body()?
+                .statements
+                .iter()
+                .find_map(|statement| nested_parts_in_statement(statement, span))
+        }
+        Expression::FunctionExpression(function) => {
+            if matches_exact(function.span, span) {
+                return Some((function.params.as_ref(), function.body.as_deref()?));
+            }
+            function
+                .body
+                .as_deref()?
+                .statements
+                .iter()
+                .find_map(|statement| nested_parts_in_statement(statement, span))
+        }
+        Expression::CallExpression(call) => {
+            nested_parts_in_expression(&call.callee, span).or_else(|| {
+                call.arguments.iter().find_map(|argument| {
+                    nested_parts_in_expression(argument.as_expression()?, span)
+                })
+            })
+        }
+        Expression::NewExpression(call) => call
+            .arguments
+            .iter()
+            .find_map(|argument| nested_parts_in_expression(argument.as_expression()?, span)),
+        Expression::ParenthesizedExpression(inner) => {
+            nested_parts_in_expression(&inner.expression, span)
+        }
+        Expression::ConditionalExpression(conditional) => {
+            nested_parts_in_expression(&conditional.consequent, span)
+                .or_else(|| nested_parts_in_expression(&conditional.alternate, span))
+        }
+        Expression::LogicalExpression(logical) => nested_parts_in_expression(&logical.left, span)
+            .or_else(|| nested_parts_in_expression(&logical.right, span)),
+        Expression::SequenceExpression(sequence) => sequence
+            .expressions
+            .iter()
+            .find_map(|expression| nested_parts_in_expression(expression, span)),
+        Expression::AssignmentExpression(assignment) => {
+            nested_parts_in_expression(&assignment.right, span)
+        }
+        Expression::ObjectExpression(object) => object.properties.iter().find_map(|property| {
+            let ObjectPropertyKind::ObjectProperty(property) = property else {
+                return None;
+            };
+            nested_parts_in_expression(&property.value, span)
+        }),
+        Expression::ArrayExpression(array) => array
+            .elements
+            .iter()
+            .find_map(|element| nested_parts_in_expression(element.as_expression()?, span)),
+        _ => None,
+    }
+}
+
 pub(crate) fn component_function_parts_mut<'p, 'a>(
     program: &'p mut Program<'a>,
     name: &str,
     span: Option<SourceSpan>,
 ) -> Option<(&'p mut FormalParameters<'a>, &'p mut FunctionBody<'a>)> {
+    // Anonymous nested components have no top-level binding; when the named
+    // lookup would miss, locate them by exact span instead. The immutable
+    // lookup decides which path applies so the mutable borrow stays single.
+    if top_level_function_parts(program, name, span).is_none() {
+        let span = span?;
+        return nested_function_parts_mut(program, span);
+    }
     program
         .body
         .iter_mut()
@@ -1406,6 +1548,160 @@ pub(crate) fn component_function_parts_mut<'p, 'a>(
             }
             _ => None,
         })
+}
+
+fn contains_span(node: oxc_span::Span, target: SourceSpan) -> bool {
+    node.start <= target.start && target.end <= node.end
+}
+
+/// Mutable twin of the nested span-based locator in `component_function_parts`.
+pub(crate) fn nested_function_parts_mut<'p, 'a>(
+    program: &'p mut Program<'a>,
+    span: SourceSpan,
+) -> Option<(&'p mut FormalParameters<'a>, &'p mut FunctionBody<'a>)> {
+    program
+        .body
+        .iter_mut()
+        .find_map(|statement| nested_parts_in_statement_mut(statement, span))
+}
+
+fn nested_parts_in_statement_mut<'p, 'a>(
+    statement: &'p mut Statement<'a>,
+    span: SourceSpan,
+) -> Option<(&'p mut FormalParameters<'a>, &'p mut FunctionBody<'a>)> {
+    match statement {
+        Statement::VariableDeclaration(declaration) => declaration
+            .declarations
+            .iter_mut()
+            .find_map(|declarator| nested_parts_in_expression_mut(declarator.init.as_mut()?, span)),
+        Statement::FunctionDeclaration(function) => function
+            .body
+            .as_deref_mut()?
+            .statements
+            .iter_mut()
+            .find_map(|statement| nested_parts_in_statement_mut(statement, span)),
+        Statement::ExpressionStatement(statement) => {
+            nested_parts_in_expression_mut(&mut statement.expression, span)
+        }
+        Statement::ReturnStatement(statement) => {
+            nested_parts_in_expression_mut(statement.argument.as_mut()?, span)
+        }
+        Statement::ExportDeclaration(export) => match &mut export.declaration {
+            Declaration::VariableDeclaration(declaration) => {
+                declaration.declarations.iter_mut().find_map(|declarator| {
+                    nested_parts_in_expression_mut(declarator.init.as_mut()?, span)
+                })
+            }
+            Declaration::FunctionDeclaration(function) => function
+                .body
+                .as_deref_mut()?
+                .statements
+                .iter_mut()
+                .find_map(|statement| nested_parts_in_statement_mut(statement, span)),
+            _ => None,
+        },
+        Statement::ExportDefaultDeclaration(export) => {
+            nested_parts_in_expression_mut(export.declaration.as_expression_mut()?, span)
+        }
+        Statement::BlockStatement(block) => block
+            .body
+            .iter_mut()
+            .find_map(|statement| nested_parts_in_statement_mut(statement, span)),
+        Statement::IfStatement(statement) => {
+            let statement = statement.as_mut();
+            if contains_span(statement.consequent.span(), span) {
+                nested_parts_in_statement_mut(&mut statement.consequent, span)
+            } else {
+                nested_parts_in_statement_mut(statement.alternate.as_mut()?, span)
+            }
+        }
+        _ => None,
+    }
+}
+
+fn nested_parts_in_expression_mut<'p, 'a>(
+    expression: &'p mut Expression<'a>,
+    span: SourceSpan,
+) -> Option<(&'p mut FormalParameters<'a>, &'p mut FunctionBody<'a>)> {
+    match expression {
+        Expression::ArrowFunctionExpression(function) => {
+            if matches_exact(function.span, span) {
+                let function = function.as_mut();
+                return Some((
+                    function.params.as_mut(),
+                    function.body.as_function_body_mut()?,
+                ));
+            }
+            function
+                .body
+                .as_function_body_mut()?
+                .statements
+                .iter_mut()
+                .find_map(|statement| nested_parts_in_statement_mut(statement, span))
+        }
+        Expression::FunctionExpression(function) => {
+            if matches_exact(function.span, span) {
+                let function = function.as_mut();
+                return Some((function.params.as_mut(), function.body.as_deref_mut()?));
+            }
+            function
+                .body
+                .as_deref_mut()?
+                .statements
+                .iter_mut()
+                .find_map(|statement| nested_parts_in_statement_mut(statement, span))
+        }
+        Expression::CallExpression(call) => {
+            let call = call.as_mut();
+            if contains_span(call.callee.span(), span) {
+                nested_parts_in_expression_mut(&mut call.callee, span)
+            } else {
+                call.arguments.iter_mut().find_map(|argument| {
+                    nested_parts_in_expression_mut(argument.as_expression_mut()?, span)
+                })
+            }
+        }
+        Expression::NewExpression(call) => call.arguments.iter_mut().find_map(|argument| {
+            nested_parts_in_expression_mut(argument.as_expression_mut()?, span)
+        }),
+        Expression::ParenthesizedExpression(inner) => {
+            nested_parts_in_expression_mut(&mut inner.expression, span)
+        }
+        Expression::ConditionalExpression(conditional) => {
+            let conditional = conditional.as_mut();
+            if contains_span(conditional.consequent.span(), span) {
+                nested_parts_in_expression_mut(&mut conditional.consequent, span)
+            } else {
+                nested_parts_in_expression_mut(&mut conditional.alternate, span)
+            }
+        }
+        Expression::LogicalExpression(logical) => {
+            let logical = logical.as_mut();
+            if contains_span(logical.left.span(), span) {
+                nested_parts_in_expression_mut(&mut logical.left, span)
+            } else {
+                nested_parts_in_expression_mut(&mut logical.right, span)
+            }
+        }
+        Expression::SequenceExpression(sequence) => sequence
+            .expressions
+            .iter_mut()
+            .find_map(|expression| nested_parts_in_expression_mut(expression, span)),
+        Expression::AssignmentExpression(assignment) => {
+            nested_parts_in_expression_mut(&mut assignment.right, span)
+        }
+        Expression::ObjectExpression(object) => object.properties.iter_mut().find_map(|property| {
+            let ObjectPropertyKind::ObjectProperty(property) = property else {
+                return None;
+            };
+            nested_parts_in_expression_mut(&mut property.value, span)
+        }),
+        Expression::ArrayExpression(array) => array
+            .elements
+            .iter_mut()
+            .find_map(|element| nested_parts_in_expression_mut(element.as_expression_mut()?, span)),
+        _ => None,
+    }
 }
 
 fn default_export_parts<'a>(

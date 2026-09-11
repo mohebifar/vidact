@@ -545,3 +545,140 @@ fn fails_closed_for_lookalikes_shadowing_and_lost_provenance() {
         );
     }
 }
+
+#[test]
+fn moves_the_forwarded_ref_into_destructured_forward_ref_props() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "destructured-forward-ref.mjs",
+            source: r#"
+                import { forwardRef, createElement } from "react";
+                function IconBase(props) {
+                    return createElement("svg", { className: props.className });
+                }
+                export const Icon = forwardRef(({ className = "", ...rest }, ref) =>
+                    createElement(IconBase, { ref, className, ...rest })
+                );
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("destructured forwardRef props should absorb the forwarded ref binding");
+
+    assert!(!output.contains("forwardRef"), "{output}");
+    // The ref parameter becomes a `ref` property of the props pattern, keeping
+    // its original binding name for the body references.
+    assert!(output.contains("ref: ref"), "{output}");
+}
+
+#[test]
+fn rejects_destructured_forward_ref_props_that_already_bind_ref() {
+    let error = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "conflicting-forward-ref.mjs",
+            source: r#"
+                import { forwardRef, createElement } from "react";
+                export const Icon = forwardRef(({ ref: inner, ...rest }, ref) =>
+                    createElement("svg", { ...rest })
+                );
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect_err("a props pattern that already binds ref cannot absorb the forwarded ref");
+
+    assert!(
+        format!("{error:?}").contains("must not already destructure a ref property"),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn compiles_components_returned_from_module_factories() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "icon-factory.mjs",
+            source: r#"
+                import { forwardRef, createElement } from "react";
+                export default function createIcon(d) {
+                    return forwardRef(({ className, ...rest }, ref) =>
+                        createElement("svg", { ref, className, ...rest },
+                            createElement("path", { d })
+                        )
+                    );
+                }
+                export const ArrowRight = createIcon("M5 12h14");
+                export function IconFrame({ children }) {
+                    return createElement("figure", null, children);
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("components returned from factories should compile in place");
+
+    assert!(!output.contains("forwardRef"), "{output}");
+    // The nested component body is compiled where it stands, inside the factory.
+    assert!(output.contains("__vidactCompiledRoot"), "{output}");
+    assert!(output.contains("createIcon"), "{output}");
+}
+
+#[test]
+fn lowers_runtime_tag_create_element_to_a_runtime_call() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "runtime-tag.mjs",
+            source: r#"
+                import { createElement, useRef } from "react";
+                export function Dyn({ tag, nodes }) {
+                    const marker = useRef(null);
+                    return createElement(tag, { "data-marker": marker },
+                        nodes.map(([child, attrs]) => createElement(child, attrs))
+                    );
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("runtime-tagged createElement should compile as a runtime call");
+
+    // The identifier tag must stay a runtime value, never a literal JSX name.
+    assert!(
+        output.contains("__vidactCreateReactElement(tag"),
+        "{output}"
+    );
+    assert!(
+        output.contains("__vidactCreateReactElement(child"),
+        "{output}"
+    );
+    assert!(!output.contains("<tag"), "{output}");
+    assert!(
+        output.contains("createElement as __vidactCreateReactElement"),
+        "{output}"
+    );
+}
+
+#[test]
+fn treats_non_hook_array_destructured_calls_as_derived_locals() {
+    let output = compile_surgical_module_with_options(
+        ModuleInput {
+            filename: "tuple-helper.mjs",
+            source: r#"
+                import { jsx as h } from "react/jsx-runtime";
+                function split(value) {
+                    return [value, value.length];
+                }
+                export function Sized({ text }) {
+                    const [value, size = 0] = split(text);
+                    return h("p", { "data-size": size, children: value });
+                }
+            "#,
+        },
+        &CompilationOptions::default().with_feature(CompilerFeature::DependencySource),
+    )
+    .expect("array destructuring of a plain call should compile");
+
+    // Each element regains reactivity through an indexed derived expression.
+    assert!(output.contains("split(text.get())[0]"), "{output}");
+    assert!(output.contains("split(text.get())[1] ?? 0"), "{output}");
+}

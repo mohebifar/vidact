@@ -22,6 +22,7 @@
     "@vidact/runtime": "workspace:*",
     "@vidact/start": "workspace:*",
     "fumadocs-core": "16.15.4",
+    "lucide-react": "1.44.0",
     "remark-gfm": "4.0.1",
     "shiki": "4.4.3",
     "srvx": "^0.12.7",

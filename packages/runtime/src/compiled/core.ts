@@ -219,9 +219,18 @@ export function deferred(render: () => CompiledRenderValue): StructuralBinding {
   return [
     STRUCTURAL,
     (parent, before) => {
-      const hydrated = claimHydrationSlotRange(parent)
-      if (hydrated === undefined) insertValue(parent, render(), before)
-      else insertValue(parent, render(), hydrated[1])
+      const value = render()
+      if (ownedStructuralBinding(value)?.[2] === 'slot') {
+        insertValue(parent, value, before)
+        return
+      }
+      const hydrated = borrowHydrationSlotRange(parent, true)
+      if (hydrated === undefined) {
+        insertValue(parent, value, before)
+        return
+      }
+      claimHydrationSlotRange(parent)
+      insertValue(parent, value, hydrated[1])
     },
     'slot',
   ]
@@ -1714,6 +1723,42 @@ export function useCallback<T extends Function>(callback: T, _dependencies: read
   return callback
 }
 
+const ownedBlockFacades = new WeakMap<StructuralBinding, RenderableProtocol>()
+const ownedFacadeBlocks = new WeakMap<RenderableProtocol, StructuralBinding>()
+
+function ownedStructuralBinding(value: unknown): StructuralBinding | undefined {
+  if (isStructuralBinding(value)) return value
+  return isRenderableProtocol(value) ? ownedFacadeBlocks.get(value) : undefined
+}
+
+/**
+ * Owned blocks are arrays internally, which user-level data flow must never
+ * observe: dependency code inspects children with `Array.isArray` and spreads
+ * them. Prop reads wrap a block in a stable renderable facade that
+ * materializes back to the block when rendered.
+ */
+function sanitizeCompiledPropValue<T>(value: T): T {
+  if (!isStructuralBinding(value)) return value
+  let facade = ownedBlockFacades.get(value)
+  if (facade === undefined) {
+    const capability = { props: {} } as unknown as RenderableProtocol
+    Object.defineProperty(capability, RENDERABLE, {
+      configurable: false,
+      enumerable: false,
+      value: {
+        identity: value,
+        input: {},
+        reconcile: false,
+        construct: () => value,
+      },
+    })
+    facade = capability
+    ownedBlockFacades.set(value, facade)
+    ownedFacadeBlocks.set(facade, value)
+  }
+  return facade as T
+}
+
 export function createCompiledProp<T>(
   scope: CompiledScope,
   sourceMask: SourceMask,
@@ -1724,7 +1769,9 @@ export function createCompiledProp<T>(
   const upstream = isCompiledBinding(input) ? input : undefined
   const read = (): T => {
     const value = upstream === undefined ? (input as T) : upstream[1]()
-    return value === undefined && fallback !== undefined ? fallback() : value
+    return sanitizeCompiledPropValue(
+      value === undefined && fallback !== undefined ? fallback() : value,
+    )
   }
   const slot = createStateSlot<T>(scope[1], sourceMask, read(), assertWritable)
   if (upstream !== undefined) {
@@ -1749,7 +1796,10 @@ export function createCompiledRestProp(
     Object.entries(input).filter(([name]) => !excluded.has(name))
   const read = (): Record<string, unknown> =>
     Object.fromEntries(
-      entries().map(([name, value]) => [name, isCompiledBinding(value) ? value[1]() : value]),
+      entries().map(([name, value]) => [
+        name,
+        sanitizeCompiledPropValue(isCompiledBinding(value) ? value[1]() : value),
+      ]),
     )
   const slot = createStateSlot(scope[1], sourceMask, read(), stateWriteGuard(scope))
   const publish = (): void => {
@@ -1985,7 +2035,12 @@ export function choose(
   return structural(
     scope,
     (parent, before) => {
-      const [start, end, hydrated] = structuralRange(parent, before, 'choice')
+      const range = structuralRange(parent, before, 'choice', true, true)
+      const markerlessHydration = range === undefined
+      const start = range?.[0] ?? document.createComment(DEV ? 'vidact:choice' : '')
+      const end = range?.[1] ?? document.createComment(DEV ? '/vidact:choice' : '')
+      const hydrated = range?.[2] ?? true
+      const ownsMarkers = range?.[3] ?? true
       let selected = -1
       let branchOwner: Owner | null = null
       let branchNodes: readonly Node[] = []
@@ -1995,15 +2050,28 @@ export function choose(
         const next =
           mode === 'not-nullish' ? (value === null || value === undefined ? 1 : 0) : value ? 0 : 1
         if (next === selected) return
-        const currentParent = rangeParent(start, end, 'choice block')
         const nextOwner = createOwner()
-        const [fragment, nodes] =
-          hydrated && selected === -1
-            ? withHydrationInsertion(currentParent, end, () =>
-                stageRender(next === 0 ? consequent : alternate, nextOwner),
-              )
-            : stageRender(next === 0 ? consequent : alternate, nextOwner)
-        currentParent.insertBefore(fragment, end)
+        const render = next === 0 ? consequent : alternate
+        let nodes: readonly Node[]
+        if (markerlessHydration && selected === -1) {
+          const [first, after, hydratedNodes] = stageMarkerlessHydrationRender(
+            parent,
+            before,
+            render,
+            nextOwner,
+          )
+          parent.insertBefore(start, first)
+          parent.insertBefore(end, after)
+          nodes = hydratedNodes
+        } else {
+          const currentParent = rangeParent(start, end, 'choice block')
+          const [fragment, stagedNodes] =
+            hydrated && selected === -1
+              ? withHydrationInsertion(currentParent, end, () => stageRender(render, nextOwner))
+              : stageRender(render, nextOwner)
+          currentParent.insertBefore(fragment, end)
+          nodes = stagedNodes
+        }
         try {
           commitPublishedNodes(nodes)
         } catch (error) {
@@ -2031,8 +2099,10 @@ export function choose(
         try {
           disposePublished(branchOwner, branchNodes)
         } finally {
-          start.remove()
-          end.remove()
+          if (ownsMarkers) {
+            start.remove()
+            end.remove()
+          }
         }
       })
     },
@@ -3330,14 +3400,40 @@ function structuralRange(
   parent: Node,
   before: Node | null,
   label: string,
-): readonly [start: Comment, end: Comment, hydrated: boolean] {
+  borrowOuter?: boolean,
+  allowMarkerlessHydration?: false,
+): readonly [start: Comment, end: Comment, hydrated: boolean, ownsMarkers: boolean]
+function structuralRange(
+  parent: Node,
+  before: Node | null,
+  label: string,
+  borrowOuter: boolean,
+  allowMarkerlessHydration: true,
+): readonly [start: Comment, end: Comment, hydrated: boolean, ownsMarkers: boolean] | undefined
+function structuralRange(
+  parent: Node,
+  before: Node | null,
+  label: string,
+  borrowOuter = false,
+  allowMarkerlessHydration = false,
+): readonly [start: Comment, end: Comment, hydrated: boolean, ownsMarkers: boolean] | undefined {
+  const current = borrowHydrationSlotRange(parent, true)
+  if (current !== undefined) {
+    claimHydrationSlotRange(parent)
+    return [current[0], current[1], true, true]
+  }
+  if (borrowOuter) {
+    const outer = borrowHydrationSlotRange(parent, false)
+    if (outer !== undefined) return [outer[0], outer[1], true, false]
+  }
+  if (allowMarkerlessHydration && hydrationCursor(parent) !== undefined) return undefined
   const hydrated = claimHydrationSlotRange(parent)
-  if (hydrated !== undefined) return [hydrated[0], hydrated[1], true]
+  if (hydrated !== undefined) return [hydrated[0], hydrated[1], true, true]
   const start = document.createComment(DEV ? `vidact:${label}` : '')
   const end = document.createComment(DEV ? `/vidact:${label}` : '')
   parent.insertBefore(start, before)
   parent.insertBefore(end, before)
-  return [start, end, false]
+  return [start, end, false, true]
 }
 
 function subscribe(
@@ -3855,12 +3951,13 @@ function mountCompiledBindingBefore(
 ): void {
   const initial = value[1]()
   const scalarInitial = isScalarRenderValue(initial)
+  const structuralInitial = ownedStructuralBinding(initial)
   const hydratedTextRange = scalarInitial
     ? claimHydrationTextRange(parent, toText(initial))
     : undefined
   const borrowedHydrationRange =
     isHydrating() && !scalarInitial
-      ? borrowHydrationSlotRange(parent, isStructuralBinding(initial) && initial[2] === 'slot')
+      ? borrowHydrationSlotRange(parent, structuralInitial?.[2] === 'slot')
       : undefined
   const hydratedStructuralRange =
     isHydrating() && !scalarInitial
@@ -4077,6 +4174,40 @@ function stageRender(
     }
     throw error
   }
+}
+
+function stageMarkerlessHydrationRender(
+  parent: Node,
+  before: Node | null,
+  render: () => CompiledRenderValue,
+  owner: Owner,
+): readonly [first: Node | null, after: Node | null, nodes: readonly Node[]] {
+  const first = hydrationCursor(parent)
+  if (first === undefined) {
+    throw new Error('markerless hydration render requires active hydration')
+  }
+  try {
+    withHydrationInsertion(parent, before, () =>
+      withOwner(owner, () => insertValue(parent, render(), before)),
+    )
+  } catch (error) {
+    try {
+      disposeOwner(owner)
+    } catch {
+      // Preserve the render or hydration error after every registered cleanup ran.
+    }
+    throw error
+  }
+  const after = hydrationCursor(parent)
+  if (after === undefined) {
+    disposeOwner(owner)
+    throw new Error('markerless hydration render lost its hydration cursor')
+  }
+  const nodes: Node[] = []
+  for (let node = first; node !== null && node !== after; node = node.nextSibling) {
+    nodes.push(node)
+  }
+  return [first, after, nodes]
 }
 
 function insertValue(

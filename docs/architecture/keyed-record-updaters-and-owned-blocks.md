@@ -2,6 +2,7 @@
 
 - Decision state: Accepted
 - Decided: 2026-08-21
+- Updated: 2026-09-10
 
 ## Context
 
@@ -22,6 +23,15 @@ the compiler emits its slot read without a binding or item-scope subscription.
 If that key value changes, keyed reconciliation removes the old owner and mounts
 a new record before an in-place item update could be observed.
 
+A JSX map may select different component types with a conditional expression
+when every branch declares the same supported item key. Analysis validates the
+key path across all branches and the generated `keyed` selector owns that key
+once. The callback conditional becomes an item-scope `choose`, so changing a
+retained row from one component type to another replaces only that row's branch
+while other keyed records remain untouched. Missing, different, computed, or
+otherwise unsupported branch keys fail closed instead of falling back to index
+identity.
+
 A keyed or conditional structural result is an owned block. The block may pass through props and be rendered as a child, including the compiled form of `<div>{props.arrayOfJsx}</div>`, but it may mount only once. This supports arrays produced by Vidact compilation; it does not make arbitrary external `ReactElement[]` values renderable.
 
 ## Compiler and runtime contract
@@ -40,6 +50,12 @@ Invariant-key matching uses the same `KeyPath::Identity` and
 equality. It applies to exact repeated item references and direct properties,
 including supported destructured key leaves. Composite, computed, nested, and
 mixed parent/item expressions keep their normal reactive bindings.
+
+For a conditional map callback, each direct JSX branch must repeat the same
+validated key expression. The compiler registers callback parameters as item
+slots before lowering the conditional, rewrites the predicate and branch props
+to slot reads, and subscribes the generated choice to the item scope. Branch
+events retain their normal owner-scoped delegated behavior.
 
 The compiler emits an index-tracking boolean in the private `keyed` call ABI.
 Compiler-managed item and index inputs use read-only cells: they expose the
@@ -90,6 +106,8 @@ Owned blocks carry their update ownership from their producer. Passing one into 
   row rendering receives slots and compiler-owned property paths.
 - An exact repeated key path allocates no item updater; changing the path's
   value changes record identity and therefore replaces the record owner.
+- Conditional component branches in one map record share one validated key;
+  changing branch type replaces only the branch inside that retained record.
 - Duplicate keys fail before the current DOM is changed.
 - Removing or changing a key disposes the old record exactly once.
 - One owned block has one legal mount.
@@ -117,7 +135,9 @@ mixed bindings register in two scopes. Scope methods, read-only getters, and
 delegated event invocation are shared rather than allocated per record, while
 transition-only cell fields remain lazy. Nested collections derived from an outer
 item and direct/aliased/nested object leaf reads in map callback parameters are
-supported, while direct outer-row captures remain diagnosed. Row-pattern
+supported. Conditional component branches are also supported when all branches
+repeat the same direct item key; differing branch keys remain diagnosed. Direct
+outer-row captures remain diagnosed. Row-pattern
 defaults/rest/arrays, broader imperative accumulator grammars, and arbitrary
 external JSX arrays remain outside the accepted contract.
 
@@ -131,6 +151,9 @@ external JSX arrays remain outside the accepted contract.
 - `tests/browser/corpus/apps/control-flow/ControlFlowApp.browser.test.ts` proves
   a nested keyed list reconciles from a retained outer item while preserving
   both levels of DOM identity.
+- `tests/browser/corpus/apps/conditional-events/ConditionalEventsApp.browser.test.ts`
+  proves same-key A/B component selection, unaffected-row identity, and correct
+  branch event handlers through compiled TSX.
 - `crates/vidact-compiler/tests/surgical_codegen.rs` checks separate item/component domains, invariant direct and destructured key reads, nested key-context restoration, structural branches, raw key selectors, and generated callback shape.
 - `examples/todomvc/src/TodoApp.browser.test.ts` verifies a changed todo retains its exact `li` while rows are passed through `TodoList` as a prop.
 - Run `cargo test --workspace`, `pnpm test:runtime`, `pnpm test:browser`, `pnpm test:examples`, and `pnpm typecheck`.

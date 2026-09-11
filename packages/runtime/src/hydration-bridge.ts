@@ -30,8 +30,12 @@ export interface HydrationOperations {
   readonly claimSuspenseFallback: (parent: Node) => Comment | undefined
   readonly skipRange: (start: Comment, end: Comment) => void
   readonly withoutHydration: <Result>(operation: () => Result) => Result
-  readonly withInsertion: <Result>(parent: Node, before: Node, operation: () => Result) => Result
-  readonly insertionPoint: () => readonly [parent: Node, before: Node] | undefined
+  readonly withInsertion: <Result>(
+    parent: Node,
+    before: Node | null,
+    operation: () => Result,
+  ) => Result
+  readonly insertionPoint: () => readonly [parent: Node, before: Node | null] | undefined
   readonly cursor: (parent: Node) => Node | null | undefined
   readonly rangeParent: (start: Comment, end: Comment) => Node | undefined
 }
@@ -169,13 +173,15 @@ export function withoutHydration<Result>(operation: () => Result): Result {
 
 export function withHydrationInsertion<Result>(
   parent: Node,
-  before: Node,
+  before: Node | null,
   operation: () => Result,
 ): Result {
   return hydration === undefined ? operation() : hydration.withInsertion(parent, before, operation)
 }
 
-export function hydrationInsertionPoint(): readonly [parent: Node, before: Node] | undefined {
+export function hydrationInsertionPoint():
+  | readonly [parent: Node, before: Node | null]
+  | undefined {
   return hydration?.insertionPoint()
 }
 

@@ -88,6 +88,7 @@ const CREATE_OPTIMISTIC: &str = "__vidactCreateOptimistic";
 const DEFERRED: &str = "__vidactDeferred";
 const DISPATCH: &str = "__vidactDispatch";
 const DYNAMIC_INTRINSIC_COMPONENT: &str = "__vidactDynamicIntrinsicComponent";
+const CREATE_REACT_ELEMENT: &str = "__vidactCreateReactElement";
 const KEYED_FRAGMENT_COMPONENT: &str = "__vidactKeyedFragmentComponent";
 const ENABLE_FRAMEWORK_METADATA: &str = "__vidactEnableFrameworkMetadata";
 const ENABLE_DOM_FORMS: &str = "__vidactEnableDomForms";
@@ -1566,23 +1567,46 @@ fn transform_component<'a>(
             )?;
             transform_effect_event_declarator(&ast, declarator, &react)?;
             transform_id_declarator(&ast, declarator, &react)?;
+            let is_active_derived = |name: &str| {
+                ir.sources.iter().any(|source| {
+                    source.kind == SourceKind::Derived
+                        && source.name == name
+                        && !memo_sources.contains(&source.id)
+                        && !concurrent_sources.contains(&source.id)
+                        && !action_sources.contains(&source.id)
+                        && !context_sources.contains(&source.id)
+                        && !external_sources.contains(&source.id)
+                        && !effect_event_sources.contains(&source.id)
+                        && !id_sources.contains(&source.id)
+                })
+            };
             if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
                 && (identifier
                     .symbol_id
                     .get()
                     .is_some_and(|symbol| synthetic_symbols.contains(&symbol))
-                    || ir.sources.iter().any(|source| {
-                        source.kind == SourceKind::Derived
-                            && source.name == identifier.name.as_str()
-                            && !memo_sources.contains(&source.id)
-                            && !concurrent_sources.contains(&source.id)
-                            && !action_sources.contains(&source.id)
-                            && !context_sources.contains(&source.id)
-                            && !external_sources.contains(&source.id)
-                            && !effect_event_sources.contains(&source.id)
-                            && !id_sources.contains(&source.id)
-                    }))
+                    || is_active_derived(identifier.name.as_str()))
             {
+                declarator.kind = VariableDeclarationKind::Let;
+                contains_derived = true;
+            }
+            if let BindingPattern::ArrayPattern(pattern) = &declarator.id
+                && pattern.elements.iter().flatten().any(|element| {
+                    let identifier = match element {
+                        BindingPattern::BindingIdentifier(identifier) => identifier,
+                        BindingPattern::AssignmentPattern(assignment) => {
+                            let BindingPattern::BindingIdentifier(identifier) = &assignment.left
+                            else {
+                                return false;
+                            };
+                            identifier
+                        }
+                        _ => return false,
+                    };
+                    is_active_derived(identifier.name.as_str())
+                })
+            {
+                // Element updaters reassign the destructured locals.
                 declarator.kind = VariableDeclarationKind::Let;
                 contains_derived = true;
             }
@@ -1881,6 +1905,7 @@ fn transform_component<'a>(
         react: &react,
         renderable_depth: 0,
         invariant_item_key: None,
+        keyed_map_render: false,
         reactive_spread_overrides: BTreeMap::new(),
         diagnostic: None,
     };
@@ -3029,12 +3054,64 @@ fn derived_expressions<'a>(
         .filter(|source| source.kind == SourceKind::Derived)
         .map(|source| source.name.as_str())
         .collect::<Vec<_>>();
+    let ast = AstBuilder::new(allocator);
     let mut expressions = BTreeMap::new();
     for statement in &body.statements {
         let Statement::VariableDeclaration(declaration) = statement else {
             continue;
         };
         for declarator in &declaration.declarations {
+            if let BindingPattern::ArrayPattern(pattern) = &declarator.id {
+                // Array-destructured derived locals recompute as an indexed read
+                // of the reevaluated initializer. A destructuring default maps to
+                // `?? default`; that diverges from destructuring semantics only
+                // for a deliberately null element.
+                let Some(init) = &declarator.init else {
+                    continue;
+                };
+                for (index, element) in pattern.elements.iter().enumerate() {
+                    let (identifier, default) = match element {
+                        Some(BindingPattern::BindingIdentifier(identifier)) => (identifier, None),
+                        Some(BindingPattern::AssignmentPattern(assignment)) => {
+                            let BindingPattern::BindingIdentifier(identifier) = &assignment.left
+                            else {
+                                continue;
+                            };
+                            (identifier, Some(&assignment.right))
+                        }
+                        _ => continue,
+                    };
+                    if !derived.contains(&identifier.name.as_str()) {
+                        continue;
+                    }
+                    let span = identifier.span;
+                    let mut expression =
+                        Expression::from(MemberExpression::new_computed_member_expression(
+                            span,
+                            init.clone_in_with_semantic_ids(allocator),
+                            Expression::new_numeric_literal(
+                                span,
+                                index as f64,
+                                None,
+                                NumberBase::Decimal,
+                                &ast,
+                            ),
+                            false,
+                            &ast,
+                        ));
+                    if let Some(default) = default {
+                        expression = Expression::new_logical_expression(
+                            span,
+                            expression,
+                            LogicalOperator::Coalesce,
+                            default.clone_in_with_semantic_ids(allocator),
+                            &ast,
+                        );
+                    }
+                    expressions.insert(allocator.alloc_str(identifier.name.as_str()), expression);
+                }
+                continue;
+            }
             let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
                 continue;
             };
@@ -3060,6 +3137,7 @@ struct JsxBindingTransformer<'a, 'b, 's> {
     react: &'s ReactBindings<'s>,
     renderable_depth: usize,
     invariant_item_key: Option<ItemReadPath>,
+    keyed_map_render: bool,
     reactive_spread_overrides: BTreeMap<u32, (ReactiveSpreadKind, Vec<String>)>,
     diagnostic: Option<Diagnostic>,
 }
@@ -3307,12 +3385,22 @@ impl<'a> JsxBindingTransformer<'a, '_, '_> {
             self.lower_choice_branch(&mut conditional.alternate);
             return true;
         }
-        match render::align_render_alternatives(
-            self.ast,
-            &conditional.test,
-            &conditional.consequent,
-            &conditional.alternate,
-        ) {
+        let aligned = if self.keyed_map_render {
+            render::align_keyed_map_render_alternatives(
+                self.ast,
+                &conditional.test,
+                &conditional.consequent,
+                &conditional.alternate,
+            )
+        } else {
+            render::align_render_alternatives(
+                self.ast,
+                &conditional.test,
+                &conditional.consequent,
+                &conditional.alternate,
+            )
+        };
+        match aligned {
             Ok(Some(aligned)) => {
                 *expression = aligned;
                 self.visit_expression(expression);
@@ -4406,10 +4494,23 @@ impl<'a> VisitMut<'a> for JsxBindingTransformer<'a, '_, '_> {
                 );
                 return;
             }
+            let previous_keyed_map_render =
+                std::mem::replace(&mut self.keyed_map_render, key.is_some());
             let previous_item_key =
                 std::mem::replace(&mut self.invariant_item_key, invariant_item_key);
-            self.visit_expression(&mut render);
+            let lowered_conditional = if let Expression::ArrowFunctionExpression(render) =
+                &mut render
+                && let Some(expression) = render.body.as_expression_mut()
+            {
+                self.lower_structural_conditional(expression)
+            } else {
+                false
+            };
+            if !lowered_conditional {
+                self.visit_expression(&mut render);
+            }
             self.invariant_item_key = previous_item_key;
+            self.keyed_map_render = previous_keyed_map_render;
             let mut arguments = vec![
                 ident(self.ast, SCOPE),
                 dependency_mask(self.ast, &reads.parent),
@@ -5270,10 +5371,7 @@ fn jsx_map<'a>(
     if !(1..=2).contains(&render.params.items.len()) {
         return None;
     }
-    if !matches!(
-        render.body.as_expression()?.without_parentheses(),
-        Expression::JSXElement(_) | Expression::JSXFragment(_)
-    ) {
+    if !is_supported_map_render(render.body.as_expression()?.without_parentheses()) {
         return None;
     }
     let key_expression = key_expression(render);
@@ -5396,25 +5494,52 @@ fn item_pattern_bindings(pattern: &BindingPattern<'_>) -> Option<Vec<(SymbolId, 
 }
 
 fn key_expression<'a>(render: &'a ArrowFunctionExpression<'a>) -> Option<&'a Expression<'a>> {
-    let expression = render.body.as_expression()?;
-    let Expression::JSXElement(element) = expression.without_parentheses() else {
-        return None;
-    };
-    element.opening_element.attributes.iter().find_map(|item| {
-        let JSXAttributeItem::Attribute(attribute) = item else {
-            return None;
-        };
-        let JSXAttributeName::Identifier(name) = &attribute.name else {
-            return None;
-        };
-        if name.name != "key" {
-            return None;
+    let mut keys = Vec::new();
+    collect_map_render_keys(render.body.as_expression()?, &mut keys);
+    keys.first().copied().flatten()
+}
+
+fn is_supported_map_render(expression: &Expression<'_>) -> bool {
+    match expression.without_parentheses() {
+        Expression::JSXElement(_) | Expression::JSXFragment(_) => true,
+        Expression::ConditionalExpression(conditional) => {
+            is_supported_map_render(&conditional.consequent)
+                && is_supported_map_render(&conditional.alternate)
         }
-        let Some(JSXAttributeValue::ExpressionContainer(container)) = &attribute.value else {
-            return None;
-        };
-        container.expression.as_expression()
-    })
+        _ => false,
+    }
+}
+
+fn collect_map_render_keys<'a>(
+    expression: &'a Expression<'a>,
+    keys: &mut Vec<Option<&'a Expression<'a>>>,
+) {
+    match expression.without_parentheses() {
+        Expression::JSXElement(element) => {
+            keys.push(element.opening_element.attributes.iter().find_map(|item| {
+                let JSXAttributeItem::Attribute(attribute) = item else {
+                    return None;
+                };
+                let JSXAttributeName::Identifier(name) = &attribute.name else {
+                    return None;
+                };
+                if name.name != "key" {
+                    return None;
+                }
+                let JSXAttributeValue::ExpressionContainer(container) = attribute.value.as_ref()?
+                else {
+                    return None;
+                };
+                container.expression.as_expression()
+            }));
+        }
+        Expression::ConditionalExpression(conditional) => {
+            collect_map_render_keys(&conditional.consequent, keys);
+            collect_map_render_keys(&conditional.alternate, keys);
+        }
+        Expression::JSXFragment(_) => keys.push(None),
+        _ => {}
+    }
 }
 
 fn item_read_path(expression: &Expression<'_>, scoping: &Scoping) -> Option<ItemReadPath> {
@@ -5782,12 +5907,10 @@ impl<'a> Visit<'a> for ItemParameterCollector<'a, '_> {
             && let [argument] = call.arguments.as_slice()
             && let Some(Expression::ArrowFunctionExpression(render)) = argument.as_expression()
             && (1..=2).contains(&render.params.items.len())
-            && render.body.as_expression().is_some_and(|expression| {
-                matches!(
-                    expression.without_parentheses(),
-                    Expression::JSXElement(_) | Expression::JSXFragment(_)
-                )
-            })
+            && render
+                .body
+                .as_expression()
+                .is_some_and(is_supported_map_render)
         {
             for (index, parameter) in render.params.items.iter().take(2).enumerate() {
                 let Some(bindings) = item_pattern_bindings(&parameter.pattern) else {
@@ -5980,6 +6103,7 @@ fn runtime_imports<'a>(
         ("createCompiledState", CREATE_STATE),
         ("createCompiledTransition", CREATE_TRANSITION),
         ("createRenderable", CREATE_RENDERABLE),
+        ("createElement", CREATE_REACT_ELEMENT),
         ("runWithCompiledContext", RUN_WITH_CONTEXT),
         ("deferred", DEFERRED),
         ("dispatch", DISPATCH),

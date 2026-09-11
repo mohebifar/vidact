@@ -1480,18 +1480,46 @@ impl<'a> LoweredReactNormalizer<'a, '_> {
         if params.items.len() == 1 {
             return Ok(None);
         }
-        let BindingPattern::BindingIdentifier(props) = &params.items[0].pattern else {
-            return Err("forwardRef props must use a simple identifier");
-        };
-        let props_name = self.ast.allocator().alloc_str(props.name.as_str());
         let BindingPattern::BindingIdentifier(forwarded_ref) = &params.items[1].pattern else {
             return Err("forwardRef ref must use a simple identifier");
         };
-        let Some(symbol) = forwarded_ref.symbol_id.get() else {
-            return Err("forwardRef ref binding has no semantic symbol");
+        if let BindingPattern::BindingIdentifier(props) = &params.items[0].pattern {
+            let props_name = self.ast.allocator().alloc_str(props.name.as_str());
+            let Some(symbol) = forwarded_ref.symbol_id.get() else {
+                return Err("forwardRef ref binding has no semantic symbol");
+            };
+            params.items.truncate(1);
+            return Ok(Some((symbol, props_name)));
+        }
+        if !matches!(&params.items[0].pattern, BindingPattern::ObjectPattern(_)) {
+            return Err("forwardRef props must use a simple identifier or object pattern");
+        }
+        // Destructured props keep their pattern: the forwarded ref moves into it as a
+        // `ref` binding property, so body references resolve without rewriting.
+        let ref_parameter = params.items.pop().expect("two parameters checked above");
+        let ref_pattern = ref_parameter.pattern;
+        let span = ref_pattern.span();
+        let BindingPattern::ObjectPattern(object) = &mut params.items[0].pattern else {
+            unreachable!("object pattern matched above");
         };
-        params.items.truncate(1);
-        Ok(Some((symbol, props_name)))
+        if object.properties.iter().any(|property| {
+            !property.computed
+                && property
+                    .key
+                    .static_name()
+                    .is_some_and(|name| name.as_ref() == "ref")
+        }) {
+            return Err("forwardRef props must not already destructure a ref property");
+        }
+        object.properties.push(BindingProperty::new(
+            span,
+            PropertyKey::new_static_identifier(span, "ref", &self.ast),
+            ref_pattern,
+            false,
+            false,
+            &self.ast,
+        ));
+        Ok(None)
     }
 
     fn lower_clone_element(
@@ -1554,6 +1582,38 @@ impl<'a> LoweredReactNormalizer<'a, '_> {
             arguments.next(),
             "React element factory is missing its props argument",
         )?;
+        // A lowercase identifier tag is a runtime value: JSX name position would
+        // reinterpret it as a literal intrinsic name, so the call stays a runtime
+        // element construction, which the reactive pipeline treats as an opaque
+        // renderable expression.
+        let runtime_identifier_tag = matches!(
+            tag.without_parentheses(),
+            Expression::Identifier(identifier)
+                if !identifier
+                    .name
+                    .chars()
+                    .next()
+                    .is_some_and(|initial| initial.is_ascii_uppercase())
+        );
+        if kind == FactoryKind::Classic && runtime_identifier_tag {
+            let mut call_arguments = ArenaVec::new_in(&self.ast);
+            call_arguments.push(Argument::from(tag));
+            call_arguments.push(Argument::from(props));
+            for argument in arguments {
+                if !argument.is_expression() {
+                    return Err("spread children in React.createElement are unsupported");
+                }
+                call_arguments.push(argument);
+            }
+            return Ok(Expression::new_call_expression(
+                span,
+                Expression::new_identifier(span, "__vidactCreateReactElement", &self.ast),
+                None,
+                call_arguments,
+                false,
+                &self.ast,
+            ));
+        }
         if kind == FactoryKind::Classic
             && matches!(tag.without_parentheses(), Expression::Identifier(_))
             && !matches!(

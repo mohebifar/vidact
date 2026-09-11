@@ -13,17 +13,6 @@ import {
 const REACT_EXTERNAL = /^(?:react|react-dom)(?:\/|$)/
 export const EXTERNAL_STORE_SHIM_ID = '\0vidact:use-sync-external-store-shim'
 export const EXTERNAL_STORE_SELECTOR_SHIM_ID = '\0vidact:use-sync-external-store-selector-shim'
-export const BASE_UI_FAST_HOOKS_SHIM_ID = '\0vidact:base-ui-fast-hooks-shim'
-const BASE_UI_FAST_HOOKS_SHIM = `
-export { memo as fastComponent, forwardRef as fastComponentRef } from 'react'
-
-export function getInstance() {
-  return undefined
-}
-
-export function setInstance() {}
-export function register() {}
-`
 const EXTERNAL_STORE_SELECTOR_SHIM = `
 import { useDebugValue, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 
@@ -85,6 +74,36 @@ export function useSyncExternalStoreWithSelector(
 }
 `
 
+/**
+ * Named exports of each compatibility shim, paired with the label used when one reaches the main
+ * module graph unlowered. Capsule compilation is supposed to replace these, so an import that
+ * survives into the build is a bug, and the shim says so instead of failing silently.
+ */
+const UNLOWERED_SHIM_EXPORTS = new Map<string, readonly (readonly [string, string])[]>([
+  [EXTERNAL_STORE_SHIM_ID, [['useSyncExternalStore', 'useSyncExternalStore shim']]],
+  [
+    EXTERNAL_STORE_SELECTOR_SHIM_ID,
+    [['useSyncExternalStoreWithSelector', 'useSyncExternalStoreWithSelector shim']],
+  ],
+])
+
+/** Whether `id` is a compatibility shim the capsule builder can substitute for a dependency. */
+export function isDependencyShimId(id: string): boolean {
+  return UNLOWERED_SHIM_EXPORTS.has(id)
+}
+
+/** Source for a compatibility shim reaching the main graph, where it should never be called. */
+export function unloweredDependencyShimSource(id: string): string | null {
+  const shimExports = UNLOWERED_SHIM_EXPORTS.get(id)
+  if (shimExports === undefined) return null
+  return shimExports
+    .map(([name, label]) => {
+      const message = JSON.stringify(`${label} must be lowered during dependency compilation`)
+      return `export function ${name}() { throw new Error(${message}) }`
+    })
+    .join('\n')
+}
+
 function externalStoreShimId(specifier: string): string | undefined {
   if (specifier === 'use-sync-external-store/shim') return EXTERNAL_STORE_SHIM_ID
   if (specifier === 'use-sync-external-store/shim/with-selector') {
@@ -100,20 +119,11 @@ function externalStoreShimSource(id: string): string | undefined {
 }
 
 function dependencyCompatibilityShimId(specifier: string): string | undefined {
-  if (specifier === '@base-ui/utils/fastHooks') return BASE_UI_FAST_HOOKS_SHIM_ID
   return externalStoreShimId(specifier)
 }
 
 function dependencyCompatibilityShimSource(id: string): string | undefined {
-  if (id === BASE_UI_FAST_HOOKS_SHIM_ID) return BASE_UI_FAST_HOOKS_SHIM
   return externalStoreShimSource(id)
-}
-
-function resolvedDependencyCompatibilityShimId(id: string): string | undefined {
-  if (/[\\/]node_modules[\\/]@base-ui[\\/]utils[\\/]fastHooks\.m?js$/.test(id)) {
-    return BASE_UI_FAST_HOOKS_SHIM_ID
-  }
-  return undefined
 }
 
 export interface DependencyCapsuleInput extends VidactCompilerConfiguration {
@@ -256,9 +266,6 @@ export async function buildSourceDependencyCapsule(
             return null
           }
           const resolved = await this.resolve(specifier, importer, { skipSelf: true })
-          const resolvedShimId =
-            resolved === null ? undefined : resolvedDependencyCompatibilityShimId(resolved.id)
-          if (resolvedShimId !== undefined) return resolvedShimId
           if (resolved === null || !isDependencyModuleId(resolved.id)) {
             return { id: specifier, external: true }
           }
@@ -366,9 +373,6 @@ export async function buildDependencyCapsule(
             return null
           }
           const resolved = await this.resolve(specifier, importer, { skipSelf: true })
-          const resolvedShimId =
-            resolved === null ? undefined : resolvedDependencyCompatibilityShimId(resolved.id)
-          if (resolvedShimId !== undefined) return resolvedShimId
           if (resolved === null || !isDependencyModuleId(resolved.id)) return resolved
           const qualification = await qualifier.qualify(resolved.id)
           if (qualification?.status === 'candidate') {

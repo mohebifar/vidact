@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
-    "@vidact/runtime": "workspace:*"
+    "@vidact/runtime": "workspace:*",
+    "lucide-react": "1.44.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",

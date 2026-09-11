@@ -14,6 +14,7 @@ const CLONE_RENDERABLE: &str = "__vidactCloneRenderable";
 const CLONE_RENDERABLE_COMPONENT: &str = "__vidactCloneRenderableComponent";
 const CREATE_RENDERABLE: &str = "__vidactCreateRenderable";
 const DYNAMIC_INTRINSIC_COMPONENT: &str = "__vidactDynamicIntrinsicComponent";
+const CREATE_REACT_ELEMENT: &str = "__vidactCreateReactElement";
 const KEYED_FRAGMENT_COMPONENT: &str = "__vidactKeyedFragmentComponent";
 const FORWARDED_REF: &str = "__vidactForwardedRef";
 const IS_RENDERABLE: &str = "__vidactIsRenderable";
@@ -47,6 +48,7 @@ pub(crate) fn lower_server_renderables<'a>(
         ("cloneRenderable", CLONE_RENDERABLE),
         ("cloneRenderableComponent", CLONE_RENDERABLE_COMPONENT),
         ("createRenderable", CREATE_RENDERABLE),
+        ("createElement", CREATE_REACT_ELEMENT),
         ("dynamicIntrinsicComponent", DYNAMIC_INTRINSIC_COMPONENT),
         ("keyedFragmentComponent", KEYED_FRAGMENT_COMPONENT),
         ("forwardedRef", FORWARDED_REF),
