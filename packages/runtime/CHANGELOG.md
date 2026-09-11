@@ -1,5 +1,11 @@
 # @vidact/runtime
 
+## 0.2.0-beta.8
+
+### Patch Changes
+
+- e480658: Reduce retained keyed-row memory by sharing scheduler, disposer, and getter callables, allocating concurrent bookkeeping lazily, and trimming inline event metadata.
+
 ## 0.2.0-beta.7
 
 ### Patch Changes
