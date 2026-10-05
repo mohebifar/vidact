@@ -123,6 +123,48 @@ fn imports_only_dom_capabilities_reached_by_intrinsic_jsx() {
 }
 
 #[test]
+fn destructured_derived_locals_track_their_props() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "DestructuredDerived.tsx",
+        source: r#"
+            import { read } from './read';
+            export function ObjectDerived({ data }) {
+                const { label, count = 0 } = read(data);
+                if (!label) return <p>empty</p>;
+                return <p>{label}{count}</p>;
+            }
+            export function ArrayDerived({ data }) {
+                const [first, second] = read(data);
+                return <p>{first ? <b>{second}</b> : <i>none</i>}</p>;
+            }
+        "#,
+    })
+    .expect("destructured derived locals should compile");
+
+    assert!(
+        output.contains(r#"label = read(data.get())["label"];"#),
+        "{output}"
+    );
+    assert!(
+        output.contains(r#"count = read(data.get())["count"] ?? 0;"#),
+        "{output}"
+    );
+    assert!(output.contains("second = read(data.get())[1];"), "{output}");
+    for local in ["count", "second"] {
+        assert!(
+            output.contains(&format!("() => {local})")),
+            "{local} should render through a reactive binding\n{output}"
+        );
+    }
+    assert!(
+        output.contains(r#"() => !label ? "empty" : label)"#),
+        "{output}"
+    );
+    assert!(output.contains(r#""truthy", () => !label"#), "{output}");
+    assert!(output.contains(r#""truthy", () => first"#), "{output}");
+}
+
+#[test]
 fn constructs_reactive_event_expressions_once() {
     let output = compile_surgical_module(ModuleInput {
         filename: "StableEventExpression.tsx",

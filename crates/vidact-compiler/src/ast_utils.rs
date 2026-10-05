@@ -4,11 +4,12 @@ use oxc_allocator::{Allocator, CloneIn, GetAllocator, TakeIn};
 use oxc_ast::{
     ast::{
         Argument, ArrayExpressionElement, ArrowFunctionBody, ArrowFunctionExpression,
-        AssignmentExpression, AssignmentTarget, BindingPattern, CallExpression, Declaration,
-        ExportDefaultDeclarationKind, Expression, FormalParameterKind, FormalParameters, Function,
-        FunctionBody, JSXAttributeItem, JSXAttributeName, JSXAttributeValue, JSXChild, JSXElement,
-        JSXElementName, JSXFragment, JSXMemberExpressionObject, MemberExpression,
-        ObjectPropertyKind, Program, Statement, VariableDeclaration, VariableDeclarator,
+        AssignmentExpression, AssignmentTarget, BindingIdentifier, BindingPattern, CallExpression,
+        Declaration, ExportDefaultDeclarationKind, Expression, FormalParameterKind,
+        FormalParameters, Function, FunctionBody, JSXAttributeItem, JSXAttributeName,
+        JSXAttributeValue, JSXChild, JSXElement, JSXElementName, JSXFragment,
+        JSXMemberExpressionObject, MemberExpression, ObjectPattern, ObjectPropertyKind, Program,
+        Statement, VariableDeclaration, VariableDeclarator,
     },
     builder::AstBuilder,
 };
@@ -108,6 +109,43 @@ impl<'a> VisitMut<'a> for SimpleLogicalAssignmentNormalizer<'a> {
         );
         self.changed = true;
     }
+}
+
+/// A flat object pattern binding: the local, its static key, and its default.
+pub(crate) type ObjectPatternBinding<'p, 'a> = (
+    &'p BindingIdentifier<'a>,
+    String,
+    Option<&'p Expression<'a>>,
+);
+
+/// The bindings of a flat object pattern (`{ a, b: c, d = 1 }`), or `None` when the
+/// pattern has a rest element, a computed or dynamic key, or a nested pattern.
+pub(crate) fn flat_object_pattern_bindings<'p, 'a>(
+    pattern: &'p ObjectPattern<'a>,
+) -> Option<Vec<ObjectPatternBinding<'p, 'a>>> {
+    if pattern.rest.is_some() {
+        return None;
+    }
+    pattern
+        .properties
+        .iter()
+        .map(|property| {
+            if property.computed {
+                return None;
+            }
+            let key = property.key.static_name()?.to_string();
+            match &property.value {
+                BindingPattern::BindingIdentifier(identifier) => Some((&**identifier, key, None)),
+                BindingPattern::AssignmentPattern(assignment) => {
+                    let BindingPattern::BindingIdentifier(identifier) = &assignment.left else {
+                        return None;
+                    };
+                    Some((&**identifier, key, Some(&assignment.right)))
+                }
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 pub(crate) fn normalize_identifier_object_destructuring<'a>(
