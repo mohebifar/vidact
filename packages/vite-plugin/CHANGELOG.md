@@ -1,5 +1,13 @@
 # @vidact/vite
 
+## 0.2.0-beta.9
+
+### Patch Changes
+
+- Updated dependencies [10e58c4]
+  - @vidact/compiler@0.2.0-beta.9
+  - @vidact/runtime@0.2.0-beta.9
+
 ## 0.2.0-beta.8
 
 ### Patch Changes

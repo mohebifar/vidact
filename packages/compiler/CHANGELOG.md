@@ -1,5 +1,11 @@
 # @vidact/compiler
 
+## 0.2.0-beta.9
+
+### Patch Changes
+
+- 10e58c4: Keep object- and array-destructured derived locals reactive, so components that destructure values computed from props re-render when retained Start routes receive new loader data.
+
 ## 0.2.0-beta.8
 
 ### Patch Changes
