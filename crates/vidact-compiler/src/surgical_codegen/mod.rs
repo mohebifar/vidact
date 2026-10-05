@@ -23,8 +23,8 @@ use crate::{
     Diagnostic, DiagnosticCode, SourceSpan,
     analysis::{KeyPath, ModuleInput, SourceId, SourceKind},
     ast_utils::{
-        OBJECT_REST, component_function_parts_mut, is_event_attribute,
-        is_supported_react_event_attribute, normalize_compiler_hook_inputs,
+        OBJECT_REST, component_function_parts_mut, flat_object_pattern_bindings,
+        is_event_attribute, is_supported_react_event_attribute, normalize_compiler_hook_inputs,
         normalize_expression_bodied_component_arrows, normalize_identifier_object_destructuring,
         normalize_precomputed_provider_children, normalize_simple_logical_assignments,
         restore_anonymous_default_component_names,
@@ -1446,6 +1446,40 @@ fn transform_component<'a>(
                 && let Some(symbol) = identifier.symbol_id.get()
             {
                 source_symbols.insert(symbol, source);
+            } else {
+                // Destructured derived locals: each binding reads its own source.
+                let identifiers: Vec<&BindingIdentifier<'_>> = match &declarator.id {
+                    BindingPattern::ArrayPattern(pattern) => pattern
+                        .elements
+                        .iter()
+                        .flatten()
+                        .filter_map(|element| match element {
+                            BindingPattern::BindingIdentifier(identifier) => Some(&**identifier),
+                            BindingPattern::AssignmentPattern(assignment) => {
+                                match &assignment.left {
+                                    BindingPattern::BindingIdentifier(identifier) => {
+                                        Some(&**identifier)
+                                    }
+                                    _ => None,
+                                }
+                            }
+                            _ => None,
+                        })
+                        .collect(),
+                    BindingPattern::ObjectPattern(pattern) => flat_object_pattern_bindings(pattern)
+                        .into_iter()
+                        .flatten()
+                        .map(|(identifier, _, _)| identifier)
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                for identifier in identifiers {
+                    if let Some(source) = source_ids.get(identifier.name.as_str()).copied()
+                        && let Some(symbol) = identifier.symbol_id.get()
+                    {
+                        source_symbols.insert(symbol, source);
+                    }
+                }
             }
         }
     }
@@ -1607,6 +1641,17 @@ fn transform_component<'a>(
                 })
             {
                 // Element updaters reassign the destructured locals.
+                declarator.kind = VariableDeclarationKind::Let;
+                contains_derived = true;
+            }
+            if let BindingPattern::ObjectPattern(pattern) = &declarator.id
+                && flat_object_pattern_bindings(pattern).is_some_and(|bindings| {
+                    bindings
+                        .iter()
+                        .any(|(identifier, _, _)| is_active_derived(identifier.name.as_str()))
+                })
+            {
+                // Property updaters reassign the destructured locals.
                 declarator.kind = VariableDeclarationKind::Let;
                 contains_derived = true;
             }
@@ -3094,6 +3139,45 @@ fn derived_expressions<'a>(
                                 index as f64,
                                 None,
                                 NumberBase::Decimal,
+                                &ast,
+                            ),
+                            false,
+                            &ast,
+                        ));
+                    if let Some(default) = default {
+                        expression = Expression::new_logical_expression(
+                            span,
+                            expression,
+                            LogicalOperator::Coalesce,
+                            default.clone_in_with_semantic_ids(allocator),
+                            &ast,
+                        );
+                    }
+                    expressions.insert(allocator.alloc_str(identifier.name.as_str()), expression);
+                }
+                continue;
+            }
+            if let BindingPattern::ObjectPattern(pattern) = &declarator.id {
+                // Object-destructured derived locals recompute as a keyed read of the
+                // reevaluated initializer, with the same `?? default` caveat as arrays.
+                let (Some(init), Some(bindings)) =
+                    (&declarator.init, flat_object_pattern_bindings(pattern))
+                else {
+                    continue;
+                };
+                for (identifier, key, default) in bindings {
+                    if !derived.contains(&identifier.name.as_str()) {
+                        continue;
+                    }
+                    let span = identifier.span;
+                    let mut expression =
+                        Expression::from(MemberExpression::new_computed_member_expression(
+                            span,
+                            init.clone_in_with_semantic_ids(allocator),
+                            Expression::new_string_literal(
+                                span,
+                                allocator.alloc_str(&key),
+                                None,
                                 &ast,
                             ),
                             false,

@@ -11,7 +11,7 @@ use crate::{
     analysis::{
         ControlFlowFacts, KeyPath, SourceId, SourceKind, UpdaterFact, UpdaterId, UpdaterKind,
     },
-    ast_utils::{component_function_parts, is_event_attribute},
+    ast_utils::{component_function_parts, flat_object_pattern_bindings, is_event_attribute},
     react_bindings::{ActionHook, ConcurrentHook, ReactBindings, reference_symbol},
     render_flow::{RenderFlowGraph, lower_render_flow},
 };
@@ -143,6 +143,38 @@ pub(super) fn classify_component<'a>(
                         }
                         _ => continue,
                     };
+                    let Some(symbol) = identifier.symbol_id.get() else {
+                        continue;
+                    };
+                    let name = identifier.name.to_string();
+                    let source = SourceSyntax {
+                        kind: SourceKind::Derived,
+                        symbol,
+                        declaration_start: identifier.span.start,
+                    };
+                    locals.insert(name.clone(), source.clone());
+                    if declaration.kind == VariableDeclarationKind::Const
+                        && declarator.init.is_some()
+                    {
+                        candidates.insert(name, source);
+                    }
+                }
+                continue;
+            }
+            if let BindingPattern::ObjectPattern(pattern) = &declarator.id {
+                // Flat object destructuring of a plain (non-hook) initializer behaves
+                // like array destructuring: each property becomes a derived local.
+                // Hook results keep their dedicated lowering.
+                let hook_result = matches!(
+                    &declarator.init,
+                    Some(Expression::CallExpression(call)) if callee_looks_like_hook(call)
+                );
+                let bindings = if hook_result {
+                    None
+                } else {
+                    flat_object_pattern_bindings(pattern)
+                };
+                for (identifier, _, _) in bindings.into_iter().flatten() {
                     let Some(symbol) = identifier.symbol_id.get() else {
                         continue;
                     };
