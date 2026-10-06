@@ -26,7 +26,7 @@ export function Counter() {
 
 Calling `setCount` stores the new value and marks `count` as changed. Vidact then runs every updater the compiler attached to `count`: here, the one that rewrites the button's text. The `Counter` function itself does not run again.
 
-This has two consequences you will feel right away:
+This has two consequences:
 
 - **Derived values update automatically.** If you write `const doubled = count * 2` and use `doubled` in JSX, the compiler generates a step that recomputes `doubled` when `count` changes.
 - **Handlers read fresh values.** The `count` inside `onClick` is rewritten to read the current slot, so `setCount(count + 1)` never sees a stale value.

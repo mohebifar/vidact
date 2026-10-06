@@ -18,7 +18,7 @@ A module goes through five stages:
 
 > [!NOTE] Where the React Compiler fits
 >
-> Vidact uses the React Compiler as an analysis library, not as a code generator. It is good at exactly one thing Vidact needs, understanding the data flow of a React function, and its output ends at a narrow adapter. Vidact's renderer, runtime, and ownership model are its own.
+> Vidact uses the React Compiler only to analyze the data flow of a React function. It generates no code, and its output ends at a narrow adapter. Vidact's renderer, runtime, and ownership model are its own.
 
 ## A worked example
 

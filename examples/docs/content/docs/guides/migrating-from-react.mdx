@@ -15,7 +15,7 @@ Start with one route or component and run its tests under Vidact. Function compo
 
 Leave the `import { useState } from 'react'` lines alone. The plugin resolves them.
 
-Run the build. Every place Vidact cannot compile is reported with a file, line, and reason. Work through the list; the sections below cover the common ones.
+Run the build. It reports every place Vidact cannot compile, with a file, line, and reason. Work through the list; the sections below cover the common ones.
 
 ## Step 2: Replace class components
 
@@ -90,7 +90,7 @@ These will not produce errors. Know about them before you ship.
 
 **Components run once per mount.** The compiler updates derived expressions when it can trace their dependencies. `memo` does not skip component calls, while `useMemo` and `useCallback` preserve identity where observable. Use effects for work that must respond to changes, and measure expensive calculations before optimizing them.
 
-**Synchronous updates by default.** Without `concurrent`, every update is applied synchronously and atomically at the end of the event. There is no time slicing.
+**Synchronous updates by default.** Without `concurrent`, Vidact applies every update synchronously and atomically at the end of the event. There is no time slicing.
 
 **No Strict Mode double-invocation.** Development mode does not run components and effects twice.
 

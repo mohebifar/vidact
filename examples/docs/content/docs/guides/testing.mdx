@@ -31,7 +31,7 @@ export default defineConfig({
 })
 ```
 
-Because the test files go through the same Vite pipeline, components imported by a test are compiled by Vidact, just as they are in the application.
+Test files go through the same Vite pipeline, so Vidact compiles the components a test imports the same way it compiles them in the application.
 
 ## Mounting a component
 
@@ -76,7 +76,7 @@ await act(async () => {
 
 ## Asserting on DOM mutations
 
-Updates are meant to be surgical, and `@vidact/test-support` includes helpers to check that in a test. `captureMutations` runs an action under a `MutationObserver` and returns the records; `assertMutationEnvelope` checks that only the expected kinds of mutation touched the expected nodes.
+An update should touch only the DOM nodes that changed, and `@vidact/test-support` includes helpers to check that in a test. `captureMutations` runs an action under a `MutationObserver` and returns the records; `assertMutationEnvelope` checks that only the expected kinds of mutation touched the expected nodes.
 
 ```ts
 import { assertMutationEnvelope, captureMutations } from '@vidact/test-support'
@@ -86,7 +86,7 @@ const capture = await captureMutations(host, () => button.click())
 assertMutationEnvelope(capture.records, [{ type: 'characterData', target: output.firstChild! }], 'counter update')
 ```
 
-This is useful for components where accidental re-creation of DOM would break focus, animations, or third-party widgets.
+Use these helpers for components where accidental re-creation of DOM would break focus, animations, or third-party widgets.
 
 ## Testing with props
 

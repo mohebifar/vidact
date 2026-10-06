@@ -8,7 +8,7 @@ Vidact Start renders every route on the server, but once the page has hydrated, 
 
 ## Link
 
-`Link` renders an `<a>` element. On the server it is a normal anchor, so the page works before JavaScript loads. After hydration, a click on it is intercepted and handled as a client navigation.
+`Link` renders an `<a>` element. On the server it is a normal anchor, so the page works before JavaScript loads. After hydration, `Link` intercepts clicks and handles them as client navigations.
 
 ```tsx
 import { Link } from '@vidact/start'
@@ -31,7 +31,7 @@ export function Nav() {
 | `replace` | Replace the current history entry instead of pushing a new one |
 | `reloadDocument` | Opt out of client navigation and let the browser load the page |
 
-Clicks that should not be intercepted are left alone automatically: modified clicks (Ctrl, Cmd, Shift, Alt), non-primary buttons, links with a `target` other than `_self`, a `download` attribute, `rel="external"`, or a different origin, and clicks whose default was already prevented.
+`Link` leaves these clicks to the browser: modified clicks (Ctrl, Cmd, Shift, Alt), non-primary buttons, links with a `target` other than `_self`, a `download` attribute, `rel="external"`, or a different origin, and clicks whose default was already prevented.
 
 ## Marking the active link
 
@@ -83,4 +83,4 @@ Components below the first changed route are replaced. For example, navigating f
 
 ## Scroll and focus
 
-Links with a fragment, such as `/docs/learn/state#initial-values`, scroll to that element after navigation. Other destinations scroll to the top. Pass `scroll: false` to `navigate` when you are updating a filter or a tab and want the viewport to stay put. Focus is not moved automatically; move it yourself in an effect if the new content needs it for accessibility.
+Links with a fragment, such as `/docs/learn/state#initial-values`, scroll to that element after navigation. Other destinations scroll to the top. Pass `scroll: false` to `navigate` when you are updating a filter or a tab and want the viewport to stay put. Start does not move focus; move it yourself in an effect if the new content needs it for accessibility.

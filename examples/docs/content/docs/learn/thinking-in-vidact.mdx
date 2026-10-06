@@ -62,11 +62,11 @@ In React, the closure a handler captured may hold an older value of state, which
 
 ### Props and outer variables are read-only during construction
 
-Assigning to a prop, mutating a prop object, or writing to a module-level variable inside a component body is rejected by the compiler with a `DestructiveRenderMutation` diagnostic. Move the write into an event handler or an effect, or copy the value into local state.
+The compiler rejects assigning to a prop, mutating a prop object, or writing to a module-level variable inside a component body, and reports a `DestructiveRenderMutation` diagnostic. Move the write into an event handler or an effect, or copy the value into local state.
 
 ### There is no "render count" to optimize
 
-`memo` does not skip component calls after mount because those calls do not occur. For performance work, measure the derived computations, effects, and DOM updates triggered by a change. Expensive calculations can still be expensive even when the component body runs once.
+`memo` does not skip component calls after mount because those calls do not occur. For performance work, measure the derived computations, effects, and DOM updates triggered by a change. A slow derived value still runs on every change to its inputs, even though the component body runs once.
 
 ### Unsupported code fails at compile time
 
