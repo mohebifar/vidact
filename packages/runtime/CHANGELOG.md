@@ -1,5 +1,7 @@
 # @vidact/runtime
 
+## 0.2.0-beta.10
+
 ## 0.2.0-beta.9
 
 ## 0.2.0-beta.8

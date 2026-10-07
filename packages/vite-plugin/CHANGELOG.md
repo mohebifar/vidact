@@ -1,5 +1,12 @@
 # @vidact/vite
 
+## 0.2.0-beta.10
+
+### Patch Changes
+
+- @vidact/compiler@0.2.0-beta.10
+  - @vidact/runtime@0.2.0-beta.10
+
 ## 0.2.0-beta.9
 
 ### Patch Changes
