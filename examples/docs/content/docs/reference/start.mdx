@@ -48,6 +48,7 @@ Renders an `<a>` that navigates client-side after hydration.
 | `href` | Target URL, required |
 | `replace` | Replace the history entry instead of pushing |
 | `reloadDocument` | Let the browser perform a full navigation |
+| `prefetch` | `'intent'` (default) fetches the route on hover, focus, or press. `'none'` waits for the click |
 
 All other props are passed to the anchor.
 
@@ -68,13 +69,14 @@ Hydrates the current page and installs navigation handling. Resolves to a `Start
 | `rootId` | `'vidact-start-root'` | ID of the element containing the app HTML |
 | `snapshotId` | `'vidact-start-snapshot'` | ID of the `<script type="application/json">` holding loader data |
 | `snapshot` | read from DOM | Override the snapshot text |
-| `fetch` | `globalThis.fetch` | Used for navigation requests |
+| `fetch` | `globalThis.fetch` | Used for navigation and prefetch requests |
 
 ### StartClient
 
 | Member | Description |
 | --- | --- |
 | `navigate(to, options?)` | Navigate to a URL. Resolves `true` when applied, `false` when cancelled. Options: `replace`, `scroll` |
+| `prefetch(to)` | Fetch a route's loader data and code ahead of time. The next navigation to that path and search within 30 seconds uses it |
 | `replace(component)` | Replace the route root with an arbitrary compiled application |
 | `unmount()` | Remove listeners and dispose the root |
 
