@@ -24,6 +24,21 @@ describe('Vidact Start Link', () => {
     )
   })
 
+  it('can opt out of intent prefetching', () => {
+    const html = renderToStaticMarkup(
+      () =>
+        createElement(Link as unknown as ServerComponent, {
+          href: '/account',
+          prefetch: 'none',
+          children: 'Account',
+        }) as ServerChild,
+    )
+
+    expect(html).toBe(
+      '<a data-vidact-start-link="" data-vidact-start-prefetch="none" href="/account">Account</a>',
+    )
+  })
+
   it('can request normal document navigation', () => {
     const html = renderToStaticMarkup(
       () =>

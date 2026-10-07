@@ -28,7 +28,7 @@ export function ProfilePanel({ userId }: { userId: string }) {
 
 The first argument is a function that renders the protected content. The second renders a fallback and receives the error and a `reset` function. Calling `reset` throws the fallback away and tries the content again; if that fails too, you are back in the fallback.
 
-An optional third argument, `onError(error)`, is called after the fallback has been shown, which is a good place to log.
+An optional third argument, `onError(error)`, runs after the fallback appears. Use it for logging.
 
 ### What a boundary catches
 

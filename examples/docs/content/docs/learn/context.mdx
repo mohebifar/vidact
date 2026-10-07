@@ -47,7 +47,7 @@ When the provided value changes, every consumer's bindings that read `theme` are
 
 ## Where context flows
 
-Context follows the *logical* component tree, which is what you would expect: a consumer inside a conditional branch, a list row, a portal, or a nested component sees the nearest provider above it in the JSX. This holds during server rendering and hydration as well.
+Context follows the *logical* component tree. A consumer inside a conditional branch, a list row, a portal, or a nested component sees the nearest provider above it in the JSX. This holds during server rendering and hydration as well.
 
 ## Patterns
 

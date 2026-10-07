@@ -32,7 +32,7 @@ The effect runs after the component's DOM is in the document. When `roomId` chan
 
 ## Dependencies
 
-The dependency array tells Vidact which values the effect reads. The compiler uses the same reactive tracking it uses for JSX, so a dependency on a prop or state value re-runs the effect exactly when that value changes, not when some unrelated value changes.
+The dependency array tells Vidact which values the effect reads. The compiler uses the same reactive tracking it uses for JSX, so a dependency on a prop or state value re-runs the effect only when that value changes.
 
 - `[]` runs the effect once after mount and cleans up on unmount.
 - `[a, b]` re-runs when `a` or `b` changes.

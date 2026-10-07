@@ -60,6 +60,12 @@ replace the current history entry.
 `hydrateStart()` returns a `StartClient` whose `navigate()` method provides the
 same behavior for programmatic navigation.
 
+Links prefetch their route on intent: after the pointer rests on them for 50 ms,
+on focus, or on press. The next navigation to that path and search reuses the
+prefetched snapshot for up to 30 seconds. Use `prefetch="none"` to opt a link
+out, or `client.prefetch(to)` to prefetch from code. Hover and focus prefetching
+pause while the browser's data saver is on.
+
 Document HTML and client-navigation snapshots share the same route URL. Start
 marks both successful representations with `Vary: x-vidact-start-navigation`,
 so HTTP caches that honor `Vary` keep them separate. Deployments must preserve

@@ -5,6 +5,7 @@ export default defineConfig({
   test: {
     include: [
       'corpus/apps/start-navigation/StartLayoutRetention.browser.test.ts',
+      'corpus/apps/start-navigation/StartPrefetch.browser.test.ts',
       'corpus/apps/start-navigation/StartStreaming.browser.test.ts',
     ],
     browser: {

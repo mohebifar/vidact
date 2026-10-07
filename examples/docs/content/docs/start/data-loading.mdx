@@ -47,7 +47,7 @@ Route IDs are the file paths without the extension: `__root`, `index`, `blog`, `
 
 ## What a loader can return
 
-Loader data travels from the server to the browser as a serialized snapshot, so it must be plain data: strings, numbers, bigints, booleans, `null`, `undefined`, arrays, and plain objects of those. Class instances such as `Date` or `Map`, functions, promises, and cyclic graphs are rejected with a clear error at serialization time. If a loader produces a rich object, map it to a plain shape before returning, for example `date.toISOString()` for a `Date`.
+Loader data travels from the server to the browser as a serialized snapshot, so it must be plain data: strings, numbers, bigints, booleans, `null`, `undefined`, arrays, and plain objects of those. Class instances such as `Date` or `Map`, functions, promises, and cyclic graphs fail with an error at serialization time. If a loader produces a rich object, map it to a plain shape before returning, for example `date.toISOString()` for a `Date`.
 
 ## Typing loader data
 

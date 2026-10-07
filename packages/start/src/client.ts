@@ -15,6 +15,7 @@ import { hydrateRoot } from '@vidact/runtime/hydrate'
 import {
   loadRouteMatches,
   matchRoutes,
+  resolveRouteMatches,
   type LoadedRouteMatch,
   type RouteComponentProps,
   type RouteManifest,
@@ -29,6 +30,10 @@ import {
 
 const DEFAULT_ROOT_ID = 'vidact-start-root'
 const DEFAULT_SNAPSHOT_ID = 'vidact-start-snapshot'
+/** How long a prefetched snapshot may stand in for a fresh navigation request. */
+const PREFETCH_STALE_TIME = 30_000
+/** Hover must rest on a link this long before it counts as intent to navigate. */
+const PREFETCH_HOVER_DELAY = 50
 
 export interface HydrateStartOptions {
   readonly fetch?: typeof globalThis.fetch
@@ -52,9 +57,23 @@ export interface StartNavigateOptions {
 
 export interface StartClient extends CompiledRoot {
   readonly navigate: (to: string | URL, options?: StartNavigateOptions) => Promise<boolean>
+  /**
+   * Fetches the route's snapshot and code ahead of a navigation. A navigation to the same
+   * path and search within 30 seconds uses the prefetched snapshot instead of a new request.
+   */
+  readonly prefetch: (to: string | URL) => Promise<void>
 }
 
 type HistoryMode = 'none' | 'push' | 'replace'
+
+type NavigationPayload =
+  | { readonly kind: 'document' }
+  | { readonly kind: 'snapshot'; readonly text: string }
+
+interface PrefetchEntry {
+  readonly expires: number
+  readonly payload: Promise<NavigationPayload>
+}
 
 interface ClientRouteState {
   readonly components: readonly ClientRouteComponent[]
@@ -99,6 +118,71 @@ export async function hydrateStart(options: HydrateStartOptions): Promise<StartC
   let navigation = 0
   let navigationController: AbortController | undefined
   let disposed = false
+  const prefetchController = new AbortController()
+  const prefetches = new Map<string, PrefetchEntry>()
+  let hoverAnchor: HTMLAnchorElement | undefined
+  let hoverTimer: ReturnType<typeof setTimeout> | undefined
+  /** The snapshot key of the navigation in flight, which prefetching must not duplicate. */
+  let navigatingKey: string | undefined
+
+  async function requestNavigationPayload(
+    target: URL,
+    signal: AbortSignal,
+  ): Promise<NavigationPayload> {
+    const response = await fetchNavigation(target, {
+      credentials: 'same-origin',
+      headers: { [VIDACT_START_NAVIGATION_HEADER]: '1' },
+      signal,
+    })
+    if (
+      !response.ok ||
+      response.headers.get('content-type')?.split(';', 1)[0] !== VIDACT_START_SNAPSHOT_MEDIA_TYPE
+    ) {
+      return { kind: 'document' }
+    }
+    return { kind: 'snapshot', text: await response.text() }
+  }
+
+  async function prefetch(to: string | URL): Promise<void> {
+    if (disposed) return
+    const target = new URL(to, window.location.href)
+    if (!isClientNavigationUrl(target) || isCurrentDocument(target)) return
+    const targetMatches = matchRoutes(options.manifest, target.pathname)
+    if (targetMatches.length === 0) return
+    void resolveRouteMatches(targetMatches).catch(() => undefined)
+
+    const key = prefetchKey(target)
+    if (key === navigatingKey) return
+    const now = Date.now()
+    let entry = prefetches.get(key)
+    if (entry === undefined || entry.expires <= now) {
+      for (const [cachedKey, cached] of prefetches) {
+        if (cached.expires <= now) prefetches.delete(cachedKey)
+      }
+      const created: PrefetchEntry = {
+        expires: now + PREFETCH_STALE_TIME,
+        payload: requestNavigationPayload(target, prefetchController.signal),
+      }
+      created.payload.catch(() => {
+        if (prefetches.get(key) === created) prefetches.delete(key)
+      })
+      prefetches.set(key, created)
+      entry = created
+    }
+    await entry.payload.then(
+      () => undefined,
+      () => undefined,
+    )
+  }
+
+  /** Removes and returns a fresh prefetch so each snapshot backs at most one navigation. */
+  function takePrefetch(target: URL): Promise<NavigationPayload> | undefined {
+    const key = prefetchKey(target)
+    const entry = prefetches.get(key)
+    if (entry === undefined) return undefined
+    prefetches.delete(key)
+    return entry.expires > Date.now() ? entry.payload : undefined
+  }
 
   async function navigate(
     to: string | URL,
@@ -132,23 +216,23 @@ export async function hydrateStart(options: HydrateStartOptions): Promise<StartC
     navigationController?.abort()
     const controller = new AbortController()
     navigationController = controller
+    navigatingKey = prefetchKey(target)
+    cancelHover()
+
+    // Route code downloads while the snapshot request is in flight instead of after it.
+    void resolveRouteMatches(nextMatches).catch(() => undefined)
 
     try {
-      const response = await fetchNavigation(target, {
-        credentials: 'same-origin',
-        headers: { [VIDACT_START_NAVIGATION_HEADER]: '1' },
-        signal: controller.signal,
-      })
+      const prefetched = await takePrefetch(target)?.catch(() => undefined)
       if (attempt !== navigation) return false
-      if (
-        !response.ok ||
-        response.headers.get('content-type')?.split(';', 1)[0] !== VIDACT_START_SNAPSHOT_MEDIA_TYPE
-      ) {
+      const payload = prefetched ?? (await requestNavigationPayload(target, controller.signal))
+      if (attempt !== navigation) return false
+      if (payload.kind === 'document') {
         navigateDocument(target, historyMode === 'replace')
         return false
       }
 
-      const nextSnapshot = decodeStartSnapshot(await response.text())
+      const nextSnapshot = decodeStartSnapshot(payload.text)
       const nextUrl = new URL(nextSnapshot.pathname, target.origin)
       // Fragments never reach the server request. Preserve the caller's fragment unless
       // the snapshot explicitly supplies one, including when the server redirects the path.
@@ -181,6 +265,8 @@ export async function hydrateStart(options: HydrateStartOptions): Promise<StartC
       if (controller.signal.aborted || attempt !== navigation) return false
       navigateDocument(target, historyMode === 'replace')
       return false
+    } finally {
+      if (attempt === navigation) navigatingKey = undefined
     }
   }
 
@@ -207,19 +293,71 @@ export async function hydrateStart(options: HydrateStartOptions): Promise<StartC
     void performNavigation(new URL(window.location.href), 'none', false)
   }
 
+  function prefetchAnchor(anchor: HTMLAnchorElement): void {
+    void prefetch(anchor.href)
+  }
+
+  function cancelHover(): void {
+    if (hoverTimer !== undefined) clearTimeout(hoverTimer)
+    hoverTimer = undefined
+    hoverAnchor = undefined
+  }
+
+  function handlePointerOver(event: PointerEvent): void {
+    const anchor = prefetchLinkForTarget(event.target)
+    if (anchor === undefined || anchor === hoverAnchor || prefersReducedData()) return
+    cancelHover()
+    hoverAnchor = anchor
+    hoverTimer = setTimeout(() => {
+      hoverTimer = undefined
+      prefetchAnchor(anchor)
+    }, PREFETCH_HOVER_DELAY)
+  }
+
+  function handlePointerOut(event: PointerEvent): void {
+    if (hoverAnchor === undefined) return
+    const related = event.relatedTarget
+    if (related instanceof Node && hoverAnchor.contains(related)) return
+    cancelHover()
+  }
+
+  function handleFocusIn(event: FocusEvent): void {
+    const anchor = prefetchLinkForTarget(event.target)
+    if (anchor !== undefined && !prefersReducedData()) prefetchAnchor(anchor)
+  }
+
+  /** A press is a stronger signal than hover, so it prefetches even in data saver mode. */
+  function handlePointerDown(event: PointerEvent): void {
+    if (event.button !== 0) return
+    const anchor = prefetchLinkForTarget(event.target)
+    if (anchor !== undefined) prefetchAnchor(anchor)
+  }
+
   document.addEventListener('click', handleClick)
+  document.addEventListener('pointerover', handlePointerOver)
+  document.addEventListener('pointerout', handlePointerOut)
+  document.addEventListener('focusin', handleFocusIn)
+  document.addEventListener('pointerdown', handlePointerDown)
   window.addEventListener('popstate', handlePopState)
 
   return {
     mount: root.mount,
     replace: root.replace,
     navigate,
+    prefetch,
     unmount() {
       if (disposed) return
       disposed = true
       navigation += 1
       navigationController?.abort()
+      prefetchController.abort()
+      prefetches.clear()
+      cancelHover()
       document.removeEventListener('click', handleClick)
+      document.removeEventListener('pointerover', handlePointerOver)
+      document.removeEventListener('pointerout', handlePointerOut)
+      document.removeEventListener('focusin', handleFocusIn)
+      document.removeEventListener('pointerdown', handlePointerDown)
       window.removeEventListener('popstate', handlePopState)
       root.unmount()
     },
@@ -360,7 +498,15 @@ function linkForEvent(event: MouseEvent): HTMLAnchorElement | undefined {
   ) {
     return undefined
   }
-  const target = event.target
+  return startLinkForTarget(event.target)
+}
+
+function prefetchLinkForTarget(target: EventTarget | null): HTMLAnchorElement | undefined {
+  const anchor = startLinkForTarget(target)
+  return anchor === undefined || anchor.dataset.vidactStartPrefetch === 'none' ? undefined : anchor
+}
+
+function startLinkForTarget(target: EventTarget | null): HTMLAnchorElement | undefined {
   if (!(target instanceof Element)) return undefined
   const anchor = target.closest<HTMLAnchorElement>('a[data-vidact-start-link]')
   if (
@@ -379,6 +525,20 @@ function isClientNavigationUrl(url: URL): boolean {
   return (
     url.origin === window.location.origin && (url.protocol === 'http:' || url.protocol === 'https:')
   )
+}
+
+function isCurrentDocument(url: URL): boolean {
+  return url.pathname === window.location.pathname && url.search === window.location.search
+}
+
+function prefetchKey(url: URL): string {
+  return `${url.pathname}${url.search}`
+}
+
+function prefersReducedData(): boolean {
+  const connection = (navigator as Navigator & { readonly connection?: { saveData?: boolean } })
+    .connection
+  return connection?.saveData === true
 }
 
 function updateHistory(url: URL, mode: HistoryMode): void {

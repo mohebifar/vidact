@@ -8,7 +8,7 @@ Vidact Start renders every route on the server, but once the page has hydrated, 
 
 ## Link
 
-`Link` renders an `<a>` element. On the server it is a normal anchor, so the page works before JavaScript loads. After hydration, a click on it is intercepted and handled as a client navigation.
+`Link` renders an `<a>` element. On the server it is a normal anchor, so the page works before JavaScript loads. After hydration, `Link` intercepts clicks and handles them as client navigations.
 
 ```tsx
 import { Link } from '@vidact/start'
@@ -24,14 +24,33 @@ export function Nav() {
 }
 ```
 
-`Link` accepts every attribute an `<a>` accepts, plus two of its own:
+`Link` accepts every attribute an `<a>` accepts, plus three of its own:
 
 | Prop | Effect |
 | --- | --- |
 | `replace` | Replace the current history entry instead of pushing a new one |
 | `reloadDocument` | Opt out of client navigation and let the browser load the page |
+| `prefetch` | Set to `'none'` to skip [prefetching](#prefetching) for this link |
 
-Clicks that should not be intercepted are left alone automatically: modified clicks (Ctrl, Cmd, Shift, Alt), non-primary buttons, links with a `target` other than `_self`, a `download` attribute, `rel="external"`, or a different origin, and clicks whose default was already prevented.
+`Link` leaves these clicks to the browser: modified clicks (Ctrl, Cmd, Shift, Alt), non-primary buttons, links with a `target` other than `_self`, a `download` attribute, `rel="external"`, or a different origin, and clicks whose default was already prevented.
+
+## Prefetching
+
+A `Link` starts loading its route before you click it. When the pointer rests on a link for 50 ms, or the link receives keyboard focus, Start requests the route's loader data and downloads its code. Pressing the link starts the same work, which still saves the gap between press and release. The click then reuses the prefetched data instead of waiting on the network.
+
+A prefetched snapshot backs one navigation and expires after 30 seconds, so loader data is never older than that. When the browser has data saver turned on, hover and focus stop prefetching and only a press does.
+
+Links whose loaders are expensive or have side effects can opt out:
+
+```tsx
+<Link href="/reports/export" prefetch="none">Export</Link>
+```
+
+To prefetch from code, for example when a menu opens, call `client.prefetch`:
+
+```ts
+await client.prefetch('/products/42')
+```
 
 ## Marking the active link
 
@@ -68,7 +87,7 @@ await client.navigate('/login', { replace: true, scroll: false })
 
 ## What a navigation does
 
-1. The client requests the target URL with a header asking for a snapshot rather than a document.
+1. The client requests the target URL with a header asking for a snapshot rather than a document, unless a fresh prefetch already holds one. The matched route modules download at the same time.
 2. The server runs the matched loaders and responds with serialized loader data.
 3. The client updates the props of unchanged routes and replaces the portion of the route tree that changed.
 4. Browser history is updated. Unless `scroll: false`, the window scrolls to the destination fragment or the top of the page.
@@ -83,4 +102,4 @@ Components below the first changed route are replaced. For example, navigating f
 
 ## Scroll and focus
 
-Links with a fragment, such as `/docs/learn/state#initial-values`, scroll to that element after navigation. Other destinations scroll to the top. Pass `scroll: false` to `navigate` when you are updating a filter or a tab and want the viewport to stay put. Focus is not moved automatically; move it yourself in an effect if the new content needs it for accessibility.
+Links with a fragment, such as `/docs/learn/state#initial-values`, scroll to that element after navigation. Other destinations scroll to the top. Pass `scroll: false` to `navigate` when you are updating a filter or a tab and want the viewport to stay put. Start does not move focus; move it yourself in an effect if the new content needs it for accessibility.

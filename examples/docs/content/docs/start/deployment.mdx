@@ -33,7 +33,7 @@ export default defineConfig({
 })
 ```
 
-The fixed file names are what `src/server.ts` refers to in `clientEntry` and in the document template. If you prefer hashed names, read Vite's manifest in `renderDocument` instead.
+`src/server.ts` refers to these fixed file names in `clientEntry` and in the document template. If you prefer hashed names, read Vite's manifest in `renderDocument` instead.
 
 ## The server build
 
@@ -94,4 +94,4 @@ The server bundle reads `process.env` at runtime like any Node program. Loaders 
 
 ## Other platforms
 
-The first release targets Node. `createStartHandler` returns a standard `(request: Request) => Promise<Response>` function, so adapting it to another runtime that speaks the Fetch API is mostly a matter of replacing `src/start.ts`. Official adapters for edge and serverless platforms are planned.
+The first release targets Node. `createStartHandler` returns a standard `(request: Request) => Promise<Response>` function, so adapting it to another runtime that speaks the Fetch API mostly means replacing `src/start.ts`. Official adapters for edge and serverless platforms are planned.

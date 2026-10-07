@@ -26,7 +26,7 @@ After hydration completes, the component is indistinguishable from one mounted o
 
 ## What has to match
 
-Hydration is a conversation between two programs that were compiled separately. They must agree on:
+The server and hydrate builds are compiled separately. They must agree on:
 
 - **Compiler version.** The marker format is part of the compile-to-runtime protocol. Server and client builds from different versions refuse to hydrate.
 - **Feature flags.** A feature changes what the compiler emits for the affected code. Use the same `features` list for both builds.

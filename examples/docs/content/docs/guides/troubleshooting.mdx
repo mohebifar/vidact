@@ -14,7 +14,7 @@ A compile error looks like this:
 src/components/Profile.tsx:14:5: UnsupportedSyntax: React class components are unsupported; use a function component and Vidact errorBoundary
 ```
 
-Three parts matter: the **location** (`file:line:column`), which points at the exact expression the compiler stopped on; the **code**, which tells you what kind of problem it is; and the **message**, which usually says what to do instead. Vite shows the same information in its error overlay.
+It has three parts: the location (`file:line:column`), which points at the expression the compiler stopped on; the code, which names the kind of problem; and the message, which usually says what to do instead. Vite shows the same information in its error overlay.
 
 | Code | Meaning |
 | --- | --- |
@@ -98,8 +98,8 @@ An effect or store subscription writes state that triggers the same effect again
 
 ## Production error codes
 
-In production builds, runtime error messages are replaced by short codes such as `V025` to keep bundles small. The codes are stable within a runtime version. To decode one, check the error catalog for the exact `@vidact/runtime` version you shipped; the mapping is documented in the package's changelog and in the repository under `docs/architecture/development-diagnostics-and-production-error-codes.md`.
+To keep bundles small, production builds replace runtime error messages with short codes such as `V025`. The codes are stable within a runtime version. To decode one, check the error catalog for the exact `@vidact/runtime` version you shipped; the mapping is documented in the package's changelog and in the repository under `docs/architecture/development-diagnostics-and-production-error-codes.md`.
 
 ## Getting help
 
-If a diagnostic seems wrong, or a pattern that should be in the subset is rejected, open an issue with the smallest component that reproduces it. The compiler's test suite is built from exactly such examples.
+If a diagnostic seems wrong, or a pattern that should be in the subset is rejected, open an issue with the smallest component that reproduces it. The compiler's test suite is built from examples like that.

@@ -46,7 +46,14 @@ export function HomeRoute({ loaderData }: LandingProps) {
               </code>
             </div>
             <p className="mt-6 max-w-xl text-sm text-zinc-500">
-              In beta.{' '}
+              In beta and running{' '}
+              <a
+                className="font-medium text-zinc-300 underline underline-offset-4"
+                href="https://grep.codemod.com"
+              >
+                grep.codemod.com
+              </a>{' '}
+              in production.{' '}
               <Link
                 className="text-zinc-300 underline underline-offset-4"
                 href="/docs/reference/react-compatibility"
@@ -193,7 +200,7 @@ function CompilerModel() {
           </p>
           <p className="mt-5 leading-7 text-muted-foreground">
             The browser runs Vidact's small runtime. React, the Virtual DOM, the reconciler, and
-            runtime dependency tracking <strong>stay out of the bundle</strong>.
+            runtime dependency tracking stay out of the bundle.
           </p>
         </div>
         <div className="divide-y self-center">
@@ -349,10 +356,13 @@ function Origin() {
           </div>
           <p className="leading-7 text-muted-foreground">
             I started Vidact in 2020, then put it aside. Building{' '}
-            <a className="underline underline-offset-4" href="https://grep.codemod.com">
+            <a
+              className="font-medium text-foreground underline underline-offset-4"
+              href="https://grep.codemod.com"
+            >
               grep.codemod.com
             </a>{' '}
-            gave me a reason to return to Vidact. That app now runs on Vidact in production.
+            gave me a reason to pick it back up, and that app now runs on Vidact in production.
           </p>
         </div>
         <div className="mt-10 grid gap-5 border-t pt-8 lg:grid-cols-2 lg:gap-16">
@@ -377,8 +387,8 @@ function Limits() {
             Unsupported React stays a compile error
           </h2>
           <p className="mt-4 leading-7 text-muted-foreground">
-            Unsupported code fails at build time. Vidact never responds by shipping React or
-            switching to a slower renderer, which makes it a deliberate subset of React today.
+            Unsupported code fails at build time. Vidact never falls back to shipping React or a
+            slower renderer, so today it supports a deliberate subset of React.
           </p>
           <p className="mt-4 text-sm text-muted-foreground">
             Found a React pattern that should compile?{' '}
