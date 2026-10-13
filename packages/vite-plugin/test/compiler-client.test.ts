@@ -130,6 +130,26 @@ describe('vidact compiler client', () => {
     expect(sourceMap.sources).toContain('todos.tsx')
   })
 
+  it('compiles memo hooks without reactive dependencies', async () => {
+    const compilation = await compileWithCompiler(
+      `
+        import { useCallback, useMemo, useState } from 'react'
+        export function ConstantMemoCounter(): Node {
+          const [count, setCount] = useState(0)
+          const bump = useCallback(() => setCount(1), [])
+          const value = useMemo(() => 42, [])
+          return <button onClick={bump}>{count + value}</button>
+        }
+      `,
+      'constant-memo-counter.tsx',
+    )
+
+    expect(compilation.code).not.toContain('useCallback(')
+    expect(compilation.code).not.toContain('useMemo(')
+    expect(compilation.code).toContain('count.set(1)')
+    expect(compilation.code).toContain('42')
+  })
+
   it('returns deterministic server code without client effect replay', async () => {
     const compilation = await compileWithCompiler(
       `
