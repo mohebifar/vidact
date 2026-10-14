@@ -2727,6 +2727,54 @@ fn transform_form_status_declarator<'a>(
     Ok(())
 }
 
+/// Unwraps a memo hook call that produced no reactive source: the stable function for
+/// `useCallback`, the factory result for `useMemo`.
+fn constant_memo_replacement<'a>(
+    ast: &AstBuilder<'a>,
+    declarator: &VariableDeclarator<'a>,
+    react: &ReactBindings<'_>,
+    scoping: &Scoping,
+    source_symbols: &BTreeMap<SymbolId, SourceId>,
+    item_source_symbols: &BTreeMap<SymbolId, SourceId>,
+) -> Option<Expression<'a>> {
+    let Some(Expression::CallExpression(hook_call)) = &declarator.init else {
+        return None;
+    };
+    let hook = react.memo_hook_call(hook_call)?;
+    if hook_call.arguments.len() != 2 || hook_call.arguments.iter().any(Argument::is_spread) {
+        return None;
+    }
+    let factory = hook_call.arguments[0].as_expression()?;
+    if !matches!(
+        factory,
+        Expression::FunctionExpression(_) | Expression::ArrowFunctionExpression(_)
+    ) {
+        return None;
+    }
+    let dependency_expression = hook_call.arguments[1].as_expression()?;
+    if !matches!(
+        dependency_expression.without_parentheses(),
+        Expression::ArrayExpression(_)
+    ) {
+        return None;
+    }
+    if !dependencies(
+        dependency_expression,
+        scoping,
+        source_symbols,
+        item_source_symbols,
+    )
+    .is_empty()
+    {
+        return None;
+    }
+    let evaluate = snapshot_effect_create(ast, factory, scoping, source_symbols);
+    Some(match hook {
+        MemoHook::Callback => evaluate,
+        MemoHook::Memo => call(ast, evaluate, []),
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn transform_memo_declarator<'a>(
     ast: &AstBuilder<'a>,
@@ -2738,6 +2786,19 @@ fn transform_memo_declarator<'a>(
     item_source_symbols: &BTreeMap<SymbolId, SourceId>,
 ) -> Result<(), Diagnostic> {
     let Some((hook, value)) = memo_binding_symbol(declarator, sources, react)? else {
+        // A memo hook with no reactive dependency has no analysis source, so there
+        // is no runtime memo slot to lower into. Compiled components run once,
+        // so unwrap the redundant wrapper.
+        if let Some(replacement) = constant_memo_replacement(
+            ast,
+            declarator,
+            react,
+            scoping,
+            source_symbols,
+            item_source_symbols,
+        ) {
+            declarator.init = Some(replacement);
+        }
         return Ok(());
     };
     let Some(Expression::CallExpression(hook_call)) = &declarator.init else {
