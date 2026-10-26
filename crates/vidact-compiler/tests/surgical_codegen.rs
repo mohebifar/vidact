@@ -2241,6 +2241,29 @@ fn compiles_memo_and_callback_dependencies_into_cached_slots() {
 }
 
 #[test]
+fn strips_memo_hooks_without_reactive_dependencies() {
+    let output = compile_surgical_module(ModuleInput {
+        filename: "ConstantMemoCounter.tsx",
+        source: r#"
+            import { useCallback, useMemo, useState } from 'react';
+            export function ConstantMemoCounter(): Node {
+                const [count, setCount] = useState(0);
+                const bump = useCallback(() => setCount(1), []);
+                const reset = useCallback(() => setCount(0), [setCount]);
+                const value = useMemo(() => 42, []);
+                return <button onClick={bump} onMouseEnter={reset}>{count + value}</button>;
+            }
+        "#,
+    })
+    .expect("memo hooks without reactive dependencies should compile");
+
+    assert!(!output.contains("useCallback("), "{output}");
+    assert!(!output.contains("useMemo("), "{output}");
+    assert!(output.contains("count.set("), "{output}");
+    assert!(output.contains("42"), "{output}");
+}
+
+#[test]
 fn compiles_context_reads_into_owner_scoped_slots() {
     let output = compile_surgical_module(ModuleInput {
         filename: "ContextApp.tsx",
